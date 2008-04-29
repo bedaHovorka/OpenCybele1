@@ -1,0 +1,106 @@
+# Property file of Cybele
+
+#DEFINE EXCEPTION_HANDLING	=	0
+#DEFINE	CONCUR_MANAGEMENT	=	1
+#DEFINE EVENT_MANAGEMENT	=	2
+#DEFINE THREAD_MANAGEMENT	=	3
+#DEFINE	INTERNAL		=	4
+
+#DEFINE	COMMUNICATION		=	5
+#DEFINE	TIMER			=	6
+#DEFINE DATA_SHARING		=	7
+#DEFINE	GUI			=	8
+
+#DEFINE SUPPLEMENTAL		=	9
+
+
+#DEFINE FATAL	=	0
+#DEFINE NORMAL	=	1
+#DEFINE ALL 	=	2
+
+#DEFINE NONE	=	0
+#DEFINE SHORT	=	1
+#DEFINE	DETAIL	=	2
+
+
+cybele.services = exception;concurmgmt;evmgmt;thmgmt;intlevent;comm;timer
+
+
+##################################
+cybele.srv.exception.type = 0
+cybele.srv.exception.names = iai
+cybele.srv.exception.default = iai
+
+cybele.srv.exception.debug.any=0
+cybele.srv.exception.report.any=0
+cybele.srv.exception.trace.any=0
+
+cybele.srv.exception.class.iai = com.iai.cybele.exception.IAIExceptionHandling
+cybele.srv.exception.debug.iai = 1
+cybele.srv.exception.report.iai = 2
+cybele.srv.exception.trace.iai = 2
+
+##################################
+cybele.srv.concurmgmt.type = 1
+cybele.srv.concurmgmt.names = iai
+cybele.srv.concurmgmt.default = iai
+
+cybele.srv.concurmgmt.class.iai = com.iai.cybele.concurmgmt.IAIConcurManagement
+
+##################################
+cybele.srv.evmgmt.type = 2
+cybele.srv.evmgmt.names = iai
+cybele.srv.evmgmt.default = iai
+
+cybele.srv.evmgmt.class.iai = com.iai.cybele.evmgmt.IAIEventManagement
+cybele.srv.evmgmt.sys.param.iai = no_sort;merge_sort;no_comp;staticpriority_comp;priority_comp;eventpriority_comp;inheritedpriority_comp
+cybele.srv.evmgmt.sort.iai.merge_sort = com.iai.cybele.evmgmt.MergeSortStrategy
+cybele.srv.evmgmt.sort.iai.no_sort = com.iai.cybele.evmgmt.NoSortStrategy
+cybele.srv.evmgmt.comp.iai.staticpriority_comp = com.iai.cybele.evmgmt.StaticPriorityComparator
+cybele.srv.evmgmt.comp.iai.priority_comp = com.iai.cybele.evmgmt.PriorityComparator
+cybele.srv.evmgmt.comp.iai.eventpriority_comp = com.iai.cybele.evmgmt.EventPriorityComparator
+cybele.srv.evmgmt.comp.iai.inheritedpriority_comp = com.iai.cybele.evmgmt.InheritedPriorityComparator
+cybele.srv.evmgmt.comp.iai.no_comp = com.iai.cybele.evmgmt.NoComparator
+
+#cybele.srv.evmgmt.app.param.iai = system_queue no_sort no_comp;agent_queue no_sort no_comp
+#cybele.srv.evmgmt.app.param.iai = system_queue merge_sort staticpriority_comp;agent_queue no_sort no_comp
+
+##################################
+cybele.srv.thmgmt.type = 3
+cybele.srv.thmgmt.names = iai
+cybele.srv.thmgmt.default = iai
+
+cybele.srv.thmgmt.class.iai = com.iai.cybele.thmgmt.IAIThreadManagement
+cybele.srv.thmgmt.app.param.iai = 5 10 4000 3 5
+
+##################################
+cybele.srv.intlevent.type = 4
+cybele.srv.intlevent.names = iai
+cybele.srv.intlevent.default = iai
+
+cybele.srv.intlevent.class.iai = com.iai.cybele.intlevent.IAIIntlEventService
+
+##################################
+cybele.srv.comm.type = 5
+cybele.srv.comm.names = iai
+cybele.srv.comm.default = iai
+
+cybele.srv.comm.class.iai = com.iai.cybele.comm.IAICommService
+
+#cybele.srv.comm.app.param.iai = Local;NoSerialization
+
+#cybele.srv.comm.sys.param.iai = 207.196.79.53;207.196.79.66;207.196.79.106;207.196.79.103
+
+##################################
+cybele.srv.timer.type = 6
+cybele.srv.timer.names = iai
+cybele.srv.timer.default = iai
+
+cybele.srv.timer.class.iai = com.iai.cybele.timer.IAITimerService
+
+##################################
+
+
+
+
+
