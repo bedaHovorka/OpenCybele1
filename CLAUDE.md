@@ -26,6 +26,19 @@ Both scripts just launch `cz.vutbr.fit.ags.xhovor07.Main` with classpath `bin:cy
 
 `bin/` is git-ignored build output — regenerate it with the compile command above rather than editing anything under it.
 
+`cybelle/cybele.prop` has `cybele.srv.comm.app.param.iai = Local;NoSerialization` set so the comm service stays local-only; commented out (the vendored default), Cybele instead tries to reach an external `IAIDaemon`/license host and the app hangs or aborts at startup with "Could not connect with IAIDaemon".
+
+### Docker (X11 GUI passthrough)
+
+On the `develop` branch, `Dockerfile` + `docker-compose.yml` build and run the app in a container, forwarding the Swing GUI to an X server on the host (bind-mounted `/tmp/.X11-unix` + `.Xauthority`, UID/GID-matched non-root user), the same X11-passthrough pattern used by the sibling `interlockSim` project. The image is based on Debian wheezy (`archive.debian.org`, since wheezy is EOL) to install a genuine `openjdk-6-jdk` — no maintained Docker base image ships Java 6 anymore. This isn't just toolchain fidelity: on a modern JDK (tested with JDK 21) Cybele fails immediately with "Cannot find cybele.prop at class path", so a real Java 6 JVM is required.
+
+```bash
+xhost +local:docker && docker compose up app   # Linux/macOS
+docker compose run app                         # Windows, after starting VcXsrv
+```
+
+See `README.md` for full prerequisites and platform-specific setup.
+
 ## Architecture
 
 Everything is an **agent** or **activity** in the Cybele kernel, communicating exclusively through named pub/sub **channels** (`Activity.openChannel`/`Activity.sendAll`) — there are no direct method calls between agents. `Main` boots the Cybele kernel and creates a single `RailwayMainAgent`.

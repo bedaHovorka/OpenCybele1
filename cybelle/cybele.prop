@@ -87,7 +87,7 @@ cybele.srv.comm.default = iai
 
 cybele.srv.comm.class.iai = com.iai.cybele.comm.IAICommService
 
-#cybele.srv.comm.app.param.iai = Local;NoSerialization
+cybele.srv.comm.app.param.iai = Local;NoSerialization
 
 #cybele.srv.comm.sys.param.iai = 207.196.79.53;207.196.79.66;207.196.79.106;207.196.79.103
 
