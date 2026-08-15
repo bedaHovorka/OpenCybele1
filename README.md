@@ -6,7 +6,7 @@ Stations and single-track road segments are simulated as agents that negotiate t
 
 ## Requirements
 
-- JDK (plain `javac`/`java` — no build tool is used)
+- JDK 21 (plain `javac`/`java` — no build tool is used)
 - The Cybele kernel jars, vendored in `cybelle/` (`Cybele.jar`, `CybeleImpl.jar`, plus its `ICS.prop`/`cybele.prop` runtime config)
 
 ## Build
@@ -27,13 +27,17 @@ Windows:
 xhovor07.bat
 ```
 
-Both scripts launch `cz.vutbr.fit.ags.xhovor07.Main` with classpath `bin:cybelle:cybelle/Cybele.jar:cybelle/CybeleImpl.jar`; Cybele reads its `ICS.prop`/`cybele.prop` config from `cybelle/` on that classpath. A Swing window opens on launch showing the railway network, live station/track state, and a table of trains currently in transit. There is no automated test suite — verification is manual, through the GUI.
+Both scripts launch `cz.vutbr.fit.ags.xhovor07.Main` with classpath `bin:cybelle:cybelle/Cybele.jar:cybelle/CybeleImpl.jar` plus the JVM flag `--patch-module java.base=cybelle`; Cybele reads its `ICS.prop`/`cybele.prop` config from `cybelle/` via that flag. A Swing window opens on launch showing the railway network, live station/track state, and a table of trains currently in transit. There is no automated test suite — verification is manual, through the GUI.
 
 `cybelle/cybele.prop` sets `cybele.srv.comm.app.param.iai = Local;NoSerialization` so Cybele's comm service runs in local-only mode; without it, startup hangs/aborts trying to reach an external `IAIDaemon`/license host that isn't part of this vendored setup.
 
+### Why `--patch-module`
+
+Cybele's kernel jar loads `cybele.prop` via `props.getClass().getResourceAsStream("/cybele.prop")`, where `props` is a `java.util.Properties` — a class loaded by the bootstrap class loader as part of the `java.base` platform module. Before the Java Platform Module System (Java 9+), that call fell back to searching the application classpath, which is how this 2002-era kernel found `cybele.prop` sitting in `cybelle/`. Since JPMS, that classpath fallback no longer happens for module-loaded classes, so the lookup returns `null` and Cybele aborts with `Cannot find cybele.prop at class path` — regardless of JDK version. `--patch-module java.base=cybelle` works around this by injecting `cybelle/`'s contents directly into the `java.base` module, so the same lookup succeeds again. No source or jar changes are needed.
+
 ## Run with Docker
 
-A `Dockerfile`/`docker-compose.yml` (on the `develop` branch) build and run the app in a container, forwarding the Swing GUI to an X server on the host. The container uses a real Java 6 JDK (`openjdk-6-jdk`, via a Debian wheezy base pointed at `archive.debian.org` since wheezy is EOL and no maintained image ships Java 6 anymore) — this isn't just for historical fidelity: on a modern JDK (tested with JDK 21) Cybele fails immediately with `Cannot find cybele.prop at class path`, so a real Java 6 JVM is required for this vendored kernel to work at all.
+A `Dockerfile`/`docker-compose.yml` (on the `develop` branch) build and run the app in a container, forwarding the Swing GUI to an X server on the host, on the same `eclipse-temurin:21-jdk-noble` (Ubuntu 24.04 LTS) base as a native JDK 21 install — Docker here is a convenience/reproducibility option, not a requirement for a working JVM.
 
 **Prerequisites**: Docker + Docker Compose, and an X server (native on Linux; [XQuartz](https://www.xquartz.org/) on macOS; [VcXsrv](https://sourceforge.net/projects/vcxsrv/) or Xming on Windows).
 

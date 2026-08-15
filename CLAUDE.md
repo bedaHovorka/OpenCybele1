@@ -22,15 +22,17 @@ Run (Windows):
 xhovor07.bat
 ```
 
-Both scripts just launch `cz.vutbr.fit.ags.xhovor07.Main` with classpath `bin:cybelle:cybelle/Cybele.jar:cybelle/CybeleImpl.jar` (Cybele reads `cybelle/ICS.prop`/`cybele.prop` from that classpath at startup). There is no automated test suite; verification is manual via the Swing GUI that pops up on launch.
+Both scripts just launch `cz.vutbr.fit.ags.xhovor07.Main` with classpath `bin:cybelle:cybelle/Cybele.jar:cybelle/CybeleImpl.jar` and the JVM flag `--patch-module java.base=cybelle` (Cybele reads `cybelle/ICS.prop`/`cybele.prop` via that flag at startup). There is no automated test suite; verification is manual via the Swing GUI that pops up on launch.
 
 `bin/` is git-ignored build output — regenerate it with the compile command above rather than editing anything under it.
 
 `cybelle/cybele.prop` has `cybele.srv.comm.app.param.iai = Local;NoSerialization` set so the comm service stays local-only; commented out (the vendored default), Cybele instead tries to reach an external `IAIDaemon`/license host and the app hangs or aborts at startup with "Could not connect with IAIDaemon".
 
+Cybele's kernel loads `cybele.prop` via `props.getClass().getResourceAsStream("/cybele.prop")` on a `java.util.Properties` instance — a `java.base`-loaded class. Since JPMS (Java 9+), `Class.getResourceAsStream()` on a module-loaded class no longer falls back to the application classpath the way it did pre-JPMS, so without `--patch-module java.base=cybelle` (which injects `cybelle/`'s contents into `java.base`) startup fails immediately with "Cannot find cybele.prop at class path", on any JDK version. This required no changes to the vendored jars or app source, only the added launch flag.
+
 ### Docker (X11 GUI passthrough)
 
-On the `develop` branch, `Dockerfile` + `docker-compose.yml` build and run the app in a container, forwarding the Swing GUI to an X server on the host (bind-mounted `/tmp/.X11-unix` + `.Xauthority`, UID/GID-matched non-root user), the same X11-passthrough pattern used by the sibling `interlockSim` project. The image is based on Debian wheezy (`archive.debian.org`, since wheezy is EOL) to install a genuine `openjdk-6-jdk` — no maintained Docker base image ships Java 6 anymore. This isn't just toolchain fidelity: on a modern JDK (tested with JDK 21) Cybele fails immediately with "Cannot find cybele.prop at class path", so a real Java 6 JVM is required.
+On the `develop` branch, `Dockerfile` + `docker-compose.yml` build and run the app in a container, forwarding the Swing GUI to an X server on the host (bind-mounted `/tmp/.X11-unix` + `.Xauthority`, UID/GID-matched non-root user), the same X11-passthrough pattern used by the sibling `interlockSim` project. The image is based on `eclipse-temurin:21-jdk-noble` (Ubuntu 24.04 LTS), the same JDK 21 used for local builds — Docker is a convenience/reproducibility option here, not a requirement for a working JVM.
 
 ```bash
 xhost +local:docker && docker compose up app   # Linux/macOS
