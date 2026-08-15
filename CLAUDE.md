@@ -10,7 +10,7 @@ OpenCybele1 (package `cz.vutbr.fit.ags.xhovor07`) is a 2007/08 school project fo
 
 Compile (from repo root):
 ```bash
-javac -d bin -cp "cybelle/Cybele.jar:cybelle/CybeleImpl.jar" $(find src -name "*.java")
+javac -d bin -cp "cybelle/Cybele.jar:cybelle/CybeleImpl.jar" $(find src/main -name "*.java")
 ```
 
 Run (Linux/macOS):

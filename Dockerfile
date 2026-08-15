@@ -30,7 +30,7 @@ COPY --chown=app:app src ./src
 COPY --chown=app:app cybelle ./cybelle
 
 RUN mkdir -p bin \
-    && javac -d bin -cp "cybelle/Cybele.jar:cybelle/CybeleImpl.jar" $(find src -name "*.java")
+    && javac -d bin -cp "cybelle/Cybele.jar:cybelle/CybeleImpl.jar" $(find src/main -name "*.java")
 
 ENV DISPLAY=:0
 USER app

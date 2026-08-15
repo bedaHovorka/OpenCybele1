@@ -12,7 +12,7 @@ Stations and single-track road segments are simulated as agents that negotiate t
 ## Build
 
 ```bash
-javac -d bin -cp "cybelle/Cybele.jar:cybelle/CybeleImpl.jar" $(find src -name "*.java")
+javac -d bin -cp "cybelle/Cybele.jar:cybelle/CybeleImpl.jar" $(find src/main -name "*.java")
 ```
 
 ## Run
