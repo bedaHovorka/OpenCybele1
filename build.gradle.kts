@@ -8,12 +8,6 @@ java {
     }
 }
 
-sourceSets {
-    main {
-        java.setSrcDirs(listOf("src/main"))
-    }
-}
-
 application {
     mainClass.set("cz.vutbr.fit.ags.xhovor07.Main")
     applicationName = "opencybele"
