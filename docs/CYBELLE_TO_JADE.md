@@ -19,7 +19,10 @@
 > **Reachability** — `jade.tilab.com` did **not** respond from the verifying machine (TLS failure:
 > *unable to get local issuer certificate*). The JADE Programmer's Guide was therefore read from the
 > reachable mirror <https://jade-project.gitlab.io/docs/programmersguide.pdf>, edition
-> *"JADE 4.0, last update 08-April-2010"*; cite that URL, not `jade.tilab.com`.
+> *"JADE 4.0, last update 08-April-2010"*; cite that URL, not `jade.tilab.com`. ⚠️ Note the **edition
+> lags the pinned artifact** (guide 4.0/2010 vs. JADE 4.3.3/2014). It is cited here only for
+> behaviour-class semantics and the AMS/DF/topics model, all of which predate 4.0 and are unchanged in
+> 4.3.3 (topics exist "since version 3.5"); do not rely on it for anything introduced after 4.0.
 
 ## TL;DR
 - **No — do not do a full OpenCybele→JADE rewrite as a mandatory stepping stone if your end goal is Jason/BDI.** The BDI paradigm shift you are trying to reach is done exactly once whether you go direct or via JADE, so an intermediate JADE rewrite mostly adds a second full migration you will later have to partially throw away.
@@ -59,7 +62,54 @@ JADE (Java Agent DEvelopment Framework) is a FIPA-compliant, fully-Java multi-ag
   - **`de.enflexit.jade:de.enflexit.jade` — present**, versions `4.6.2, 4.6.3, 4.6.4, 4.6.5`. ⚠️ The *group* directory is <https://repo1.maven.org/maven2/de/enflexit/jade/> and the *artifact* directory is one level deeper (`…/de/enflexit/jade/de.enflexit.jade/`), because the artifactId repeats the groupId. An earlier probe that stopped at the group directory concluded "not on Maven Central" — that conclusion was **wrong**; see the Caveats section.
   - **`net.sf.ingenias:jade:4.3` — present**: a complete JADE **4.3.3 rev 6726 of 2014/12/09** distribution jar (2.6 MB). **This is what this project pins**, per decision [#26](https://github.com/bedaHovorka/OpenCybele1/issues/26).
 - **Which one this project uses, and why (decision [#26](https://github.com/bedaHovorka/OpenCybele1/issues/26), closed):** `net.sf.ingenias:jade:4.3`. The deciding factor is **Phase-2 alignment, not maintenance**: Jason 3.3.0's POM declares exactly **three** dependencies, and its **only** JADE dependency is `net.sf.ingenias:jade:4.3` — verified at <https://repo1.maven.org/maven2/io/github/jason-lang/jason-interpreter/3.3.0/jason-interpreter-3.3.0.pom>. Pinning the same artifact in Phase 1 means `infrastructure: Jade` in Phase 2 cannot produce a JADE version conflict. This document's earlier recommendation of the EnFlexIT fork is therefore **superseded for this repo**; the fork remains the right answer for a long-lived standalone JADE product, and is a one-line coordinate change if a later phase needs 4.6.x.
-- **Java 17/21 notes — measured, not inferred.** JADE predates the Java module system, and `--illegal-access` no longer works: on OpenJDK 21.0.11 the JVM answers `Ignoring option --illegal-access=permit; support was removed in 17.0`. That makes `--add-opens`/`--add-exports` a *plausible* need for pre-Java-9 libraries — but for **the artifact this project actually uses it is not needed**. Measured 2026-08-18 on OpenJDK 21.0.11 (Red Hat build 21.0.11+10): `java -cp jade-4.3.jar jade.Boot -gui:false -nomtp -container:false smoke:jade.core.Agent` boots a container cleanly — `AgentManagement`, `Messaging`, `ResourceManagement`, `AgentMobility` and `Notification` services all initialise — with **no `--add-opens`, no `--add-exports`, and no reflection warnings**. `jade.core.messaging.TopicManagementService`, `jade.core.messaging.TopicManagementHelper`, `jade.domain.DFService` and `jade.domain.AMSService` are all present in the jar. ⚠️ Scope this result: it covers **boot and messaging on 4.3.3 only**. `Thread.stop()` throws `UnsupportedOperationException` since JDK 20 and `SecurityManager` is deprecated for removal, and both sit on the agent-kill / container-shutdown paths that [#26](https://github.com/bedaHovorka/OpenCybele1/issues/26) singles out — a boot smoke test does not clear those. Because Jason 3.3 requires Java 21, when you use Jason-on-JADE the classpath comes bundled and this is handled for you via Gradle.
+- **Java 17/21 notes — measured, not inferred.** JADE predates the Java module system, and `--illegal-access` no longer works: on OpenJDK 21.0.11 the JVM answers `Ignoring option --illegal-access=permit; support was removed in 17.0`. That makes `--add-opens`/`--add-exports` a *plausible* need for pre-Java-9 libraries — but for **the artifact this project actually uses it is not needed**. Measured 2026-08-18 on **OpenJDK 21.0.11** (Red Hat build 21.0.11+10), Fedora, headless, with a real agent:
+
+  ```
+  # Smoke.java: setup() -> send an INFORM to itself -> blockingReceive(5000) -> doDelete(); takeDown() prints
+  javac -cp jade-4.3.jar -d out Smoke.java
+  java  -cp jade-4.3.jar:out jade.Boot -nomtp smoke:Smoke
+  ```
+
+  Observed: `This is JADE 4.3.3 - revision 6726 of 2014/12/09`, then `setup()` on
+  `smoke@…/JADE`, the self-addressed `INFORM` received with content intact,
+  `doDelete()` accepted and `takeDown()` executed. A programmatic variant
+  (`Runtime.instance().createMainContainer(...)` → `createNewAgent(...).start()` → `container.kill()`)
+  also completed. **No `--add-opens`, no `--add-exports`, no reflection warnings, no exceptions.**
+  So this exercises **container boot, service initialisation, agent creation, ACL send/receive, and the
+  `doDelete()`/`takeDown()` teardown path** — the set [#26](https://github.com/bedaHovorka/OpenCybele1/issues/26) asked for.
+  `jade.core.messaging.TopicManagementService`, `jade.core.messaging.TopicManagementHelper`,
+  `jade.domain.DFService` and `jade.domain.AMSService` are all present in the jar.
+
+  ⚠️ **A malformed command line was recorded here in an earlier revision** and is corrected above:
+  `jade.Boot -gui:false -nomtp -container:false smoke:jade.core.Agent`. In JADE 4.3.3 `-gui`, `-nomtp`
+  and `-container` are **valueless flags**, so `-container:false` parses as a *property* named
+  `container:false` which then swallows `smoke:jade.core.Agent` as its value. Measured consequences:
+  **no agent named `smoke` is ever created** (0 occurrences in the run log) and `-nomtp` is silently
+  not honoured (the HTTP MTP still starts and logs `MTP addresses: http://…:7778/acc`); dropping the
+  trailing agent spec aborts with `IllegalArgumentException: No value specified for property
+  "container:false"`. That run therefore proved container boot and service init **only** — the earlier
+  claim of "boot and messaging" over-read it. The corrected run proves strictly more.
+
+  ⚠️ **Correction: the `Thread.stop()` / `SecurityManager` caveat is empirically false for this
+  artifact.** An earlier revision of this file restated [#26](https://github.com/bedaHovorka/OpenCybele1/issues/26)'s
+  warning that `Thread.stop()` (throws `UnsupportedOperationException` since JDK 20) and
+  `SecurityManager` (deprecated for removal) "sit on" the agent-kill and container-shutdown paths.
+  Measured by disassembling **all 1 815 classes** in `jade-4.3.jar` (`javap -p -c`, 360 855 lines):
+  **zero** call sites for `Thread.stop()`, `Thread.suspend()` or `Thread.resume()`, and **zero**
+  references to `SecurityManager` anywhere in the jar. That caveat **over-states** the risk — it points
+  testers at a hazard that is not present — and is withdrawn.
+
+  The real residual risks for [#13](https://github.com/bedaHovorka/OpenCybele1/issues/13)/[#36](https://github.com/bedaHovorka/OpenCybele1/issues/36)/[#38](https://github.com/bedaHovorka/OpenCybele1/issues/38), which the smoke test does **not** clear, are:
+  - **`System.exit` inside the library — 28 call sites**, including `jade.Boot` and `jade.core.Runtime$1`
+    (the `"JADE is closing down now."` → `System.exit(0)` hook). An in-process test JVM must never let
+    that path fire; keep `Runtime.setCloseVM` at its default and never launch via `jade.Boot` from a test.
+  - **The JVM does not exit by itself after `container.kill()`** — measured: `main` returned in ~6 s and
+    the JVM was still alive at 25 s. JADE leaves non-daemon threads behind, so an `integrationTest`
+    source set needs `forkEvery`/timeouts, not a reliance on natural termination.
+  - **Container shutdown ordering and JICP socket teardown** between test classes — the
+    `jade.core.Runtime` singleton is JVM-wide, so class-to-class reuse is the thing to test, not `Thread.stop()`.
+
+  Because Jason 3.3 requires Java 21, when you use Jason-on-JADE the classpath comes bundled and this is handled for you via Gradle.
 
 ### Cybele/OpenCybele side (general background; repo specifics now in `INVENTORY.md`)
 Cybele/CybelePro is a proprietary Java agent infrastructure from **Intelligent Automation, Inc.** — the mark CYBELEPRO (USPTO serial 77019994, reg. 3257603, filed Oct 12, 2006, status *Registered and Renewed*) is described as "Agent infrastructure software for agent programming for use in distributed computing environments." It has been used for military logistics, simulation, and transportation control. Its programming model is **Activity-Centric Programming (ACP)**, and per the DCF/ACM paper "CybelePro™ is built on top of the Java 2 platform" with services including "concurrency management, event handling, thread-management, internal event services, communication, timer, data sharing, GUI services, sender side fil[tering]," plus migration and load balancing. NASA's Technical Reports Server ("Activity-Centric Approach to Distributed Programming," NTRS 20110020334) states that Cybele "provides support for event handling from multiple sources, multithreading, concurrency control, migration, and load balancing," and that "activity centric programming relieves application programmers of the complex tasks of thread management, concurrency control, and event management." **OpenCybele** is an open reimplementation in that lineage. Everything above is general Cybele/CybelePro background. **The repo itself has since been read in full and inventoried in [`docs/INVENTORY.md`](INVENTORY.md)** (issue [#9](https://github.com/bedaHovorka/OpenCybele1/issues/9)); wherever this document generalises about "Cybele applications", `INVENTORY.md` is the authority for *this* application.

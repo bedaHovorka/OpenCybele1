@@ -192,17 +192,38 @@ Only if you build a large long-lived JADE layer and want protocol-level function
 > | Check | Result |
 > |---|---|
 > | Published Javadoc package list <https://jason-lang.github.io/api/element-list> | 24 packages, `jason` … `jason.util`. **No `jason.asunit`.** |
-> | `unzip -l jason-interpreter-3.3.0.jar \| grep -i asunit` | **0 matches** |
-> | Same for `jason-interpreter-3.2.1.jar` and `3.2.0.jar` | **0 matches each** |
-> | Same for the older coordinate `net.sf.jason:jason:2.3` | **0 matches** |
+> | `unzip -l jason-interpreter-3.3.0.jar \| grep -ci asunit` | **0** |
+> | Same for `jason-interpreter-3.2.1.jar`, `3.2.0.jar` | **0** each |
+> | Same for `net.sf.jason:jason` **2.3**, **2.2**, **2.0** | **0** each |
+> | Same for `net.sf.jason:jason` **1.4.2** and **1.4.1** | ⚠️ **11 entries each** — `jason/asunit/{Condition,TestAgent,TestArch,print}.class` + 6 `TestAgent$N` inner classes |
+> | Same for `net.sf.jason:jason` **1.3.10**, **1.3.9** | **0** each |
 > | GitHub tree `src/test/java/test` at tags `main` / `v3.3.0` | **404 — the directory is gone** |
 > | GitHub tree `src/test/java/jason/asunit` at tag `v2.6` | **Exists**: `TestAgent.java`, `TestArch.java`, `Condition.java`, `print.java` |
+> | GitHub tree `src/main/java/jason` at tag `2.0` | **No `asunit` subdirectory** |
 >
-> So the package was real in Jason 2.x — which is where the old text came from — but it lived under
-> **`src/test/java/`**, i.e. it was part of Jason's *own test sources* and was **never published in any
-> Jason artifact on Maven Central** (checked: 2.3, 3.2.0, 3.2.1, 3.3.0). A downstream project could not
-> have depended on it even in 2.x. In 3.x it is gone from the repository entirely.
-> **The `@[test]` tester-agent path is the only one.**
+> That is **all ten** artifacts Jason has ever published to Maven Central —
+> `net.sf.jason:jason` `{1.3.9, 1.3.10, 1.4.1, 1.4.2, 2.0, 2.2, 2.3}` plus
+> `io.github.jason-lang:jason-interpreter` `{3.2.0, 3.2.1, 3.3.0}` — not a sample.
+>
+> **The actual history is published → demoted → deleted:**
+>
+> 1. **Published** in `net.sf.jason:jason` **1.4.1** and **1.4.2** (class timestamps 2015-12), in the
+>    *main* jar. `jason/asunit/TestAgent.class` is exactly the class the deleted §5.1 snippet used, so a
+>    downstream project in that era genuinely **could** have depended on it.
+> 2. **Demoted** by 2.0: gone from the published jar, surviving only in Jason's own
+>    `src/test/java/jason/asunit/` — still present at tag `v2.6`, never republished.
+> 3. **Deleted** in 3.x: absent from the repository and from every 3.x artifact and from the Javadoc.
+>
+> ⚠️ **Correction to an earlier revision of this document (2026-08-18).** This block previously claimed
+> `jason.asunit` was *"never published in any Jason artifact on Maven Central"* and that *"a downstream
+> project could not have depended on it even in 2.x"*. **Both statements are false** — they generalised
+> from a four-version sample (2.3, 3.2.0, 3.2.1, 3.3.0) to all ten. The `1.4.1`/`1.4.2` jars disprove them.
+> The correction is recorded rather than silently edited, because reasoning past your own evidence is the
+> exact defect this document exists to catch.
+>
+> **None of that changes the operational conclusion**, which rests only on 3.3.0: the package does not
+> exist in the version this project targets, the snippet is deleted rather than hedged, and
+> **the `@[test]` tester-agent path is the only one.**
 
 The single official mechanism, per
 <https://raw.githubusercontent.com/jason-lang/jason/main/doc/tech/unit-tests.adoc> (read 2026-08-18).
@@ -330,14 +351,19 @@ for its logic → (3) L2 test for its messaging → (4) re-run L3 parity suite.
 > It is resolved **in favour of the scope guard** ([#10](https://github.com/bedaHovorka/OpenCybele1/issues/10)).
 > Binding text, unchanged, from the phase docs:
 >
-> - [`Phase1.md`](Phase1.md) L7 — *"logic / system / features / behaviour are NOT extended in any phase.
+> - [`Phase1.md`](Phase1.md) **§ Scope guard** (L7) — *"logic / system / features / behaviour are NOT extended in any phase.
 >   Every golden diff in this phase = bug in the port. Goldens are never re-recorded in Phase 1 except to
 >   fix a defect in the harness itself (normalizer bug), and any such re-record must be reproduced and
 >   verified against `develop` first."*
-> - [`Phase1.md`](Phase1.md) L82 / [`Phase2.md`](Phase2.md) L71 triage rule — *"(c) never 'accept new
+> - [`Phase1.md`](Phase1.md) **§ 1-POST.3 Parity run** (L82), triage rule — *"(c) never 'accept new
 >   behavior' — features are frozen."*
-> - [`Phase2.md`](Phase2.md) L7 — *"The only allowed golden change is a Phase-1-style normalizer fix,
->   re-verified against `develop` **and** `jade` before merging."*
+> - [`Phase2.md`](Phase2.md) **§ 2-POST.3 Parity run** (L92), the counterpart rule, worded differently —
+>   *"never accept behavioral drift."*
+> - [`Phase2.md`](Phase2.md) **§ Scope guard** (L16) — *"The only allowed golden change is a
+>   Phase-1-style normalizer fix, re-verified against `develop` **and** `jade` before merging."*
+>
+> (Line numbers are given as a convenience and drift when those files are edited; the **section
+> headings** are the durable anchor. Verified against the current files on 2026-08-18.)
 
 The triage on a diff is therefore **two-way, not three-way**:
 
@@ -358,7 +384,7 @@ original baseline. "The new trace looks more correct" is case (a) until proven o
 - **Timing-based assertions**: assert *ordering and counts*, not wall-clock durations; keep timer periods short and configurable in test config.
 - **JADE singleton runtime** across tests → sequential integration suite or fresh JVM per class (`forkEvery = 1`).
 - **Don't over-assert in characterization tests** (e.g., exact debug wording) — pin the boundary behavior, not incidental formatting, or every harmless change breaks goldens.
-- **Do not plan around `jason.asunit`** — it does not exist in Jason 3.3.0 and was never published in any Jason Maven artifact (§5). Any design that assumes JUnit-driven AgentSpeak plan tests has to be re-thought around `@[test]` tester agents.
+- **Do not plan around `jason.asunit`** — it does not exist in Jason 3.3.0. It was last published in `net.sf.jason:jason:1.4.2` (2015) and has been absent from every artifact since 2.0 (§5). Any design that assumes JUnit-driven AgentSpeak plan tests has to be re-thought around `@[test]` tester agents; older tutorials showing `TestAgent`/`assertPrint` were written against 1.4.x and do not apply.
 - **The Jason test task is not generated for you** — `jason app add-gradle` writes `run`, `runJade` and `shadowJar` only; the `test`/`testJason` wiring and a project-level `unit_tests.mas2j` are yours to author (§5.2b, [#44](https://github.com/bedaHovorka/OpenCybele1/issues/44)).
 - **`src/test/jason/asl` must contain only tester agents**, or the test manager's statistics break; put shared includes in `src/test/jason/inc` (§5.2c).
 - The **JADE Test Suite** docs/add-on are old (JADE ~4.x era); expect friction on modern JDKs — prefer the JUnit in-process pattern unless you specifically need it.
@@ -372,7 +398,7 @@ original baseline. "The new trace looks more correct" is case (a) until proven o
 - **Jason release notes**: https://raw.githubusercontent.com/jason-lang/jason/main/doc/release-notes.adoc
 - **Jason published Javadoc package list** (the `jason.asunit` disproof): https://jason-lang.github.io/api/element-list
 - **Jason Maven Central metadata**: https://repo1.maven.org/maven2/io/github/jason-lang/jason-interpreter/maven-metadata.xml
-- ~~Jason asunit usage in Jason's own tests~~ — **removed**: `src/test/java/test/asunit/` does not exist at `v3.3.0` or `main` (404), and `jason.asunit` was never published in a Jason artifact. See §5.
+- ~~Jason asunit usage in Jason's own tests~~ — **removed**: `src/test/java/test/asunit/` does not exist at `v3.3.0` or `main` (404). `jason.asunit` was published only in `net.sf.jason:jason` **1.4.1/1.4.2** and has been absent from every artifact from 2.0 onward. See §5.
 - Goal-Oriented TDD tutorial (JaCaMo docs; useful background, but `unit-tests.adoc` above is authoritative): https://jacamo-lang.github.io/jacamo/tutorials/tdd/readme.html
 - **JADE Programmer's Guide** — `jade.tilab.com` was unreachable from the verifying machine (TLS chain); read from the mirror https://jade-project.gitlab.io/docs/programmersguide.pdf
 - Jason site/docs: https://jason-lang.github.io/
