@@ -13,9 +13,15 @@ OpenCybele1 (package `cz.vutbr.fit.ags.xhovor07`) is a 2007/08 school project fo
 ./gradlew run
 ```
 
-Before the first build, install the vendor jars into `~/.m2` (they're recoverable from the `withoutGradle` git tag — see README.md's "One-time setup" section for the exact `git checkout`/`mvn install:install-file` commands).
+Before the first build, run `scripts/bootstrap-vendor-jars.sh`. It recovers `cybelle/Cybele.jar`/`CybeleImpl.jar` from the `withoutGradle` git tag if absent and installs them into `~/.m2` as `com.iai:cybele-api:1.0`/`com.iai:cybele-impl:1.0`. It is idempotent and does **not** need `mvn` on `PATH` — without Maven it writes the local-repository layout (jar + generated POM) itself. Same script is called by the `Dockerfile` builder stage and is the intended CI entry point, though no CI workflow exists in this repo yet (#25).
 
-`./gradlew run` launches `cz.vutbr.fit.ags.xhovor07.Main` with the two jars (resolved from `mavenLocal()`) on the classpath, plus the JVM flag `--patch-module java.base=cybelle` set via `applicationDefaultJvmArgs` in `build.gradle.kts` (Cybele reads `cybelle/ICS.prop`/`cybele.prop` via that flag at startup). There is no automated test suite; verification is manual via the Swing GUI that pops up on launch.
+`./gradlew run` launches `cz.vutbr.fit.ags.xhovor07.Main` with the two jars (resolved from `mavenLocal()`) on the classpath, plus the JVM flags `-ea` and `--patch-module java.base=cybelle` set via `applicationDefaultJvmArgs` in `build.gradle.kts` (Cybele reads `cybelle/ICS.prop`/`cybele.prop` via that flag at startup). There is no automated test suite; verification is manual via the Swing GUI that pops up on launch. The simulation has no stop condition, so bound it with `timeout` when capturing output.
+
+Assertions are **on** for `run` — and, because `applicationDefaultJvmArgs` is baked into the generated start script, for `installDist` and the Docker image too. Triage of all 33 sites is in `docs/assertion-triage.md`: none fires; 25 exercised and holding, 8 never reached.
+
+`com.iai.cybele.thmgmt.IAIAgentThread` catches five named exception types around its reflective handler invoke — **not** `Throwable`. An `AssertionError` survives only because `Method.invoke` wraps it in `InvocationTargetException`. It is printed by `com.iai.cybele.exception.IAIExceptionHandler` **to `System.err`**, twice per failure, and the simulation continues. Three things follow, and all three have bitten: capture **stderr** or you see nothing; the process **exit status never changes**, so it is useless as a pass/fail signal; and a throwable in a timer handler like `Generator.generateTrain` **permanently stops** train generation, because the method re-arms its own timer as its last statement. See `docs/assertion-triage.md` § Result 3 before writing anything that diffs run output.
+
+To disable assertions without editing the build, use the start script's env hook: `OPENCYBELE_OPTS=-da build/install/opencybele/bin/opencybele`. `./gradlew run` has no equivalent hook. Enabling `-ea` is itself a behaviour change; the assertions-on/off decision *for golden recording* is deliberately left to issues #22/#24 and must not be settled here.
 
 `build/` is Gradle's git-ignored build output.
 
@@ -25,7 +31,7 @@ Cybele's kernel loads `cybele.prop` via `props.getClass().getResourceAsStream("/
 
 ### Docker (X11 GUI passthrough)
 
-On the `develop` branch, `Dockerfile` + `docker-compose.yml` build and run the app in a container, forwarding the Swing GUI to an X server on the host (bind-mounted `/tmp/.X11-unix` + `.Xauthority`, UID/GID-matched non-root user), the same X11-passthrough pattern used by the sibling `interlockSim` project. The `Dockerfile` is a multi-stage build: a `eclipse-temurin:21-jdk-noble` builder stage (installs the vendor jars via Maven, then `./gradlew installDist`), then a slim `eclipse-temurin:21-jre-noble` runtime stage — Docker is a convenience/reproducibility option here, not a requirement for a working JVM. Since the jars aren't in git, the `withoutGradle` recovery step (see README.md) must be run before `docker compose build` so they're present in the build context.
+`Dockerfile` + `docker-compose.yml` build and run the app in a container, forwarding the Swing GUI to an X server on the host (bind-mounted `/tmp/.X11-unix` + `.Xauthority`, UID/GID-matched non-root user), the same X11-passthrough pattern used by the sibling `interlockSim` project. The `Dockerfile` is a multi-stage build: a `eclipse-temurin:21-jdk-noble` builder stage (runs `scripts/bootstrap-vendor-jars.sh`, then `./gradlew installDist`; no Maven is installed in the image), then a slim `eclipse-temurin:21-jre-noble` runtime stage — Docker is a convenience/reproducibility option here, not a requirement for a working JVM. Since the jars aren't in git and `.dockerignore` excludes `.git`, `scripts/bootstrap-vendor-jars.sh` must be run **on the host** before `docker compose build` so the jars are present in the build context.
 
 ```bash
 xhost +local:docker && docker compose up app   # Linux/macOS
