@@ -71,6 +71,17 @@ class OpenCybeleCharacterizationIT {
 }
 ```
 
+> **Assertion failures land inside this captured trace.** `redirectErrorStream(true)`
+> above merges stderr into `raw`, and with `-ea` on (the OpenCybele baseline default) a
+> firing assertion prints its stack trace there — so `TraceNormalizer` will happily
+> normalize a broken invariant into invisibility, or `golden.record` will bake it into a
+> golden as expected output. **The runner must fail fast on `AssertionError` /
+> `Exception in thread "` in `raw`, before calling `normalize()`.** Note also that the
+> process exit status never reflects any of this, that one handler failure prints
+> `AssertionError` twice, and that a throwable in a timer handler stops the simulation
+> permanently while still looking healthy. Full mechanism and evidence:
+> [`assertion-triage.md`](assertion-triage.md) § Result 3.
+
 `TraceNormalizer` is the critical piece — it must strip everything nondeterministic:
 - timestamps → `<TS>`; thread names/ids → `<THREAD>`; message ids/UUIDs → `<ID>`; absolute paths, ports, hostnames;
 - optionally **sort or bucket interleaved lines** (e.g. group by agent name, or sort within a tick) because concurrent agents interleave output differently per run. A robust trick: have each log line carry `agent|tick|event|payload`, then sort lines with equal tick.

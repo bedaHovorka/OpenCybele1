@@ -14,7 +14,7 @@ This is the reference environment the baseline is built and run in. Anything els
 | **Java** | Gradle **toolchain 21** (`build.gradle.kts`); verified on Temurin/OpenJDK 21 |
 | **Required JVM flag** | `--patch-module java.base=cybelle` — mandatory, see [Why `--patch-module`](#why---patch-module) |
 | **Required Cybele config** | `cybele.srv.comm.app.param.iai = Local;NoSerialization` in `cybelle/cybele.prop` — mandatory, see [Why `Local;NoSerialization`](#why-localnoserialization) |
-| **Assertions** | `-ea` is on for `run` — see [Assertions (`-ea`)](#assertions--ea) and [`docs/assertion-triage.md`](docs/assertion-triage.md) |
+| **Assertions** | `-ea` is on for `run`, and baked into the `installDist` start script and the Docker image — see [Assertions (`-ea`)](#assertions--ea) and [`docs/assertion-triage.md`](docs/assertion-triage.md) |
 | **Vendor jars** | `com.iai:cybele-api:1.0`, `com.iai:cybele-impl:1.0` in the local Maven repository — see [One-time setup](#one-time-setup-install-the-vendor-jars) |
 | **Tests** | none; verification is manual through the Swing GUI |
 
@@ -40,11 +40,11 @@ The script:
 - restores `cybelle/Cybele.jar` and `cybelle/CybeleImpl.jar` from the `withoutGradle` tag if they're not already in the working tree (and leaves them untracked, as `.gitignore` intends);
 - installs them as `com.iai:cybele-api:1.0` and `com.iai:cybele-impl:1.0` into the local Maven repository;
 - **does not require `mvn` on `PATH`.** If Maven is available it shells out to `mvn install:install-file`; if not, it writes the repository layout (jar + a minimal generated POM) directly. Both paths produce the same on-disk result, which `mavenLocal()` resolves identically;
-- is **idempotent** — re-running it is a no-op once both artifacts are installed and match. `--force` reinstalls anyway, `--verify-only` checks without writing;
-- honours `MAVEN_REPO_LOCAL`, otherwise `<localRepository>` from `~/.m2/settings.xml`, otherwise `~/.m2/repository`;
+- is **idempotent** — re-running it is a no-op once both artifacts are installed and match. `--force` reinstalls anyway; `--verify-only` checks that both artifacts are installed and exits, writing nothing and leaving the working tree untouched (it will *not* restore missing jars — the two flags are mutually exclusive);
+- resolves the target repository from `MAVEN_REPO_LOCAL`, else `<localRepository>` in `~/.m2/settings.xml` (XML comments stripped first — Maven's own shipped `settings.xml` carries a commented-out `/path/to/local/repo` example that a naive grep picks up), else `~/.m2/repository`, and logs which one it chose. **`MAVEN_REPO_LOCAL` is a script-side override only**: Gradle's `mavenLocal()` does not read it, so if you point it somewhere non-default you must also pass a matching `-Dmaven.repo.local` to Gradle or the build will not find what was just installed;
 - fails with an actionable message rather than a stack trace when the tag is missing, the clone has no `.git`, or the destination isn't writable.
 
-It is also the entry point used by the [`Dockerfile`](Dockerfile) builder stage, and is the single call CI ([#25](https://github.com/bedaHovorka/OpenCybele1/issues/25)) should make to prepare a build — no separate Maven install step is needed anywhere.
+It is also the entry point used by the [`Dockerfile`](Dockerfile) builder stage — no separate Maven install step is needed anywhere. It is designed to be the single call CI makes to prepare a build, but **no CI workflow exists in this repository yet**; wiring one up is [#25](https://github.com/bedaHovorka/OpenCybele1/issues/25).
 
 ## Build
 
@@ -70,9 +70,19 @@ timeout 300 ./gradlew run --console=plain
 
 `run` enables assertions (`-ea` in `applicationDefaultJvmArgs`). The 33 `assert` statements in `src/` are the codebase's only invariant checks, and they encode real preconditions — every path member having voted, a train arriving where it was routed, a path direction being resolvable. With assertions off, a violated invariant is silent corruption; with them on, it is a logged failure.
 
-Note how Cybele treats one: a `Throwable` raised inside an agent event handler is **caught, printed with a stack trace by `com.iai.cybele.thmgmt.IAIAgentThread`, and the simulation continues**. A firing assertion therefore does *not* abort the process or change the exit status — it aborts the remainder of that one handler invocation and leaves a trace in the log. This matters for anything that diffs run output.
+Note how Cybele treats one. An exception thrown out of an agent event handler is caught by `com.iai.cybele.thmgmt.IAIAgentThread` — but its catch list is five named types, *not* `Throwable`. An `AssertionError` survives only because `Method.invoke` wraps it in an `InvocationTargetException`, which is on that list. It is then printed by `com.iai.cybele.exception.IAIExceptionHandler` **to `System.err`** (twice per failure), and the simulation continues. So a firing assertion does *not* abort the process or change the exit status.
+
+Three practical consequences, all measured: output diffing must **capture stderr** (nothing appears on stdout); the exit status is worthless as a pass/fail signal; and a throwable inside a timer handler such as `Generator.generateTrain` stops train generation **permanently and silently**, because the method re-arms its own timer as its last statement. Full mechanism, evidence and the rules a scenario runner must follow are in [`docs/assertion-triage.md`](docs/assertion-triage.md) § Result 3.
 
 Full triage of all 33 assertion sites — which fire, which are merely never reached, and how many times each is evaluated in a normal run — is in [`docs/assertion-triage.md`](docs/assertion-triage.md). Summary: **none fires**; 25 sites are exercised and hold, 8 are never reached (2 of those deliberately).
+
+`applicationDefaultJvmArgs` is baked into the generated start script too (`build/install/opencybele/bin/opencybele`), so the Docker image runs with assertions on as well. That script appends `JAVA_OPTS` and `OPENCYBELE_OPTS` *after* `DEFAULT_JVM_OPTS`, so assertions can be turned off there without touching the build:
+
+```bash
+OPENCYBELE_OPTS=-da build/install/opencybele/bin/opencybele
+```
+
+`./gradlew run` has **no** such escape hatch — disabling assertions on that path requires editing `build.gradle.kts`. #22 should be aware of the asymmetry: it is exactly the sort of thing that produces a golden recorded under different assertion settings than the label claims.
 
 **Enabling `-ea` is itself a behaviour change.** A path that previously continued silently past a broken invariant now throws instead. That is the desired trade for local development and CI, but it means the assertions-on/assertions-off setting is a property of the *scenario being recorded*, not a free-standing preference.
 

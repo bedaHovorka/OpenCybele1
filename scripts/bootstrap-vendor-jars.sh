@@ -18,12 +18,22 @@
 # on-disk result.
 #
 # Usage:
-#   scripts/bootstrap-vendor-jars.sh [--force] [--verify-only]
+#   scripts/bootstrap-vendor-jars.sh [--force | --verify-only]
+#
+#   --force        reinstall even if the artifacts are already current
+#   --verify-only  check that both artifacts are installed and exit; writes
+#                  nothing and does not touch the working tree
+#                  (mutually exclusive with --force)
 #
 # Environment:
-#   MAVEN_REPO_LOCAL   override the local repository path
-#                      (default: <localRepository> from ~/.m2/settings.xml,
-#                       else ~/.m2/repository)
+#   MAVEN_REPO_LOCAL   override the local repository path this script writes to.
+#                      NOTE: Gradle's mavenLocal() does NOT read this variable —
+#                      it reads the `maven.repo.local` system property, then
+#                      <localRepository> in ~/.m2/settings.xml, then the
+#                      ~/.m2/repository default. So if you set this to a
+#                      non-default path you must also pass a matching
+#                      -Dmaven.repo.local to Gradle, or it will not find the
+#                      artifacts this script just installed.
 #
 # Exit codes: 0 success, 1 failure (always with an actionable message).
 
@@ -39,6 +49,9 @@ ARTIFACTS=(
     "cybele-impl:cybelle/CybeleImpl.jar"
 )
 
+die() { echo "" >&2; echo "ERROR: $*" >&2; echo "" >&2; exit 1; }
+log() { echo "[bootstrap-vendor-jars] $*"; }
+
 FORCE=0
 VERIFY_ONLY=0
 for arg in "$@"; do
@@ -46,17 +59,22 @@ for arg in "$@"; do
         --force)       FORCE=1 ;;
         --verify-only) VERIFY_ONLY=1 ;;
         -h|--help)
-            sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+            # Print the leading comment block, however long it is.
+            awk 'NR==1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
             exit 0 ;;
         *)
             echo "bootstrap-vendor-jars: unknown option '$arg'" >&2
-            echo "Usage: $0 [--force] [--verify-only]" >&2
+            echo "Usage: $0 [--force | --verify-only]" >&2
             exit 1 ;;
     esac
 done
 
-die() { echo "" >&2; echo "ERROR: $*" >&2; echo "" >&2; exit 1; }
-log() { echo "[bootstrap-vendor-jars] $*"; }
+if [ "$FORCE" -eq 1 ] && [ "$VERIFY_ONLY" -eq 1 ]; then
+    die \
+"--force and --verify-only are mutually exclusive.
+--force means 'reinstall unconditionally'; --verify-only means 'write nothing'.
+Combined they would report a false failure on a correctly installed repository."
+fi
 
 # ---------------------------------------------------------------------------
 # Locate the project root (works from any cwd, inside or outside a git repo).
@@ -71,6 +89,17 @@ This script must stay in <project-root>/scripts/ so it can locate the project."
 
 # ---------------------------------------------------------------------------
 # Resolve the local Maven repository path.
+#
+# Parsing settings.xml needs XML-comment awareness: Maven's own shipped
+# settings.xml carries a commented-out example
+#     <!-- localRepository ...
+#     <localRepository>/path/to/local/repo</localRepository>
+#     -->
+# and a plain line-oriented grep happily returns "/path/to/local/repo" from it.
+# That is the dangerous case, not a cosmetic one: it only bites on machines
+# that HAVE Maven, where the install then succeeds into the wrong directory
+# and Gradle later fails to resolve the artifacts with an error that blames
+# Gradle. The awk pass below drops commented regions before matching.
 # ---------------------------------------------------------------------------
 resolve_repo_local() {
     if [ -n "${MAVEN_REPO_LOCAL:-}" ]; then
@@ -80,10 +109,17 @@ resolve_repo_local() {
     local settings="${HOME}/.m2/settings.xml"
     if [ -f "$settings" ]; then
         local configured
-        configured="$(sed -n 's:.*<localRepository>\(.*\)</localRepository>.*:\1:p' "$settings" | head -n 1 | tr -d '[:space:]')"
-        # Ignore the commented-out default placeholder and property refs we
-        # cannot expand here.
-        if [ -n "$configured" ] && [[ "$configured" != *'${'* ]]; then
+        # Strip <!-- ... --> regions, then match, then trim leading/trailing
+        # whitespace only (never internal — paths may legitimately contain
+        # spaces).
+        configured="$(
+            awk '/<!--/ { c = 1 } !c { print } /-->/ { c = 0 }' "$settings" \
+            | sed -n 's:.*<localRepository>\(.*\)</localRepository>.*:\1:p' \
+            | head -n 1 \
+            | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+        )"
+        # Skip unexpanded property references such as ${user.home}.
+        if [ -n "$configured" ] && [ "${configured#*'${'}" = "$configured" ]; then
             echo "${configured/#\~/$HOME}"
             return
         fi
@@ -92,23 +128,56 @@ resolve_repo_local() {
 }
 
 REPO_LOCAL="$(resolve_repo_local)"
+log "local Maven repository: $REPO_LOCAL"
+
+artifact_dir() { echo "$REPO_LOCAL/${GROUP_ID//./\/}/$1/$VERSION"; }
+
+# ---------------------------------------------------------------------------
+# --verify-only — read-only check, before anything can touch the working tree.
+# ---------------------------------------------------------------------------
+if [ "$VERIFY_ONLY" -eq 1 ]; then
+    for entry in "${ARTIFACTS[@]}"; do
+        artifact_id="${entry%%:*}"
+        jar="${entry#*:}"
+        dir="$(artifact_dir "$artifact_id")"
+        for required in "$dir/$artifact_id-$VERSION.jar" "$dir/$artifact_id-$VERSION.pom"; do
+            [ -s "$required" ] || die \
+"--verify-only: $GROUP_ID:$artifact_id:$VERSION is not installed in
+'$REPO_LOCAL' (missing or empty: $required).
+Run scripts/bootstrap-vendor-jars.sh to install it."
+        done
+        # Only comparable when the source jar happens to be present; absence of
+        # cybelle/*.jar is not itself a verification failure.
+        if [ -f "$jar" ] && ! cmp -s "$jar" "$dir/$artifact_id-$VERSION.jar"; then
+            die \
+"--verify-only: installed $GROUP_ID:$artifact_id:$VERSION differs from '$jar'.
+Run scripts/bootstrap-vendor-jars.sh --force to reinstall it."
+        fi
+    done
+    log "OK — both artifacts present in $REPO_LOCAL (nothing written)"
+    exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # Step 1 — make sure the jars are present in cybelle/.
+#
+# A space-separated string rather than an array: `${#arr[@]}` on an EMPTY array
+# is an unbound-variable error under `set -u` on bash < 4.4, which is still
+# /bin/bash on macOS — a platform this project documents (XQuartz).
 # ---------------------------------------------------------------------------
-missing_jars=()
+missing_jars=""
 for entry in "${ARTIFACTS[@]}"; do
     jar="${entry#*:}"
-    [ -f "$jar" ] || missing_jars+=("$jar")
+    [ -f "$jar" ] || missing_jars="${missing_jars:+$missing_jars }$jar"
 done
 
-if [ ${#missing_jars[@]} -gt 0 ]; then
-    log "missing from the working tree: ${missing_jars[*]}"
+if [ -n "$missing_jars" ]; then
+    log "missing from the working tree: $missing_jars"
 
     if ! command -v git >/dev/null 2>&1 || ! git rev-parse --git-dir >/dev/null 2>&1; then
         die \
 "The vendored Cybele jars are missing and cannot be recovered here:
-    ${missing_jars[*]}
+    $missing_jars
 
 They are not tracked on this branch (.gitignore: cybelle/*.jar) and this
 directory is not a git working tree (or git is unavailable), so the
@@ -126,14 +195,14 @@ context. Run this script on the host first, then rebuild:
     git rev-parse --verify --quiet "refs/tags/$VENDOR_TAG" >/dev/null || die \
 "The git tag '$VENDOR_TAG' does not exist in this clone, so the vendored
 Cybele jars cannot be recovered:
-    ${missing_jars[*]}
+    $missing_jars
 
 Fetch it from the remote that has it:
     git fetch --tags origin
 then re-run: scripts/bootstrap-vendor-jars.sh"
 
-    log "restoring ${missing_jars[*]} from tag '$VENDOR_TAG'"
-    for jar in "${missing_jars[@]}"; do
+    log "restoring $missing_jars from tag '$VENDOR_TAG'"
+    for jar in $missing_jars; do
         git checkout "$VENDOR_TAG" -- "$jar" || die \
 "'git checkout $VENDOR_TAG -- $jar' failed. The tag exists but does not
 contain that path, or the working tree is in a conflicted state."
@@ -150,12 +219,6 @@ done
 # ---------------------------------------------------------------------------
 # Step 2 — install into the local Maven repository.
 # ---------------------------------------------------------------------------
-same_file() {
-    # $1 source, $2 destination — true when both exist with identical content.
-    [ -f "$2" ] || return 1
-    cmp -s "$1" "$2"
-}
-
 write_pom() {
     local artifact_id="$1" pom_path="$2"
     cat > "$pom_path" <<POM
@@ -203,8 +266,7 @@ install_with_maven() {
 }
 
 install_manually() {
-    local artifact_id="$1" jar="$2"
-    local dest_dir="$REPO_LOCAL/${GROUP_ID//./\/}/$artifact_id/$VERSION"
+    local artifact_id="$1" jar="$2" dest_dir="$3"
     mkdir -p "$dest_dir"
     cp -f "$jar" "$dest_dir/$artifact_id-$VERSION.jar"
     write_pom "$artifact_id" "$dest_dir/$artifact_id-$VERSION.pom"
@@ -215,31 +277,25 @@ skipped=0
 for entry in "${ARTIFACTS[@]}"; do
     artifact_id="${entry%%:*}"
     jar="${entry#*:}"
-    dest_dir="$REPO_LOCAL/${GROUP_ID//./\/}/$artifact_id/$VERSION"
+    dest_dir="$(artifact_dir "$artifact_id")"
     dest_jar="$dest_dir/$artifact_id-$VERSION.jar"
     dest_pom="$dest_dir/$artifact_id-$VERSION.pom"
 
-    if [ "$FORCE" -eq 0 ] && same_file "$jar" "$dest_jar" && [ -f "$dest_pom" ]; then
+    if [ "$FORCE" -eq 0 ] && [ -f "$dest_jar" ] && cmp -s "$jar" "$dest_jar" && [ -f "$dest_pom" ]; then
         log "up to date: $GROUP_ID:$artifact_id:$VERSION"
         skipped=$((skipped + 1))
         continue
     fi
 
-    if [ "$VERIFY_ONLY" -eq 1 ]; then
-        die \
-"--verify-only: $GROUP_ID:$artifact_id:$VERSION is not installed (or differs)
-in '$REPO_LOCAL'. Run scripts/bootstrap-vendor-jars.sh to install it."
-    fi
-
     if [ -n "$MVN" ]; then
-        log "installing $GROUP_ID:$artifact_id:$VERSION from $jar (via $MVN)"
+        log "installing $GROUP_ID:$artifact_id:$VERSION from $jar into $REPO_LOCAL (via $MVN)"
         install_with_maven "$artifact_id" "$jar" || die \
 "'mvn install:install-file' failed for $jar.
 Re-run without Maven on PATH to use the built-in copy-based installer, or
 inspect the Maven output above."
     else
-        log "installing $GROUP_ID:$artifact_id:$VERSION from $jar (no mvn on PATH, copying into $REPO_LOCAL)"
-        install_manually "$artifact_id" "$jar" || die \
+        log "installing $GROUP_ID:$artifact_id:$VERSION from $jar into $REPO_LOCAL (no mvn on PATH, copying)"
+        install_manually "$artifact_id" "$jar" "$dest_dir" || die \
 "Failed to copy $jar into '$dest_dir'. Check the path is writable."
     fi
     installed=$((installed + 1))
@@ -250,7 +306,7 @@ done
 # ---------------------------------------------------------------------------
 for entry in "${ARTIFACTS[@]}"; do
     artifact_id="${entry%%:*}"
-    dest_dir="$REPO_LOCAL/${GROUP_ID//./\/}/$artifact_id/$VERSION"
+    dest_dir="$(artifact_dir "$artifact_id")"
     for required in "$dest_dir/$artifact_id-$VERSION.jar" "$dest_dir/$artifact_id-$VERSION.pom"; do
         [ -s "$required" ] || die \
 "Post-install verification failed: '$required' is missing or empty.

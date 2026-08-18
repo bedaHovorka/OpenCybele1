@@ -3,9 +3,16 @@
 > Produced for [#14](https://github.com/bedaHovorka/OpenCybele1/issues/14) (*Reproducible baseline*).
 > Consumed by [#22](https://github.com/bedaHovorka/OpenCybele1/issues/22) (assertions-on/off decision for
 > golden recording) and [#24](https://github.com/bedaHovorka/OpenCybele1/issues/24) (run manifest).
+> **Result 3 below constrains [#13](https://github.com/bedaHovorka/OpenCybele1/issues/13) and
+> [#21](https://github.com/bedaHovorka/OpenCybele1/issues/21) directly**: a scenario runner that checks the
+> exit status, or captures only stdout, will report green through every failure mode described there.
+> See also `docs/TESTING.md` §3.2.
 >
-> **Headline: no assertion fires.** All 33 `assert` statements were checked with
-> `-ea` on. 25 of them are exercised by a normal run — collectively ~20 000
+> **Headline: no assertion fires** — across eight sampled, `timeout`-truncated runs on an
+> unseeded RNG (see [Caveats](#what-this-does-and-does-not-decide); neither
+> [#15](https://github.com/bedaHovorka/OpenCybele1/issues/15) nor
+> [#17](https://github.com/bedaHovorka/OpenCybele1/issues/17) has landed, so this is
+> sampled evidence, not proof). All 33 `assert` statements were checked with `-ea` on. 25 of them are exercised by a normal run — collectively ~20 000
 > evaluations — and every one held. The remaining 8 are never reached. Two of
 > those 8 are deliberate "this branch is impossible" markers, so not reaching
 > them is the correct outcome.
@@ -38,6 +45,13 @@ Two questions had to be answered separately, because they fail in different ways
 | 4 | `docker compose up app` | 150 s | 17 | **0** | 0 |
 | 5 | `docker compose up -d app` | ~180 s | ~20 | **0** | 0 |
 | 6 | instrumented (below) | 330 s | 43 | **0** | 0 |
+| 7 | `./gradlew run` (post-review rebuild) | 180 s | 15 | **0** | 0 |
+| 8 | `docker compose up app` (post-review rebuild) | 90 s | 4 | **0** | 0 |
+
+Runs 1–3 and 7 were captured with `./gradlew run`, which merges the child JVM's
+stderr into the console stream; runs 4, 5 and 8 through `docker compose`, likewise.
+The stdout/stderr split reported in Result 3 was measured separately, straight off
+the `installDist` start script.
 
 ### Instrumentation pass (throwaway, not committed)
 
@@ -46,9 +60,13 @@ where `Diag.hit` counts and returns `true`. Because the injected call is folded
 into the assert's own boolean expression:
 
 - it only runs when `-ea` is on — exactly the condition under test;
-- `&&` binds looser than every operator used in these expressions, and `hit()` is
-  constantly `true`, so `true && EXPR` preserves the original truth value and the
-  original short-circuit behaviour;
+- `hit()` is constantly `true`, so `true && EXPR` preserves the original truth value.
+  This is **not** universally safe: `&&` binds *tighter* than `||` and `?:`, so
+  `assert a || b` would regroup as `(hit() && a) || b`, and a top-level ternary would
+  collide with the `assert cond : msg` form. It is sound here because all 33 sites were
+  checked individually and **none contains a top-level `||` or `?:`** — verified per
+  site, not assumed. Anyone reusing this recipe must re-check that, or parenthesise the
+  original expression as `hit() && (EXPR)`;
 - it is safe at `} else assert false;` ([`RailwayMainAgent.java:280`](../src/main/java/cz/vutbr/fit/ags/xhovor07/RailwayMainAgent.java#L280)),
   where inserting a *statement* before the assert would have silently changed control flow;
 - it works with the `assert cond : msg;` form, since the rewrite touches only `cond`.
@@ -127,8 +145,8 @@ per track — because they are startup topology checks, not steady-state checks.
 |---|---|---|
 | `RailwayMainAgent.java:280` | `} else assert false;` | **Intentional dead branch.** Reaching it *is* the bug. Correctly never reached. |
 | `Station.java:108` | `assert false : e;` | **Intentional** — a swallowed-exception marker in a `catch`. No exception occurred. |
-| `util/Util.java:42` | `!objects[i].getClass().isArray()` | `Util` varargs helper unused on the simulated paths |
-| `util/Util.java:56` | `clazz != null` | `Util.assertAndCast` never called |
+| `util/Util.java:42` | `!objects[i].getClass().isArray()` | inside `Util.toClass(Object[])`, reached only from `AbstractUnorientedGraph`'s reflective helper, itself unused here |
+| `util/Util.java:56` | `clazz != null` | `Util.assertInstanceOf` never called |
 | `util/Util.java:57` | `clazz.isInstance(obj)` | same |
 | `util/AbstractUnorientedGraph.java:41` | `o instanceof Integer` | code path unused by `HashMapGraph` as driven here |
 | `util/AbstractUnorientedGraph.java:60` | `cause instanceof RuntimeException` | error path, not triggered |
@@ -139,36 +157,134 @@ supposed to be uncovered; the other six mark a coverage gap that scenario
 extension (1-PRE.3) may or may not choose to close. None of them blocks the
 baseline.
 
-## Result 3 — how Cybele handles a firing assertion
+## Result 3 — what actually happens when an assertion fires
 
-This was verified directly, by temporarily planting `assert false` inside
-`Train.entered` and running it. Behaviour:
+Verified two ways: by decompiling the kernel (`javap -c` on `CybeleImpl.jar`), and by
+planting synthetic failures at three different call sites and capturing **stdout and
+stderr into separate files**.
+
+### The catch is narrow, and it is not `Throwable`
+
+`com.iai.cybele.thmgmt.IAIAgentThread.run` invokes each event handler reflectively.
+Its exception table over the invoke region (bytecode 104–127, `Method.invoke` at 120) is:
+
+| Caught type | Handler |
+|---|---|
+| `java.lang.IllegalArgumentException` | 130 |
+| `java.lang.IllegalAccessException` | 193 |
+| `java.lang.reflect.InvocationTargetException` | 256 |
+| `java.lang.ClassCastException` | 325 |
+| `java.lang.Exception` | 394 |
+
+There is **no `catch (Throwable)`**. An `AssertionError` is an `Error`, not an
+`Exception`, so it is not caught on its own merits — it survives only because
+`Method.invoke` wraps whatever the handler threw in an `InvocationTargetException`,
+and *that* is in the table. So the swallowing is a side effect of reflection, not a
+deliberate policy.
+
+The consequence: **"Cybele swallows any Throwable" is not a safe general rule.** An
+`Error` raised outside the reflective-invoke region is not caught at all; it escapes
+`run()` and kills that agent thread silently.
+
+### It is printed to stderr, by a different class
+
+The printer is `com.iai.cybele.exception.IAIExceptionHandler.print`, not
+`IAIAgentThread`, and every branch of it writes to **`System.err`** (plus
+`Throwable.printStackTrace()`, also stderr). Confirmed empirically — 4 synthetic
+handler failures produced:
+
+| Stream | `AssertionError` occurrences |
+|---|---|
+| stdout | **0** |
+| stderr | **8** |
+
+A runner doing `./gradlew run > out.log` and grepping `out.log` finds **nothing**.
+[#21](https://github.com/bedaHovorka/OpenCybele1/issues/21) must capture stderr.
+
+Note also that `IAIExceptionHandler` *does* call `System.exit()` on its higher
+severity branches. The handler-failure path constructs a `CybeleWarning`, which takes
+the non-exiting branch — which is why the process survives. Not every Cybele error
+class is survivable.
+
+### Each failure prints the assertion twice
+
+Verbatim, one complete failure block (JDK 21):
 
 ```
-Exception thrown by target ---
-java.lang.AssertionError: PROBE synthetic failure in Train.entered
-	at cz.vutbr.fit.ags.xhovor07.Train.entered(Train.java:88)
+*** Thread Mgmt Exception ->
+cybele.exception.CybeleWarning: InvocationTargetException occured in entered of the class cz.vutbr.fit.ags.xhovor07.Train
+	at com.iai.cybele.thmgmt.IAIAgentThread.run(IAIAgentThread.java:341)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+Originated from ---
+java.lang.reflect.InvocationTargetException
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:118)
 	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
 	at com.iai.cybele.thmgmt.IAIAgentThread.run(IAIAgentThread.java:321)
 	at java.base/java.lang.Thread.run(Thread.java:1583)
-Thrown in Thread 'Thread-1'.
+Caused by: java.lang.AssertionError: PROBE synthetic failure in Train.entered
+	at cz.vutbr.fit.ags.xhovor07.Train.entered(Train.java:87)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	... 3 more
+Exception thrown by target ---
+java.lang.AssertionError: PROBE synthetic failure in Train.entered
+	at cz.vutbr.fit.ags.xhovor07.Train.entered(Train.java:87)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at com.iai.cybele.thmgmt.IAIAgentThread.run(IAIAgentThread.java:321)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+Thrown in Thread 'Thread-2'.
 ```
 
-`com.iai.cybele.thmgmt.IAIAgentThread` invokes event handlers reflectively and
-**catches, prints, and swallows** any `Throwable`. Consequences that matter for
-the harness:
+Cybele emits an `Originated from ---` block *and* an `Exception thrown by target ---`
+block per failure, so the `AssertionError` line appears **twice**: 8 occurrences for
+4 failures, measured. **A naive `grep -c AssertionError` double-counts.** Count
+`Exception thrown by target ---`, or de-duplicate, if the number matters.
 
-- A firing assertion **does not** terminate the process, change the exit status,
-  or stop the simulation. The run continued generating trains after every synthetic failure.
-- It aborts only the remainder of *that one handler invocation*. The agent's state
-  is left partially updated — a firing assertion in this codebase silently corrupts
-  the agent it fires in, rather than halting.
-- Therefore a golden-master runner **must not** rely on exit status to detect
-  assertion failures. It has to scan captured output for `AssertionError`, or the
-  failure will pass as green.
+### Not every assertion goes through Cybele at all
+
+Two of the 25 exercised sites — `RailwayCanvas.java:61` and `RailwayCanvas.java:101` —
+fire on the **AWT event dispatch thread** inside `paint()`, never through
+`IAIAgentThread`. That is 1 716 of the ~20 000 evaluations in run 6, i.e. a large
+minority. They would be swallowed by AWT's uncaught-exception handler instead, with a
+different banner and no Cybele framing.
+
+This is the reason to key any detector on the **`AssertionError` text**, not on
+Cybele's `*** Thread Mgmt Exception ->` banner: the banner covers neither the EDT
+sites nor the `main`-thread case below.
+
+### Three distinct failure modes, none visible in the exit status
+
+| Where it throws | What is printed | Exit status | Simulation |
+|---|---|---|---|
+| Agent event handler (via `IAIAgentThread`) | Cybele banner + `AssertionError` ×2, stderr | unchanged | continues; that agent left partially updated |
+| `Main.main` | `Exception in thread "main" java.lang.AssertionError`, stderr | unchanged | continues — 11 trains were generated *after* `main` died |
+| Timer handler (`Generator.generateTrain`) | Cybele banner, stderr | unchanged | **stops permanently and silently** |
+
+The third is the dangerous one. `Generator.generateTrain` re-arms its own timer with
+`Activity.setTimer(...)` as its **last** statement
+([`Generator.java:65`](../src/main/java/cz/vutbr/fit/ags/xhovor07/Generator.java#L65)).
+Anything thrown at lines 58–64 skips that call, Cybele swallows the throwable, and the
+generator is never scheduled again. Train generation ceases for the remainder of the
+run. Nothing in the exit status reflects it, and after the initial stack trace nothing
+further is logged — a scanner watching only for `AssertionError` sees one trace and a
+plausible-looking, permanently dead simulation.
+
+The `main` case matters too: it prints `Exception in thread "main"`, which does **not**
+contain Cybele's banner. Cybele's non-daemon threads keep the JVM alive after `main`
+dies, so this also does not change the exit status.
+
+### What a runner must therefore do
+
+- **Capture stderr.** The traces are not on stdout.
+- **Never trust the exit status.** No failure location changes it.
+- **Scan for both** `AssertionError` and `Exception in thread "` — the Cybele banner
+  alone misses the EDT and `main` cases.
+- **Do not equate occurrence count with failure count** (2 lines per handler failure).
+- **Assert on liveness, not just absence of errors** — e.g. a minimum train count for
+  the scenario's duration. It is the only way to catch the dead-generator mode.
 - The probe also confirmed `-ea` genuinely reaches the JVM
-  (`Main.class.desiredAssertionStatus() == true`), so the zero counts above are a
-  real negative rather than a disabled-assertion artefact.
+  (`Main.class.desiredAssertionStatus() == true`), so the zero counts in Results 1–2
+  are a real negative rather than a disabled-assertion artefact.
 
 ## What this does and does not decide
 
@@ -192,8 +308,11 @@ must never be compared against a replay made without it.
   above is from a `timeout`-truncated run. "Runs to completion without an
   `AssertionError`" can only be claimed literally once #17 lands.
 - The RNG is unseeded ([#15](https://github.com/bedaHovorka/OpenCybele1/issues/15)),
-  so these runs sample the scenario space rather than cover it. Six runs and
+  so these runs sample the scenario space rather than cover it. Eight runs and
   ~20 000 assertion evaluations is decent evidence, not proof. This triage should
   be re-run once #15 and #17 make runs deterministic and bounded.
-- Counts come from a single instrumented run; the other five runs were only
-  checked for `AssertionError`.
+- Per-site counts come from a single instrumented run (run 6); the other seven runs
+  were only checked for `AssertionError`.
+- Result 3's failure modes were produced by *synthetic* faults deliberately planted at
+  three call sites. They characterise how the kernel reacts to a failing assertion; they
+  are not evidence about any real invariant in this codebase.
