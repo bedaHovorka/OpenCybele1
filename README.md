@@ -16,6 +16,7 @@ This is the reference environment the baseline is built and run in. Anything els
 | **Required Cybele config** | `cybele.srv.comm.app.param.iai = Local;NoSerialization` in `cybelle/cybele.prop` — mandatory, see [Why `Local;NoSerialization`](#why-localnoserialization) |
 | **Assertions** | `-ea` is on for `run`, and baked into the `installDist` start script and the Docker image — see [Assertions (`-ea`)](#assertions--ea) and [`docs/assertion-triage.md`](docs/assertion-triage.md) |
 | **Vendor jars** | `com.iai:cybele-api:1.0`, `com.iai:cybele-impl:1.0` in the local Maven repository — see [One-time setup](#one-time-setup-install-the-vendor-jars) |
+| **Scenario config** | `sim.*` system properties, defaults identical to the historical literals — see [Scenario configuration](#scenario-configuration-sim) and [`docs/scenario-config.md`](docs/scenario-config.md) |
 | **Tests** | none; verification is manual through the Swing GUI |
 
 ## Requirements
@@ -66,15 +67,54 @@ The simulation has **no stop condition** — it generates trains until the proce
 timeout 300 ./gradlew run --console=plain
 ```
 
+### Scenario configuration (`sim.*`)
+
+Every simulation parameter that used to be a hardcoded literal — arrival rate, station
+capacities, track delays, network topology, clock start and pace, the GUI's pace buttons — is
+read from a `sim.*` Java system property whose **default is that literal**. A run with nothing
+set behaves exactly as it did before. Full key table, rationale and evidence:
+[`docs/scenario-config.md`](docs/scenario-config.md).
+
+```bash
+./gradlew run -Dsim.arrival.lambdaMs=2000                     # one knob
+./gradlew run -Dsim.config=scenarios/short.properties         # a scenario file
+./gradlew run -Dsim.config=scenarios/short.properties -Dsim.clock.pace=1   # file + override
+```
+
+Precedence is `-D` > scenario file > built-in default; `./gradlew run` forwards `-Dsim.*` into
+the forked application JVM. Ready-made scenarios are in [`scenarios/`](scenarios).
+`build/install/opencybele/bin/opencybele` takes the same flags through `OPENCYBELE_OPTS`, and
+so does `docker compose up app`.
+
+The configuration is parsed and validated in `Main.main` **before the kernel starts**, so a bad
+value is an ordinary uncaught exception with **exit status 1** — the one failure mode in this
+codebase where the exit status can be trusted (contrast the assertion behaviour below). The
+resolved configuration is printed to **stderr** at startup, marking anything non-default;
+stdout stays byte-for-byte as it was, because that is where the trace a golden diffs lives.
+
+Two couplings are worth knowing about before changing anything:
+
+- **`LAMBDA` had two jobs** — the generator's mean inter-arrival time *and* the voting window
+  and penalty quantum of `Station.computeDifference`. They are now
+  `sim.arrival.lambdaMs` and `sim.station.voteWindowMs`, independent, both defaulting to 8500 ms.
+  Shortening a scenario no longer silently retunes the station scheduling policy — but changing
+  the window on purpose still does, so both belong in the [#24](https://github.com/bedaHovorka/OpenCybele1/issues/24)
+  manifest.
+- **The canvas states the topology a second time** and can only draw one straight main line plus
+  branch stubs. That drift is documented rather than fixed (the GUI is outside the behavioural
+  contract), but a configured topology the canvas cannot represent produces a loud stderr banner
+  at startup and a red mismatch list plus red `??` gaps on the canvas — never a plausible-looking
+  wrong picture.
+
 ### Assertions (`-ea`)
 
-`run` enables assertions (`-ea` in `applicationDefaultJvmArgs`). The 33 `assert` statements in `src/` are the codebase's only invariant checks, and they encode real preconditions — every path member having voted, a train arriving where it was routed, a path direction being resolvable. With assertions off, a violated invariant is silent corruption; with them on, it is a logged failure.
+`run` enables assertions (`-ea` in `applicationDefaultJvmArgs`). The 32 `assert` statements in `src/` are the codebase's only invariant checks, and they encode real preconditions — every path member having voted, a train arriving where it was routed, a path direction being resolvable. With assertions off, a violated invariant is silent corruption; with them on, it is a logged failure.
 
 Note how Cybele treats one. An exception thrown out of an agent event handler is caught by `com.iai.cybele.thmgmt.IAIAgentThread` — but its catch list is five named types, *not* `Throwable`. An `AssertionError` survives only because `Method.invoke` wraps it in an `InvocationTargetException`, which is on that list. It is then printed by `com.iai.cybele.exception.IAIExceptionHandler` **to `System.err`** (twice per failure), and the simulation continues. So a firing assertion does *not* abort the process or change the exit status.
 
 Three practical consequences, all measured: output diffing must **capture stderr** (nothing appears on stdout); the exit status is worthless as a pass/fail signal; and a throwable inside a timer handler such as `Generator.generateTrain` stops train generation **permanently and silently**, because the method re-arms its own timer as its last statement. Full mechanism, evidence and the rules a scenario runner must follow are in [`docs/assertion-triage.md`](docs/assertion-triage.md) § Result 3.
 
-Full triage of all 33 assertion sites — which fire, which are merely never reached, and how many times each is evaluated in a normal run — is in [`docs/assertion-triage.md`](docs/assertion-triage.md). Summary: **none fires**; 25 sites are exercised and hold, 8 are never reached (2 of those deliberately).
+Full triage of all 32 assertion sites — which fire, which are merely never reached, and how many times each is evaluated in a normal run — is in [`docs/assertion-triage.md`](docs/assertion-triage.md). Summary: **none fires**; 24 sites are exercised and hold, 8 are never reached (2 of those deliberately). The triage was recorded against 33 sites before [#18](https://github.com/bedaHovorka/OpenCybele1/issues/18) removed `RailwayCanvas`'s `assert road != null`; see that document's amendment, which also gives the corrected `grep` exclusion list — a naive `grep -c 'assert '` now yields 33, not 32.
 
 `applicationDefaultJvmArgs` is baked into the generated start script too (`build/install/opencybele/bin/opencybele`), so the Docker image runs with assertions on as well. That script appends `JAVA_OPTS` and `OPENCYBELE_OPTS` *after* `DEFAULT_JVM_OPTS`, so assertions can be turned off there without touching the build:
 
@@ -123,6 +163,9 @@ xhost -local:docker   # revoke access again once done
    The container defaults `DISPLAY` to `host.docker.internal:0`, routing X11 over TCP to VcXsrv on the Windows host.
 
 ## Documentation
+
+- [`docs/scenario-config.md`](docs/scenario-config.md) — the `sim.*` parameter surface, the `LAMBDA` split, the canvas drift, and the short-scenario evidence
+- [`docs/assertion-triage.md`](docs/assertion-triage.md) — all assertion sites, and what Cybele does when one fires
 
 `dokumentace.pdf` and `prezentace.pdf` (in Czech) are the original project documentation and presentation submitted for the course.
 

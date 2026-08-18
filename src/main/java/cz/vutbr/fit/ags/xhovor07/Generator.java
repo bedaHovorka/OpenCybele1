@@ -22,21 +22,24 @@ import cybele.kernel.Handler;
 
 /**
  * This is one activity of main agent.
- * Each LAMBDA seconds with exponencial distribution of probability generate new train
+ * Each {@code sim.arrival.lambdaMs} milliseconds with exponencial distribution of
+ * probability generate new train.
+ * <p>
+ * This used to be {@code public static final int LAMBDA = 8500}, read both here
+ * <em>and</em> by {@link Station#computeDifference(String, long)}. The two uses are now
+ * separate parameters — {@code sim.arrival.lambdaMs} and {@code sim.station.voteWindowMs} —
+ * so a scenario can shorten the arrival rate without moving the station scheduling
+ * policy under it. Both default to 8500. See {@code docs/scenario-config.md}.
  * 
  * @author Bedrich Hovorka
  */
 public class Generator implements Handler {
-    /**
-     * 
-     */
-    public static final int LAMBDA = 8500;
     private static final long serialVersionUID = 1L;
     
     // EXTENSION jak delat ruseni?
     private Map<String, String> openedChannels = Collections.synchronizedMap(new HashMap<String, String>());
-    private Serializable[][] hhh = new Serializable[][]{{"stA", "stB"}, {"stA", "stC"}, 
-	    {"stB", "stA"}, {"stB", "stC"}, {"stC", "stB"}, {"stC", "stA"}};
+    private final Serializable[][] hhh;
+    private final long lambda;
  
     private int index = 0;
     private static final Random random = new Random();
@@ -47,7 +50,10 @@ public class Generator implements Handler {
      */
     public Generator(RailwayMainAgent mainAgent) {
 	this.mainAgent = mainAgent;
-	Activity.setTimer(RailwayMainAgent.CLOCK_ID, 1000, this, "generateTrain");
+	final ScenarioConfig config = ScenarioConfig.get();
+	this.hhh = config.getTrainPairs();
+	this.lambda = config.getArrivalLambdaMs();
+	Activity.setTimer(RailwayMainAgent.CLOCK_ID, config.getArrivalFirstFireMs(), this, "generateTrain");
     }
     
     /**
@@ -62,11 +68,11 @@ public class Generator implements Handler {
 	openedChannels.put(train, channelTicket);
 	index++;
 	Activity.sendAll(Planning.PLAN_TRAIN, new Serializable[]{train, serializables[0], serializables[1]});
-	Activity.setTimer(RailwayMainAgent.CLOCK_ID, exp(LAMBDA), this, "generateTrain");
+	Activity.setTimer(RailwayMainAgent.CLOCK_ID, exp(lambda), this, "generateTrain");
     }
     
-    private long exp(double lambda) {
-        return Math.round(-lambda * Math.log(random.nextDouble()));
+    private long exp(double mean) {
+        return Math.round(-mean * Math.log(random.nextDouble()));
     }
 
     /**

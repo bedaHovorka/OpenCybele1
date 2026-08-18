@@ -316,3 +316,95 @@ must never be compared against a replay made without it.
 - Result 3's failure modes were produced by *synthetic* faults deliberately planted at
   three call sites. They characterise how the kernel reacts to a failing assertion; they
   are not evidence about any real invariant in this codebase.
+
+## Amendment — after #18 (scenario configuration)
+
+Everything above was measured against the tree at commit `efa7711`. Two things about it are
+now stale, and nothing else is.
+
+**1. Line numbers — including this amendment's own.**
+[#18](https://github.com/bedaHovorka/OpenCybele1/issues/18) externalised the hardcoded
+simulation parameters, which shifted lines in `Generator`, `Gui`, `RailwayCanvas`,
+`RailwayMainAgent`, `Main` and `Station`. The site tables above still name the pre-#18 lines;
+the *assertions* they name are unchanged and still identify their sites unambiguously by
+expression. Re-run the instrumentation pass before trusting the numbers.
+
+> This bit the amendment itself: its first version cited the removal comment at
+> `RailwayCanvas.java:121`, which is `g.translate(leftSpace, 250);` — the comment is at `:126`.
+> Since `:121` contains no `assert` at all, excluding it was a no-op and the document's own
+> instructions returned 33, not the 32 they were there to justify. Cite by **content** in this
+> document, not by line, and re-check anything numeric against the working tree before relying
+> on it.
+
+**2. One site was removed: `assert road != null` in `RailwayCanvas.paint`** — at `:101` in the
+pre-#18 tree this document measured, which is why the tables above list it there; it is gone
+from the current tree, where `:101` is unrelated code. 1 430 evaluations in run 6.
+
+It asserted that two stations drawn next to each other on the canvas have a track
+between them. That was a real invariant while the canvas and the network were both hardcoded
+constants; once `sim.topology` and `sim.gui.mainLine` are independently configurable it is a
+property of the configuration instead, and an `AssertionError` was the wrong response to it —
+it would have fired on the **AWT event dispatch thread**, which § "Not every assertion goes
+through Cybele at all" above identifies as the case with no Cybele banner and no useful
+framing. It is replaced by a red crossed `??` gap painted in place of the missing track, plus a
+mismatch banner on stderr at startup and on the canvas. See
+[`scenario-config.md`](scenario-config.md) § "The canvas topology duplication".
+
+**The count is therefore 32 assertion sites, not 33** — 24 exercised and holding, 8 never
+reached.
+
+### Re-deriving the count: the exclusion list is now TWO entries, not one
+
+The method above counts `assert` sites by grep, excluding one known Javadoc false positive.
+**That method no longer yields 32 on this tree — it yields 33, and the difference is a second
+false positive this very change introduced.** Anyone re-deriving the count with #14's stated
+recipe will "confirm" 33, conclude the amendment is wrong, and be wrong themselves. Measured on
+the post-#18 tree:
+
+```
+$ grep -rn 'assert ' src/ | wc -l
+34
+```
+
+Both of these must be excluded. **They are identified by content, not by line number** — line
+numbers in this document have already drifted once (see the warning above) and will drift again:
+
+| File | The text that matches, and is not a site | Why |
+|---|---|---|
+| `util/Util.java` | `* assert and cast routine` | Javadoc prose. Excluded in #14 already. |
+| `RailwayCanvas.java` | ``// No `assert road != null` any more: …`` | A **comment recording the removal below**. New in #18. |
+
+`34 − 2 = 32`. Copy-pasteable, and free of both line numbers and a manual exclusion list:
+
+```
+$ grep -rn 'assert ' src/ | grep -v 'assert and cast routine' | grep -v 'any more' | wc -l
+32
+```
+
+Better still, anchor on statement *position* rather than the bare word — this needs no exclusion
+list at all, and is the recommended replacement for #14's recipe:
+
+```
+$ grep -rnE '^\s*(\} else )?assert ' src/main/java --include=*.java | wc -l
+32
+```
+
+(The `} else assert false;` alternative is needed for the one site not at the start of its line,
+in `RailwayMainAgent.TableModel.getValueAt`.) A set-difference of the assert *expressions*
+between the pre- and post-#18 trees confirms exactly one removal and no additions.
+
+### The narrower assertion that was considered and rejected
+
+`assert road != null || !layoutWarnings.isEmpty();` would have kept the site, and with it this
+document's 33/25 baseline, at no runtime cost. It was rejected: it introduces a **top-level
+`||`**, which § "Instrumentation pass" above singles out as the one shape that silently breaks
+that instrumentation recipe (`hit() && a || b` regroups as `(hit() && a) || b`). Trading a
+one-line bookkeeping delta for a landmine in the tool that produced this document is a bad
+trade. The removal stands, and this section is the compensation.
+
+Nothing else moved: no assertion was added, weakened or strengthened, and the
+`-ea` decision, the Result 3 mechanism and every caveat above stand unchanged. The new
+`ScenarioConfig` deliberately uses **exceptions, not assertions**, for configuration validation,
+and raises them from `Main.main` before the kernel starts — precisely because Result 3 shows
+that an assertion inside an agent is swallowed. That path *does* change the exit status to 1,
+which makes it the one failure mode in this codebase a runner can trust the exit status for.

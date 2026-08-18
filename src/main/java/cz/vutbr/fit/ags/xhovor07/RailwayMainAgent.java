@@ -29,7 +29,6 @@ import cybele.kernel.Agent;
 import cybele.kernel.Cybele;
 import cybele.kernel.CybeleEvent;
 import cybele.kernel.Handler;
-import cz.vutbr.fit.ags.xhovor07.util.HashMapGraph;
 import cz.vutbr.fit.ags.xhovor07.util.UnorientedGraph;
 import cz.vutbr.fit.ags.xhovor07.util.Util;
 
@@ -58,12 +57,13 @@ public class RailwayMainAgent extends Observable implements Handler {
     public static final String PATH_FIND = "PATH_FIND.";
     private transient TableModel trainTableModel = new TableModel();
     private static final long serialVersionUID = 1L;
-    private UnorientedGraph<String, String> net = new HashMapGraph<String, String>();
+    private final ScenarioConfig config = ScenarioConfig.get();
+    private UnorientedGraph<String, String> net = config.buildNet();
     private Map<String, Station.Info> stationInfos = Collections.synchronizedMap(new HashMap<String, Station.Info>());
     private Map<String, RoadAgent.State> roadAgentStates = Collections.synchronizedMap(new HashMap<String, RoadAgent.State>());
     private Map<String, String> trainStates = Collections.synchronizedMap(new LinkedHashMap<String, String>());
-    private Map<String, Long> roadDelays = new HashMap<String, Long>();
-    private Map<String, Integer> stationCapacities = new HashMap<String, Integer>();
+    private Map<String, Long> roadDelays = new HashMap<String, Long>(config.getRoadDelaysSec());
+    private Map<String, Integer> stationCapacities = new HashMap<String, Integer>(config.getStationCapacities());
     static final String CHANNEL_TRAIN_STATE = "TRAIN.STATE.";
     /**
      * identification
@@ -76,39 +76,15 @@ public class RailwayMainAgent extends Observable implements Handler {
     @SuppressWarnings("boxing")
     public RailwayMainAgent() {
 	addObserver(trainTableModel);
-	//inicializace topologie site
-	net.put("stA", "stH", "tr1");
-	net.put("stH", "stG", "tr2");
-	net.put("stG", "stE", "tr3");
-	net.put("stE", "stD", "tr4");
-	net.put("stD", "stB", "tr5");
-	net.put("stF", "stE", "tr6");
-	net.put("stC", "stF", "tr7");
-	
-	//kapacity stanic
-	stationCapacities.put("stA", 6);
-	stationCapacities.put("stB", 5);
-	stationCapacities.put("stC", 2);
-	stationCapacities.put("stD", 2);
-	stationCapacities.put("stE", 5);
-	stationCapacities.put("stF", 2);
-	stationCapacities.put("stG", 3);
-	stationCapacities.put("stH", 2);
-	
-	//doby na tratich
-	roadDelays.put("tr1", 1L);
-	roadDelays.put("tr2", 1L);
-	roadDelays.put("tr3", 5L);
-	roadDelays.put("tr4", 2L);
-	roadDelays.put("tr5", 3L);
-	roadDelays.put("tr6", 4L);
-	roadDelays.put("tr7", 3L);
+	// Topologie site, kapacity stanic a doby na tratich pochazeji ze ScenarioConfig
+	// (sim.topology / sim.station.capacities / sim.road.delaysSec). Vychozi hodnoty
+	// jsou totozne s puvodnimi literaly - viz docs/scenario-config.md.
 	
 	// vytvoreni gui
 	final Gui gui = new Gui(this);
 	gui.setVisible(true);
 	
-	Cybele.createClock(CLOCK_ID, Cybele.HOST, 0, 1);
+	Cybele.createClock(CLOCK_ID, Cybele.HOST, config.getClockStartMs(), config.getClockPace());
 	Cybele.resumeClock(CLOCK_ID);
 	
 	Activity.openChannel(PATH_FIND, "pathFind", this);

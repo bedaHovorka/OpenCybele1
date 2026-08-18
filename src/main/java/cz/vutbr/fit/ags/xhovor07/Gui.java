@@ -15,6 +15,7 @@ import java.awt.HeadlessException;
 import java.awt.event.ActionEvent;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
+import java.util.Map.Entry;
 
 import javax.swing.AbstractAction;
 import javax.swing.JComponent;
@@ -73,14 +74,16 @@ public class Gui extends JFrame {
 	setSize(800, 650);
     }
 
+    @SuppressWarnings("boxing")
     private JComponent createBar() {
 	final JToolBar bar = new JToolBar();
 	bar.setFloatable(false);
 	bar.setPreferredSize(new Dimension(800, 30));
 //	bar.add(new PaceChangeAction("Very Fast", 40));
-	bar.add(new PaceChangeAction("Fast", 8));
-	bar.add(new PaceChangeAction("Normal", 1));
-	bar.add(new PaceChangeAction("Slow", 0.3));
+	// sim.gui.paces, default "Fast=8,Normal=1,Slow=0.3" - the original three buttons
+	for (Entry<String, Double> pace : ScenarioConfig.get().getGuiPaces().entrySet()) {
+	    bar.add(new PaceChangeAction(pace.getKey(), pace.getValue()));
+	}
 	return bar;
     }
     
