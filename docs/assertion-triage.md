@@ -322,14 +322,25 @@ must never be compared against a replay made without it.
 Everything above was measured against the tree at commit `efa7711`. Two things about it are
 now stale, and nothing else is.
 
-**1. Line numbers.** [#18](https://github.com/bedaHovorka/OpenCybele1/issues/18) externalised
-the hardcoded simulation parameters, which shifted lines in `Generator`, `Gui`,
-`RailwayCanvas`, `RailwayMainAgent`, `Main` and `Station`. The site tables above still name the
-pre-#18 lines; the *assertions* they name are unchanged and still identify their sites
-unambiguously by expression. Re-run the instrumentation pass before trusting the numbers.
+**1. Line numbers — including this amendment's own.**
+[#18](https://github.com/bedaHovorka/OpenCybele1/issues/18) externalised the hardcoded
+simulation parameters, which shifted lines in `Generator`, `Gui`, `RailwayCanvas`,
+`RailwayMainAgent`, `Main` and `Station`. The site tables above still name the pre-#18 lines;
+the *assertions* they name are unchanged and still identify their sites unambiguously by
+expression. Re-run the instrumentation pass before trusting the numbers.
 
-**2. One site was removed: `RailwayCanvas.java:101`, `assert road != null`** (1 430 evaluations
-in run 6). It asserted that two stations drawn next to each other on the canvas have a track
+> This bit the amendment itself: its first version cited the removal comment at
+> `RailwayCanvas.java:121`, which is `g.translate(leftSpace, 250);` — the comment is at `:126`.
+> Since `:121` contains no `assert` at all, excluding it was a no-op and the document's own
+> instructions returned 33, not the 32 they were there to justify. Cite by **content** in this
+> document, not by line, and re-check anything numeric against the working tree before relying
+> on it.
+
+**2. One site was removed: `assert road != null` in `RailwayCanvas.paint`** — at `:101` in the
+pre-#18 tree this document measured, which is why the tables above list it there; it is gone
+from the current tree, where `:101` is unrelated code. 1 430 evaluations in run 6.
+
+It asserted that two stations drawn next to each other on the canvas have a track
 between them. That was a real invariant while the canvas and the network were both hardcoded
 constants; once `sim.topology` and `sim.gui.mainLine` are independently configurable it is a
 property of the configuration instead, and an `AssertionError` was the wrong response to it —
@@ -355,25 +366,32 @@ $ grep -rn 'assert ' src/ | wc -l
 34
 ```
 
-Both of these must be excluded:
+Both of these must be excluded. **They are identified by content, not by line number** — line
+numbers in this document have already drifted once (see the warning above) and will drift again:
 
-| Hit | Why it is not a site |
-|---|---|
-| [`util/Util.java:49`](../src/main/java/cz/vutbr/fit/ags/xhovor07/util/Util.java#L49) — `* assert and cast routine` | Javadoc prose. Excluded in #14 already. |
-| [`RailwayCanvas.java:121`](../src/main/java/cz/vutbr/fit/ags/xhovor07/RailwayCanvas.java#L121) — ``// No `assert road != null` any more: …`` | A **comment recording the removal below**. New in #18. |
+| File | The text that matches, and is not a site | Why |
+|---|---|---|
+| `util/Util.java` | `* assert and cast routine` | Javadoc prose. Excluded in #14 already. |
+| `RailwayCanvas.java` | ``// No `assert road != null` any more: …`` | A **comment recording the removal below**. New in #18. |
 
-`34 − 2 = 32`. A grep that anchors on statement position rather than the bare word avoids both
-without a manual exclusion list, and is the recommended replacement:
+`34 − 2 = 32`. Copy-pasteable, and free of both line numbers and a manual exclusion list:
+
+```
+$ grep -rn 'assert ' src/ | grep -v 'assert and cast routine' | grep -v 'any more' | wc -l
+32
+```
+
+Better still, anchor on statement *position* rather than the bare word — this needs no exclusion
+list at all, and is the recommended replacement for #14's recipe:
 
 ```
 $ grep -rnE '^\s*(\} else )?assert ' src/main/java --include=*.java | wc -l
 32
 ```
 
-(The `} else assert false;` alternative is needed for
-[`RailwayMainAgent.java:256`](../src/main/java/cz/vutbr/fit/ags/xhovor07/RailwayMainAgent.java#L256),
-the one site not at the start of its line.) A set-difference of the assert *expressions* between
-the pre- and post-#18 trees confirms exactly one removal and no additions.
+(The `} else assert false;` alternative is needed for the one site not at the start of its line,
+in `RailwayMainAgent.TableModel.getValueAt`.) A set-difference of the assert *expressions*
+between the pre- and post-#18 trees confirms exactly one removal and no additions.
 
 ### The narrower assertion that was considered and rejected
 

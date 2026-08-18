@@ -97,9 +97,9 @@ uncaught exception with **exit status 1**:
 ```
 $ opencybele -Dsim.station.capacities=stA=6,stB=5,stC=2,stD=2,stE=5,stF=2,stG=3
 Exception in thread "main" java.lang.IllegalArgumentException: sim.station.capacities: no entry for station 'stH' declared in sim.topology
-	at cz.vutbr.fit.ags.xhovor07.ScenarioConfig.checkKeySet(ScenarioConfig.java:468)
+	at cz.vutbr.fit.ags.xhovor07.ScenarioConfig.checkKeySet(ScenarioConfig.java)
 	...
-	at cz.vutbr.fit.ags.xhovor07.Main.main(Main.java:31)
+	at cz.vutbr.fit.ags.xhovor07.Main.main(Main.java)
 $ echo $?
 1
 ```
@@ -172,10 +172,12 @@ This is the part of #18 that is not plumbing.
 
 `Generator.LAMBDA = 8500` had **two unrelated jobs**:
 
-1. the mean of the generator's `Exp(1/λ)` inter-arrival draw (`Generator.java:65`);
+1. the mean of the generator's `Exp(1/λ)` inter-arrival draw (`Generator.generateTrain`'s
+   closing `setTimer(..., exp(LAMBDA), ...)`);
 2. the **voting window and penalty quantum** of `Station.computeDifference` — it counted trains
    already planned within `time ± LAMBDA`, penalised a full station by `±LAMBDA/3`, and an
-   un-full one by `plannedTrains*LAMBDA/6` (`Station.java:131-139`).
+   un-full one by `plannedTrains*LAMBDA/6` (all three in `Station.computeDifference`, at
+   `Station.java:131-139` **in the pre-#18 tree**).
 
 Job 2 is scheduling *policy*. So the obvious way to make a scenario finish in seconds —
 shorten `LAMBDA` — silently rewrote the very behaviour a golden is supposed to pin. A harness
@@ -256,8 +258,9 @@ below it keeps running the full eight-station network. Mismatches are **warnings
 refusing to start because the drawing is imperfect would block exactly the scenario work this
 change exists to enable.
 
-One assertion was removed to make this possible: `RailwayCanvas.java:101`'s
-`assert road != null`, which `assertion-triage.md` records as exercised 1 430 times in run 6.
+One assertion was removed to make this possible: `assert road != null` in `RailwayCanvas.paint`
+(`:101` in the pre-#18 tree), which `assertion-triage.md` records as exercised 1 430 times in
+run 6.
 With a hardcoded layout that was a genuine program invariant; with a configurable one it is a
 property of the configuration, and it would have fired on the AWT event dispatch thread where —
 per the same triage — it is swallowed with a different banner and no Cybele framing. The red
@@ -298,7 +301,7 @@ the unseeded RNG; the 9-departure outlier is discussed under
 [Unexplained outlier](#unexplained-outlier-a-slipping-simulated-clock).
 
 > **"Trains generated" is deliberately absent from that table.** Only *departures* are printed —
-> `Planning.java:125` fires when a train is released, and `Train.start` prints immediately after.
+> `Planning.placeTrainIntoFirstStation` fires when a train is released, and `Train.start` prints immediately after.
 > Nothing prints at generation. An earlier revision quoted a "trains generated" column derived
 > from the highest `vlN` index seen on stdout, which is not a count of generated trains at all,
 > only of the highest-numbered train that **departed**. That mistake produced a wrong conclusion
@@ -396,7 +399,7 @@ it should be re-examined once #15 and #17 make runs deterministic and bounded.
   `sim.topology` preserves the historical insertion order so nothing moves, but the underlying
   order-dependence is untouched.
 - **`cybelle/ICS.prop` is not touched** ([#16](https://github.com/bedaHovorka/OpenCybele1/issues/16)).
-- **The `RoadAgent` travel jitter** (`500 * nextGaussian()`, `RoadAgent.java:101`) is *not*
+- **The `RoadAgent` travel jitter** (`500 * nextGaussian()` in `RoadAgent.travelStart`) is *not*
   externalised. It is an RNG draw, not a timer period, and it belongs with #15.
 
 ## Evidence that the defaults are unchanged
@@ -412,7 +415,7 @@ Method: `git archive` of the pre-change tree into a scratch directory, built and
 same JDK 21 / Gradle 8.10.2 / `-ea --patch-module` as this branch, `timeout 150` on the
 `installDist` start script with stdout and stderr captured separately; then the same for this
 branch with no `sim.*` property set. Six runs each side. The measured stream is
-`Planning.java:125`'s `<train> in <station> at <t>` println.
+`Planning.placeTrainIntoFirstStation`'s `<train> in <station> at <t>` println.
 
 | | runs | departures, mean (sd) | pooled inter-departure gap | origin distribution |
 |---|---|---|---|---|
