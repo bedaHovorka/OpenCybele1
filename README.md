@@ -108,13 +108,13 @@ Two couplings are worth knowing about before changing anything:
 
 ### Assertions (`-ea`)
 
-`run` enables assertions (`-ea` in `applicationDefaultJvmArgs`). The 33 `assert` statements in `src/` are the codebase's only invariant checks, and they encode real preconditions — every path member having voted, a train arriving where it was routed, a path direction being resolvable. With assertions off, a violated invariant is silent corruption; with them on, it is a logged failure.
+`run` enables assertions (`-ea` in `applicationDefaultJvmArgs`). The 32 `assert` statements in `src/` are the codebase's only invariant checks, and they encode real preconditions — every path member having voted, a train arriving where it was routed, a path direction being resolvable. With assertions off, a violated invariant is silent corruption; with them on, it is a logged failure.
 
 Note how Cybele treats one. An exception thrown out of an agent event handler is caught by `com.iai.cybele.thmgmt.IAIAgentThread` — but its catch list is five named types, *not* `Throwable`. An `AssertionError` survives only because `Method.invoke` wraps it in an `InvocationTargetException`, which is on that list. It is then printed by `com.iai.cybele.exception.IAIExceptionHandler` **to `System.err`** (twice per failure), and the simulation continues. So a firing assertion does *not* abort the process or change the exit status.
 
 Three practical consequences, all measured: output diffing must **capture stderr** (nothing appears on stdout); the exit status is worthless as a pass/fail signal; and a throwable inside a timer handler such as `Generator.generateTrain` stops train generation **permanently and silently**, because the method re-arms its own timer as its last statement. Full mechanism, evidence and the rules a scenario runner must follow are in [`docs/assertion-triage.md`](docs/assertion-triage.md) § Result 3.
 
-Full triage of all 33 assertion sites — which fire, which are merely never reached, and how many times each is evaluated in a normal run — is in [`docs/assertion-triage.md`](docs/assertion-triage.md). Summary: **none fires**; 25 sites are exercised and hold, 8 are never reached (2 of those deliberately).
+Full triage of all 32 assertion sites — which fire, which are merely never reached, and how many times each is evaluated in a normal run — is in [`docs/assertion-triage.md`](docs/assertion-triage.md). Summary: **none fires**; 24 sites are exercised and hold, 8 are never reached (2 of those deliberately). The triage was recorded against 33 sites before [#18](https://github.com/bedaHovorka/OpenCybele1/issues/18) removed `RailwayCanvas`'s `assert road != null`; see that document's amendment, which also gives the corrected `grep` exclusion list — a naive `grep -c 'assert '` now yields 33, not 32.
 
 `applicationDefaultJvmArgs` is baked into the generated start script too (`build/install/opencybele/bin/opencybele`), so the Docker image runs with assertions on as well. That script appends `JAVA_OPTS` and `OPENCYBELE_OPTS` *after* `DEFAULT_JVM_OPTS`, so assertions can be turned off there without touching the build:
 

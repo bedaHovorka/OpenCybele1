@@ -340,8 +340,49 @@ mismatch banner on stderr at startup and on the canvas. See
 [`scenario-config.md`](scenario-config.md) § "The canvas topology duplication".
 
 **The count is therefore 32 assertion sites, not 33** — 24 exercised and holding, 8 never
-reached. The one Javadoc false positive at `util/Util.java:49` is still excluded from the
-count, as before.
+reached.
+
+### Re-deriving the count: the exclusion list is now TWO entries, not one
+
+The method above counts `assert` sites by grep, excluding one known Javadoc false positive.
+**That method no longer yields 32 on this tree — it yields 33, and the difference is a second
+false positive this very change introduced.** Anyone re-deriving the count with #14's stated
+recipe will "confirm" 33, conclude the amendment is wrong, and be wrong themselves. Measured on
+the post-#18 tree:
+
+```
+$ grep -rn 'assert ' src/ | wc -l
+34
+```
+
+Both of these must be excluded:
+
+| Hit | Why it is not a site |
+|---|---|
+| [`util/Util.java:49`](../src/main/java/cz/vutbr/fit/ags/xhovor07/util/Util.java#L49) — `* assert and cast routine` | Javadoc prose. Excluded in #14 already. |
+| [`RailwayCanvas.java:121`](../src/main/java/cz/vutbr/fit/ags/xhovor07/RailwayCanvas.java#L121) — ``// No `assert road != null` any more: …`` | A **comment recording the removal below**. New in #18. |
+
+`34 − 2 = 32`. A grep that anchors on statement position rather than the bare word avoids both
+without a manual exclusion list, and is the recommended replacement:
+
+```
+$ grep -rnE '^\s*(\} else )?assert ' src/main/java --include=*.java | wc -l
+32
+```
+
+(The `} else assert false;` alternative is needed for
+[`RailwayMainAgent.java:256`](../src/main/java/cz/vutbr/fit/ags/xhovor07/RailwayMainAgent.java#L256),
+the one site not at the start of its line.) A set-difference of the assert *expressions* between
+the pre- and post-#18 trees confirms exactly one removal and no additions.
+
+### The narrower assertion that was considered and rejected
+
+`assert road != null || !layoutWarnings.isEmpty();` would have kept the site, and with it this
+document's 33/25 baseline, at no runtime cost. It was rejected: it introduces a **top-level
+`||`**, which § "Instrumentation pass" above singles out as the one shape that silently breaks
+that instrumentation recipe (`hit() && a || b` regroups as `(hit() && a) || b`). Trading a
+one-line bookkeeping delta for a landmine in the tool that produced this document is a bad
+trade. The removal stands, and this section is the compensation.
 
 Nothing else moved: no assertion was added, weakened or strengthened, and the
 `-ea` decision, the Result 3 mechanism and every caveat above stand unchanged. The new

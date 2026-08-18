@@ -11,7 +11,7 @@ java {
 application {
     mainClass.set("cz.vutbr.fit.ags.xhovor07.Main")
     applicationName = "opencybele"
-    // -ea turns the codebase's 33 `assert` statements into real invariant
+    // -ea turns the codebase's 32 `assert` statements into real invariant
     // checks. See README.md ("Assertions (-ea)") — enabling this is itself a
     // behaviour change, and the on/off decision for golden recording is
     // deliberately NOT made here (see issues #22/#24).

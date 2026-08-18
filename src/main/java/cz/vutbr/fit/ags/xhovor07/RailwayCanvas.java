@@ -21,6 +21,7 @@ import java.awt.geom.AffineTransform;
 import java.util.List;
 import java.util.Observable;
 import java.util.Observer;
+import java.util.Set;
 
 import javax.swing.JComponent;
 import javax.swing.Scrollable;
@@ -51,6 +52,8 @@ public class RailwayCanvas extends JComponent implements Scrollable, MouseMotion
     private final String[] mainRoads;
     private final List<ScenarioConfig.Branch> branches;
     private final List<String> layoutWarnings;
+    private final Set<String> knownStations;
+    private final Set<String> knownRoads;
     private final int leftSpace = 50;
     private final int roadWidth = 75;
     private final int stationWidth = 45;
@@ -67,6 +70,8 @@ public class RailwayCanvas extends JComponent implements Scrollable, MouseMotion
 	this.mainRoads = mainLine.toArray(new String[mainLine.size()]);
 	this.branches = config.getGuiBranches();
 	this.layoutWarnings = config.getGuiLayoutWarnings();
+	this.knownStations = config.getStationNames();
+	this.knownRoads = config.getRoadNames();
 	this.mainAgent = mainAgent;
 	mainAgent.addObserver(this);
 	setPreferredSize(new Dimension(780, 380));
@@ -115,7 +120,7 @@ public class RailwayCanvas extends JComponent implements Scrollable, MouseMotion
 	final AffineTransform inicitialPos = g.getTransform();
 	g.translate(leftSpace, 250);
 	for (int i = 0; i < mainRoads.length; i++) {
-	    paintStation(mainRoads[i], g);
+	    paintStationOrGap(mainRoads[i], baseColor, g);
 	    g.translate(stationWidth, 0);
 	    if (i < mainRoads.length-1) {
 		// No `assert road != null` any more: with a configurable topology the
@@ -123,7 +128,7 @@ public class RailwayCanvas extends JComponent implements Scrollable, MouseMotion
 		// of the configuration, not an invariant of the program. Draw the gap.
 		final String road = mainAgent.getNet().get(mainRoads[i], mainRoads[i+1]);
 		if (road == null) {
-		    paintMissingRoad(baseColor, g);
+		    paintMissingRoad(null, baseColor, g);
 		} else {
 		    paintRoad(road, g);
 		}
@@ -136,7 +141,7 @@ public class RailwayCanvas extends JComponent implements Scrollable, MouseMotion
 	for (int n = 1; n <= branches.size(); n++) {
 	    final ScenarioConfig.Branch branch = branches.get(n-1);
 	    paintSecondRoad(leftSpace+n*(roadWidth+stationWidth), 50+(n-1)*100,
-		    branch.getStation(), branch.getRoad(), inicitialPos, g);
+		    branch.getStation(), branch.getRoad(), inicitialPos, baseColor, g);
 	}
     }
     
@@ -152,20 +157,43 @@ public class RailwayCanvas extends JComponent implements Scrollable, MouseMotion
 	g.setColor(baseColor);
     }
     
-    private void paintMissingRoad(Color baseColor, Graphics2D g) {
+    private void paintMissingRoad(String name, Color baseColor, Graphics2D g) {
 	g.setColor(Color.RED);
 	g.drawString("??", roadWidth/2-7, stationWidth/2-3);
 	g.drawLine(0, stationWidth/2-6, roadWidth, stationWidth/2+6);
 	g.drawLine(0, stationWidth/2+6, roadWidth, stationWidth/2-6);
+	if (name != null) g.drawString(name, roadWidth/2-7, stationWidth/2+20);
 	g.setColor(baseColor);
     }
     
-    private void paintSecondRoad(int x, int y, String stationName, String roadName, AffineTransform inicitialPos, Graphics2D g) {
+    /**
+     * A station the layout names but {@code sim.topology} does not declare would otherwise
+     * paint as an ordinary circle reading "N/A" — indistinguishable from a real station whose
+     * first state message has not arrived yet. Cross it out in red instead.
+     */
+    private void paintStationOrGap(String name, Color baseColor, Graphics2D g) {
+	if (knownStations.contains(name)) {
+	    paintStation(name, g);
+	    return;
+	}
+	g.setColor(Color.RED);
+	g.drawArc(0, 0, stationWidth, stationWidth, 0, 360);
+	g.drawLine(0, 0, stationWidth, stationWidth);
+	g.drawLine(0, stationWidth, stationWidth, 0);
+	g.drawString(name, stationWidth/2-7, stationWidth+13);
+	g.setColor(baseColor);
+    }
+    
+    private void paintSecondRoad(int x, int y, String stationName, String roadName, AffineTransform inicitialPos, Color baseColor, Graphics2D g) {
 	g.setTransform(inicitialPos);
 	g.translate(x, y);
-	paintStation(stationName, g);
+	paintStationOrGap(stationName, baseColor, g);
 	g.rotate(Math.PI/4, 0, 100);
-	paintRoad(roadName, g);
+	if (knownRoads.contains(roadName)) {
+	    paintRoad(roadName, g);
+	} else {
+	    paintMissingRoad(roadName, baseColor, g);
+	}
     }
 
 //    private void cancelClip(Graphics2D g) {

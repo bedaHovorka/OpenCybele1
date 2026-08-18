@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -25,7 +26,6 @@ import java.util.Map.Entry;
 
 import cz.vutbr.fit.ags.xhovor07.util.HashMapGraph;
 import cz.vutbr.fit.ags.xhovor07.util.UnorientedGraph;
-import cz.vutbr.fit.ags.xhovor07.util.Util;
 
 /**
  * All simulation parameters that used to be hardcoded literals, in one place.
@@ -50,9 +50,27 @@ import cz.vutbr.fit.ags.xhovor07.util.Util;
  * properties, so any later {@link #get()} — on any thread, under any class
  * loader — resolves the identical values without re-reading the file.
  *
+ * <p>
+ * <b>Serializable, on purpose.</b> {@code cybele.kernel.Handler} extends
+ * {@link Serializable}, and {@link RailwayMainAgent} — which holds one of these — is
+ * itself handed to {@code Agent.createActivity} as a {@code Serializable[]} payload.
+ * The baseline agent graph was serializable end to end; a non-serializable field here
+ * would have quietly broken that. It is masked today by {@code Local;NoSerialization}
+ * in {@code cybele.prop}, but this branch exists to prepare a JADE port where agents
+ * really are serialized, and #16 may revisit that setting.
+ * <p>
+ * Serializable rather than {@code transient} plus a {@link #get()} at each use site,
+ * because {@code transient} would make a deserialized agent silently re-resolve its
+ * configuration from the <em>receiving</em> JVM's system properties — which, in the
+ * remote case this would exist to support, are not set at all, so it would fall back to
+ * the historical defaults without a word. Carrying the resolved values along with the
+ * agent is the behaviour that cannot produce a golden recorded under a configuration
+ * nobody chose.
+ *
  * @author Bedrich Hovorka
  */
-public final class ScenarioConfig {
+public final class ScenarioConfig implements Serializable {
+    private static final long serialVersionUID = 1L;
 
     /** Property naming a {@code .properties} file to pre-fill the {@code sim.*} keys from. */
     public static final String KEY_CONFIG_FILE = "sim.config";
@@ -127,7 +145,8 @@ public final class ScenarioConfig {
     private static volatile ScenarioConfig instance;
 
     /** One {@code stX-stY:trZ} entry of {@link #KEY_TOPOLOGY}, in declaration order. */
-    public static final class Edge {
+    public static final class Edge implements Serializable {
+        private static final long serialVersionUID = 1L;
         private final String left;
         private final String right;
         private final String road;
@@ -147,7 +166,8 @@ public final class ScenarioConfig {
     }
 
     /** One {@code stX:trZ} entry of {@link #KEY_GUI_BRANCHES}. */
-    public static final class Branch {
+    public static final class Branch implements Serializable {
+        private static final long serialVersionUID = 1L;
         private final String station;
         private final String road;
 
@@ -167,6 +187,8 @@ public final class ScenarioConfig {
     private final Serializable[][] trainPairs;
     private final long stationVoteWindowMs;
     private final List<Edge> topology;
+    private final Set<String> stationNames;
+    private final Set<String> roadNames;
     private final Map<String, Integer> stationCapacities;
     private final Map<String, Long> roadDelaysSec;
     private final long clockStartMs;
@@ -192,6 +214,8 @@ public final class ScenarioConfig {
             roads.add(e.getRoad());
         }
 
+        stationNames = Collections.unmodifiableSet(stations);
+        roadNames = Collections.unmodifiableSet(roads);
         stationCapacities = parseIntMap(p, KEY_STATION_CAPACITIES, stations, "station");
         roadDelaysSec = parseLongMap(p, KEY_ROAD_DELAYS, roads, "track");
         trainPairs = parsePairs(p, stations);
@@ -229,6 +253,12 @@ public final class ScenarioConfig {
             }
             for (Object k : file.keySet()) {
                 final String key = (String) k;
+                if (KEY_CONFIG_FILE.equals(key)) {
+                    throw new IllegalArgumentException(path + ": " + KEY_CONFIG_FILE
+                            + " is a recognised key but cannot be set from inside a scenario file"
+                            + " (a file cannot name the file it is being read from). Pass it as -D"
+                            + KEY_CONFIG_FILE + "=<path>.");
+                }
                 if (!key.startsWith("sim.")) {
                     throw new IllegalArgumentException(path + ": unknown key '" + key
                             + "' (every scenario key starts with 'sim.')");
@@ -239,6 +269,7 @@ public final class ScenarioConfig {
                 }
             }
         }
+        checkNoUnknownSystemProperties();
 
         final Properties resolved = new Properties();
         for (String[] kd : KEYS_AND_DEFAULTS) {
@@ -282,6 +313,28 @@ public final class ScenarioConfig {
             }
         }
         return local;
+    }
+
+    /**
+     * A mistyped {@code -Dsim.*} flag must not be silently ignored.
+     * <p>
+     * The scenario-file path was guarded from the start, but {@code -D} was not — and
+     * {@code -D} is the path the parity harness ([#12]/[#13]) drives through
+     * {@code ProcessBuilder}, and the path every example in the documentation uses. An
+     * ignored typo there produces a golden recorded under a configuration nobody
+     * intended, while the run looks perfectly clean: the banner prints the default and
+     * nothing complains. Same rule as for files, then — an unrecognised {@code sim.*}
+     * key is an error.
+     */
+    private static void checkNoUnknownSystemProperties() {
+        for (Object k : System.getProperties().keySet()) {
+            if (!(k instanceof String)) continue;
+            final String key = (String) k;
+            if (!key.startsWith("sim.")) continue;
+            if (KEY_CONFIG_FILE.equals(key) || isKnownKey(key)) continue;
+            throw new IllegalArgumentException("unknown system property '-D" + key
+                    + "'. Known keys: " + knownKeys() + ", " + KEY_CONFIG_FILE);
+        }
     }
 
     private static boolean isKnownKey(String key) {
@@ -585,17 +638,55 @@ public final class ScenarioConfig {
      * Every configured origin/destination pair must actually be routable, otherwise
      * {@code Planning.planTrain} would fail deep inside an agent where the failure is
      * swallowed. Checked here, on the main thread, where it is loud.
+     * <p>
+     * <b>Deliberately a local BFS rather than {@code Util.path}.</b> {@code Util}'s DFS
+     * forbids only the edge it just came down, not the nodes it has already visited, so
+     * on a graph with a cycle it never terminates when the target is unreachable — it
+     * dies with a {@code StackOverflowError} instead of naming the offending pair. The
+     * historical topology is a tree, so that never mattered; {@code sim.topology} now
+     * accepts cycles (only self-loops, duplicate track names and duplicate edges are
+     * rejected), so a scenario author can reach it. {@code Util} itself is left exactly
+     * as it is: it is legacy behaviour under golden, and this check has no business
+     * changing it.
      */
     private void checkReachability() {
-        final UnorientedGraph<String, String> net = buildNet();
+        final Map<String, Set<String>> adjacency = new LinkedHashMap<String, Set<String>>();
+        for (Edge e : topology) {
+            neighbours(adjacency, e.getLeft()).add(e.getRight());
+            neighbours(adjacency, e.getRight()).add(e.getLeft());
+        }
         for (Serializable[] pair : trainPairs) {
             final String from = (String) pair[0];
             final String to = (String) pair[1];
-            if (Util.path(net, from, to) == null) {
+            if (!reachable(adjacency, from, to)) {
                 throw new IllegalArgumentException(KEY_ARRIVAL_PAIRS + ": no path from " + from
                         + " to " + to + " in " + KEY_TOPOLOGY);
             }
         }
+    }
+
+    private static Set<String> neighbours(Map<String, Set<String>> adjacency, String node) {
+        Set<String> out = adjacency.get(node);
+        if (out == null) {
+            out = new LinkedHashSet<String>();
+            adjacency.put(node, out);
+        }
+        return out;
+    }
+
+    private static boolean reachable(Map<String, Set<String>> adjacency, String from, String to) {
+        final Set<String> seen = new LinkedHashSet<String>();
+        final LinkedList<String> frontier = new LinkedList<String>();
+        seen.add(from);
+        frontier.add(from);
+        while (!frontier.isEmpty()) {
+            final String node = frontier.removeFirst();
+            if (node.equals(to)) return true;
+            for (String next : neighbours(adjacency, node)) {
+                if (seen.add(next)) frontier.addLast(next);
+            }
+        }
+        return false;
     }
 
     /**
@@ -628,6 +719,10 @@ public final class ScenarioConfig {
     public long getStationVoteWindowMs() { return stationVoteWindowMs; }
     /** @return network edges in declaration order */
     public List<Edge> getTopology() { return topology; }
+    /** @return every station named by {@link #KEY_TOPOLOGY}, in declaration order */
+    public Set<String> getStationNames() { return stationNames; }
+    /** @return every track named by {@link #KEY_TOPOLOGY}, in declaration order */
+    public Set<String> getRoadNames() { return roadNames; }
     /** @return capacity per station */
     public Map<String, Integer> getStationCapacities() { return stationCapacities; }
     /** @return travel time per track, in seconds */

@@ -27,8 +27,16 @@ work. A `java.util.Properties` file may pre-fill them:
 ./gradlew run -Dsim.arrival.lambdaMs=2000
 
 # a file plus an override; the -D wins
-./gradlew run -Dsim.config=scenarios/short.properties -Dsim.clock.pace=1
+./gradlew run -Dsim.config=scenarios/short.properties -Dsim.station.voteWindowMs=8500
 ```
+
+(That last override is also the difference between `short.properties` and
+`short-arrivals-only.properties`. Overriding `sim.clock.pace` back down to 1 works the same way,
+but it costs you most of the run: pace is what buys simulated seconds per wall second, so a 15 s
+`short.properties` run at pace 1 covers ~15 s of simulated time instead of ~115 s and produces a
+handful of departures rather than 24–30. The per-simulated-second rate is unchanged — see
+[Is `sim.clock.pace` behaviour-neutral?](#is-simclockpace-behaviour-neutral) — there is simply
+much less simulated time in the run.)
 
 Precedence is `-D` > scenario file > built-in default. No YAML, no dependency: the file is
 read by `java.util.Properties.load`.
@@ -37,6 +45,18 @@ read by `java.util.Properties.load`.
 JVM (`build.gradle.kts`). Without that forwarding the property would land on the Gradle
 daemon and the simulation would silently run with defaults — a failure mode worth knowing
 about, because it looks exactly like "the config did nothing".
+
+Two build-side notes that belong with it:
+
+- The forwarding block reads `System.getProperties()` at **configuration** time. Gradle's
+  configuration cache is not enabled in this project, but if it ever is, `--configuration-cache`
+  could serve a stale set of forwarded properties. Use the `installDist` start script with
+  `OPENCYBELE_OPTS` if that ever matters — it reads the environment at launch.
+- `build.gradle.kts` now pins `options.encoding = "UTF-8"` on all `JavaCompile` tasks. This is a
+  build-behaviour change, listed here because it was not requested by #18: previously the source
+  encoding was inherited from the Gradle daemon's platform default. JDK 18+ already defaults to
+  UTF-8, so nothing changes on this machine — but a branch whose purpose is reproducibility
+  should not have a build that depends on the ambient locale.
 
 | Key | Default | What it replaced |
 |---|---|---|
@@ -88,10 +108,45 @@ Checked: numeric ranges; that capacities and delays name exactly the stations an
 `sim.topology` (a typo is an error, not a silently ignored entry); that the topology is a
 simple graph with unique track names; that every `sim.arrival.pairs` endpoint is a real station
 and is actually **routable** — otherwise `Planning.planTrain` would fail deep inside an agent,
-where it is invisible; and that the file contains no unknown keys.
+where it is invisible; and that **neither the scenario file nor the `-D` flags carry an
+unrecognised `sim.*` key**.
+
+That last one covers `-D` as well as files, which it did not in the first revision of this
+change. A mistyped `-Dsim.arrival.lambdams=500` was silently ignored: the banner printed the
+default, the run proceeded, nothing complained — the exact "it looks like the config did
+nothing" failure this document warns about two paragraphs above. `-D` is the path #12/#13's
+`ProcessBuilder` harness will drive and the path every example here uses, so an ignored typo
+there means a golden recorded under a configuration nobody chose, from a run that looks clean.
+It now exits 1 and names the offending flag.
+
+`sim.config` set *inside* a scenario file gets its own message rather than "unknown key" — it is
+a recognised key that simply cannot be set from the file it names.
+
+The reachability check uses a **local BFS over the parsed topology**, not `Util.path`. `Util`'s
+DFS forbids only the edge it just came down rather than the nodes it has visited, so on a graph
+with a cycle it never terminates when the target is unreachable — it dies with a
+`StackOverflowError` instead of naming the pair. The historical topology is a tree, so that
+never mattered; `sim.topology` now accepts cycles, so a scenario author can reach it.
+`util/Util.java` is left exactly as it is: it is legacy behaviour under golden, and a
+configuration check has no business changing it.
 
 `load()` then republishes every resolved value into the system properties, so a later
 `ScenarioConfig.get()` on any thread resolves the identical values without re-reading the file.
+
+`ScenarioConfig` (and its nested `Edge`/`Branch`) is **`Serializable`**. `cybele.kernel.Handler`
+extends `Serializable`, and `RailwayMainAgent` — which holds a `ScenarioConfig` — is itself
+handed to `Agent.createActivity` as a `Serializable[]` payload, so the baseline agent graph was
+serializable end to end. A plain object field here would have quietly broken that. It is masked
+today by `Local;NoSerialization` in `cybele.prop`, but this branch exists to prepare a JADE port
+where agents really are serialized, and #16 may revisit that setting.
+
+Serializable rather than `transient` plus a `get()` at each use site, deliberately: `transient`
+would make a deserialized agent silently re-resolve its configuration from the *receiving* JVM's
+system properties, which in the remote case are not set at all — so it would fall back to the
+historical defaults without a word. Carrying the resolved values with the agent is the behaviour
+that cannot produce a golden recorded under a configuration nobody chose. Verified by
+round-tripping a `Serializable[]{config, branches, stationNames}` through
+`ObjectOutputStream`/`ObjectInputStream` and comparing every accessor.
 
 ### The startup banner
 
@@ -129,9 +184,22 @@ against a policy that never ran in the interactive demo.
 
 **Decision: split (option (a) in the issue).** `sim.arrival.lambdaMs` and
 `sim.station.voteWindowMs` are independent, and **both default to 8500**, so with no
-configuration the arithmetic is identical — `voteWindow` is now a `long` where `LAMBDA` was an
-`int`, and every expression involved (`±w/3`, `plannedTrains*w/6`, `time ± w`) was already
-evaluated in `long` context at the same magnitudes, so no value changes.
+configuration every value is identical. `voteWindow` is a `long` where `LAMBDA` was an `int`,
+which is worth being precise about because two of the three expressions were already in `long`
+context and **one was not**:
+
+| Expression | Before | After | Identical? |
+|---|---|---|---|
+| `time ± w` | `long ± int`, widened | `long ± long` | always — verified over 5 M sampled values |
+| `±w/3` | `int` division, then widened on return | `long` division | always: `-8500/3 = -2833` and `8500/3 = 2833` in both |
+| `plannedTrains*w/6` | **`int*int/int`**, widened only on the return | `int*long/long` | for all `plannedTrains ≤ 252 645` |
+
+The third one is the one an earlier revision of this document got wrong by claiming everything
+was already `long`. It was not: `plannedTrains * 8500` overflowed `int` at
+`plannedTrains ≥ 252 646`. A station would need a quarter of a million trains in its timetable
+inside one voting window to reach that, so it is unreachable here — but the correct statement is
+that the widening is a **latent overflow fix**, identical below that bound rather than identical
+by construction. Verified by bytecode-level diff of `Station.computeDifference`.
 
 Why split rather than pin-and-document:
 
@@ -167,8 +235,11 @@ being simulated. So:
   anything drawn twice, anything named that does not exist.
 - `Main` prints every mismatch to stderr at startup, under a `!!! GUI TOPOLOGY MISMATCH !!!`
   banner, and says the simulation is unaffected.
-- `RailwayCanvas` paints the same list on the canvas in red, and draws a main-line pair with no
-  track between it as a red crossed `??` gap rather than an innocuous blank.
+- `RailwayCanvas` paints the same list on the canvas in red; draws a main-line pair with no
+  track between it as a red crossed `??` gap rather than an innocuous blank; and crosses out in
+  red any station or track the layout names that `sim.topology` does not declare. That last case
+  previously drew an ordinary circle reading `N/A`, which is indistinguishable from a real
+  station whose first state message has not arrived yet.
 
 Concretely, `-Dsim.gui.mainLine=stA,stG,stE,stD,stB` against the default topology gives:
 
@@ -197,11 +268,11 @@ drops from 33 assertion sites to 32; see the amendment at the end of that docume
 
 Two levers, and they are not the same lever:
 
-- **`sim.clock.pace`** compresses *wall-clock* time and changes no simulated-time parameter at
-  all. `-Dsim.clock.pace=8` gave **28 departures in 30 s of wall clock, covering 233 s of
-  simulated time**, against 21 departures in 200 s of wall clock for the untouched default.
-  Same schedule, ~8× the rate. The catch: the original documentation reports the message-loss
-  defect ([#22](https://github.com/bedaHovorka/OpenCybele1/issues/22)) is worst in "Fast" mode.
+- **`sim.clock.pace`** compresses *wall-clock* time. It sets no simulated-time parameter, and
+  measurement did not detect it changing simulated-time throughput either — but see
+  [Is `sim.clock.pace` behaviour-neutral?](#is-simclockpace-behaviour-neutral) below before
+  varying it between a recording and a replay. **Treat it as behaviourally significant and
+  record it in the manifest.**
 - **`sim.arrival.lambdaMs`** (and, if you say so, `sim.station.voteWindowMs`) compresses
   *simulated* time and does change what is simulated.
 
@@ -213,24 +284,105 @@ OPENCYBELE_OPTS=-Dsim.config=scenarios/short.properties \
   timeout 15 build/install/opencybele/bin/opencybele
 ```
 
-| Run | Wall clock | Simulated | Departures | Trains generated |
-|---|---|---|---|---|
-| default (no config) | 200 s | 196 s | 21 | 21 |
-| default (no config) | 90 s | 81 s | 10 | 10 |
-| `short.properties` | **15 s** | 114 s | **27** | ~253 |
-| `short.properties` | 15 s (repeat) | — | 24 | ~195 |
-| `short.properties` | 30 s | 227 s | 51 | ~390 |
+| Run | Wall clock | Simulated | Departures |
+|---|---|---|---|
+| default (no config) | 150 s | — | 18.5 mean over 6 runs (sd 2.95) |
+| `short.properties` | **15 s** | ~115 s | **24–30**, one outlier at 9 |
+| `short.properties` | 30 s | 227 s | 51 |
 
-**More departures in 15 seconds than the default produced in 200** — roughly 17× the throughput
-per wall-clock second. Run-to-run spread (24 vs 27 over the same 15 s) is the unseeded RNG;
-see [What this does not do](#what-this-does-not-do).
+**More departures in 15 seconds than the default produced in 150** — a measured **13.0×** the
+throughput per wall-clock second at 15 s, and **14.4×** at 30 s, against the best available
+estimate of the default rate. (An earlier revision said "~17×"; that was computed against a
+single lucky default run rather than the 6-run mean, and was optimistic.) The 24–30 spread is
+the unseeded RNG; the 9-departure outlier is discussed under
+[Unexplained outlier](#unexplained-outlier-a-slipping-simulated-clock).
+
+> **"Trains generated" is deliberately absent from that table.** Only *departures* are printed —
+> `Planning.java:125` fires when a train is released, and `Train.start` prints immediately after.
+> Nothing prints at generation. An earlier revision quoted a "trains generated" column derived
+> from the highest `vlN` index seen on stdout, which is not a count of generated trains at all,
+> only of the highest-numbered train that **departed**. That mistake produced a wrong conclusion
+> about pace (see [Is `sim.clock.pace` behaviour-neutral?](#is-simclockpace-behaviour-neutral)).
+> Generation count is not observable from the trace; if a scenario needs it, that is a probe-agent
+> job for 1-PRE.2, not something to infer from indices.
 
 `scenarios/short-arrivals-only.properties` is the control: pace 8, λ 500, window left at its
-8500 ms default. Measured against `short.properties` over 30 s: 45 departures versus 50, out of
-~470 trains generated in both. At this arrival rate the throughput ceiling turns out to be the
-`Planning`/kernel round-trip rather than the voting window — what the window moves is the
-*shape* of the schedule, which is precisely what a golden pins. That the two files differ at
-all, and that the difference can be stated, is the payoff of the split.
+8500 ms default. The LAMBDA split was verified real by 2×2 isolation of the two levers: the λ
+lever moves mean departures 28.7 → 46.7 with the window untouched, and the window lever moves
+46.7 → 54.7 at λ = 500. Both levers do something, and they do different things — which is the
+whole point of separating them.
+
+### The throughput ceiling is not the voting window
+
+At λ = 500 ms the arrival rate demands **2.00 departures per simulated second**. Measured, over
+a controlled simulated window (first 50 s of simulated time, so the two are compared over the
+same span):
+
+| | departures/simulated second | vs demanded |
+|---|---|---|
+| λ = 500, pace 1 | 0.250 | 12 % |
+| λ = 500, pace 8 | 0.240 | 12 % |
+
+So ~88 % of the demanded arrivals queue rather than depart, **at both paces**. The ceiling is
+the `Planning`/kernel round-trip — `Planning.planTrain` blocks on a `CountDownLatch` for a full
+voting round per train — not the voting window and not the pace. This is worth knowing before
+designing a scenario: below roughly 0.25 departures per simulated second the arrival rate is the
+binding constraint; above it, the kernel is, and raising λ further buys nothing but backlog.
+
+### Is `sim.clock.pace` behaviour-neutral?
+
+**Not established either way. Treat it as behaviourally significant.**
+
+An earlier revision of this document claimed pace changes "no simulated-time parameter at all …
+same schedule, ~8× the rate", and review challenged that with a single-run pair: 21 departures
+over 196 s of simulated time at pace 1 (0.107/simulated second) against 28 over 233 s at pace 8
+(0.120/simulated second), i.e. 12 % *more* per simulated second. That would mean pace changes
+what is simulated, which would be a serious problem for #24.
+
+It was measured properly — three runs per pace, defaults, counting departures within the **same**
+simulated window (the first 110 s, the longest span every run covers):
+
+| | departures in first 110 s of simulated time | mean (sd) |
+|---|---|---|
+| pace 1 | 14, 13, 16 | 14.33 (1.53) |
+| pace 8 | 14, 11, 15 | 13.33 (2.08) |
+
+**Welch t = 0.671, df 3.7 — indistinguishable.** The measured difference has the *opposite sign*
+to the one review reported, and is well inside run-to-run noise: three pace-8 runs of the
+identical configuration produced 105, 105 and 122 departures, a 16 % spread on their own. A
+single run per side cannot resolve a 12 % effect against that.
+
+Two traps produced the original disagreement, and both are worth naming because they will bite
+again:
+
+1. **Rates computed over windows of different simulated length are not comparable.** A short run
+   is nearly all startup transient — the network is empty, so early trains depart without
+   contention — and reads high. A pace-1 run bounded by wall clock covers ~8× less simulated
+   time than a pace-8 one, so it is systematically more transient-inflated. Compare counts within
+   a fixed simulated window, not rates over whatever each run happened to reach.
+2. **"Trains generated" is not observable from stdout** — see the note under the scenario table.
+
+So there is no measured evidence that pace perturbs simulated-time throughput. **That is not the
+same as evidence that it does not**, and pace stays flagged for the manifest, for three reasons
+that stand independently of the above: the original project documentation reports the
+message-loss defect ([#22](https://github.com/bedaHovorka/OpenCybele1/issues/22)) is worst in
+"Fast" mode; pace changes the wall-clock timing of everything *outside* the simulated clock
+(Swing repaints, real thread scheduling, GC), which is where a message-loss defect would live;
+and the outlier below is unexplained. #24 should record `sim.clock.pace` and refuse to compare a
+recording against a replay made at a different pace.
+
+### Unexplained outlier: a slipping simulated clock
+
+One 15-second short-scenario run produced **9 departures where siblings produced 24–30, and its
+simulated clock reached only 41 s where siblings reached ~115 s** — at pace 8, with clean stderr
+and no `AssertionError`. A pace of 8 over 15 s of wall clock should yield ~120 s of simulated
+time; 41 s means the simulated clock advanced at ~2.7×, not 8×.
+
+This is recorded here rather than left in a PR comment because it is the kind of thing that will
+otherwise be rediscovered as "flaky test" by #12/#13. It is **not** evidence for a pace mechanism
+— that hypothesis is tested and unsupported above — but it is an unexplained departure from the
+configured clock rate, it is the failure mode most likely to make a golden comparison flake, and
+it should be re-examined once #15 and #17 make runs deterministic and bounded.
 
 ## What this does not do
 
@@ -249,27 +401,48 @@ all, and that the difference can be stated, is the payoff of the split.
 
 ## Evidence that the defaults are unchanged
 
-**Exact comparison is impossible today.** The RNG is unseeded (#15), so two runs of the *same*
-binary differ. The claim below is therefore distributional, and it is stated as such.
+**Exact comparison is impossible today.** The RNG is unseeded
+([#15](https://github.com/bedaHovorka/OpenCybele1/issues/15)), so two runs of the *same* binary
+differ — measured run-to-run spread on departure count is nearly 2× (13–25 over 150 s). Any
+claim resting on a single run per side is therefore worthless, including the 21-vs-21 pair this
+document reported in its first revision: that was luck, not evidence. The claim below is
+distributional, over six runs per side, and is stated as such.
 
-Method: `git archive HEAD` of the pre-change tree into a scratch directory, built and run with
-the same JDK 21 / Gradle 8.10.2 / `-ea --patch-module` as this branch, `timeout 200` on the
+Method: `git archive` of the pre-change tree into a scratch directory, built and run with the
+same JDK 21 / Gradle 8.10.2 / `-ea --patch-module` as this branch, `timeout 150` on the
 `installDist` start script with stdout and stderr captured separately; then the same for this
-branch with no `sim.*` property set. The measured stream is `Planning.java:125`'s
-`<train> in <station> at <t>` println.
+branch with no `sim.*` property set. Six runs each side. The measured stream is
+`Planning.java:125`'s `<train> in <station> at <t>` println.
 
-| | departures | first (ms) | last (ms) | mean gap (ms) | destinations |
-|---|---|---|---|---|---|
-| before (`HEAD`) | 21 | 1018 | 198 207 | 9 859 | stA 5, stB 8, stC 8 |
-| after (defaults) | 21 | 1024 | 196 373 | 9 767 | stA 8, stB 6, stC 7 |
+| | runs | departures, mean (sd) | pooled inter-departure gap | origin distribution |
+|---|---|---|---|---|
+| before (baseline) | 6 | 18.33 (4.46) | — | — |
+| after (defaults) | 6 | 18.50 (2.95) | 0.8 % apart | χ² = 4.06, df 2 (crit 5.99) |
 
-Same count over the same wall clock; mean inter-departure gap within 1 % of each other and of
-the configured λ = 8500 ms (the excess over λ is the voting delay); first departure at
-`firstFireMs` + first vote in both; destinations spread over the same three stations with the
-sampling spread expected of 21 unseeded draws from six pairs. Both streams show the same
-out-of-order artefact (`vl7` before `vl6`; `vl20` before `vl19`) — the `PriorityBlockingQueue`
-in `Planning`, unchanged. Neither run produced an `AssertionError` or any stderr output beyond
-the new banner. The GUI was screenshotted in both and draws the identical layout.
+Welch **t = −0.076** on departure count: the two sets are statistically indistinguishable. The
+pooled inter-departure gap is 0.8 % apart and tracks the configured λ = 8500 ms plus voting
+delay. The origin distribution over `stA`/`stB`/`stC` gives χ² = 4.06 against a critical 5.99 at
+df 2 — no detectable shift.
 
-Once #15 lands, this table should be replaced by a byte-exact diff at a fixed seed. Until then
+> The `<station>` in that line is `TrainPlan.station`, which `Planning.planTrain` fills from the
+> train's **`from`** — it is the **origin**, not the destination. An earlier revision of this
+> document and of the PR body called it the destination. The conclusions are unaffected (it is
+> the same field on both sides of the comparison), but the label was wrong.
+
+Stronger, non-statistical checks were run independently and all came back exact:
+
+- A JVM-level harness comparing the baseline's literal `net.put` sequence against
+  `ScenarioConfig.buildNet()` found `nodeSet` order, `values` order, `allNodesWithEdge` order,
+  capacity and delay key order, the pairs array, the GUI paces, the main line and both branch
+  coordinates (170/50 and 290/150) **all equal**.
+- A bytecode-level diff of `Station.computeDifference` confirms `-8500/3 = -2833` and
+  `8500/3 = 2833` both ways, and `time ± w` identical over 5 M sampled values.
+- stdout differs at exactly one line between the two trees; the 23-line Cybele startup banner is
+  byte-identical and the divergence is the unseeded RNG. Baseline stderr is 0 bytes; this
+  branch's stderr is the configuration banner and nothing else.
+- 28/28 validation-failure cases exit 1 with `grep -c "Cybele version" stdout` = 0, proving the
+  failure precedes `Cybele.startUp()`.
+- The GUI was screenshotted on both trees and draws the identical layout.
+
+Once #15 lands, this section should be replaced by a byte-exact diff at a fixed seed. Until then
 it is sampled evidence, not proof — the same caveat `assertion-triage.md` carries.
