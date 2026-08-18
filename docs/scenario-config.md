@@ -130,6 +130,16 @@ never mattered; `sim.topology` now accepts cycles, so a scenario author can reac
 `util/Util.java` is left exactly as it is: it is legacy behaviour under golden, and a
 configuration check has no business changing it.
 
+**A cycle also changes what "the route" means, not just reachability.** On a tree there is exactly
+one simple path between any two stations, so `Util.path`'s DFS has no choice to make. Add a cycle
+and there are several, and the DFS returns the **first one it finds, not the shortest** — decided by
+the order it walks the graph in. Since [#19](https://github.com/bedaHovorka/OpenCybele1/issues/19)
+that order is deterministic and no longer JDK-dependent, but it is still an implementation detail,
+not a documented routing policy: two sensible-looking cyclic topologies can route trains very
+differently, and the chosen route is what `Planning` collects votes on. If you declare a cycle,
+verify the routes you actually get rather than assuming shortest-path. See
+[`iteration-order.md`](iteration-order.md) ("Claim 4 is *two* hash sites, not one").
+
 `load()` then republishes every resolved value into the system properties, so a later
 `ScenarioConfig.get()` on any thread resolves the identical values without re-reading the file.
 
@@ -395,9 +405,12 @@ it should be re-examined once #15 and #17 make runs deterministic and bounded.
 - **No seeded RNG.** [#15](https://github.com/bedaHovorka/OpenCybele1/issues/15) owns it.
   Consequently the parity evidence for "defaults are unchanged" below is distributional, not
   byte-exact.
-- **No HashMap iteration-order fix** ([#19](https://github.com/bedaHovorka/OpenCybele1/issues/19)).
-  `sim.topology` preserves the historical insertion order so nothing moves, but the underlying
-  order-dependence is untouched.
+- ~~**No HashMap iteration-order fix**~~ — **landed since**, in
+  [#19](https://github.com/bedaHovorka/OpenCybele1/issues/19); see
+  [`iteration-order.md`](iteration-order.md). `sim.topology`'s declaration order is now what breaks
+  ties in the graph's iteration order, so the "preserves the historical insertion order" property
+  this file relies on became load-bearing rather than incidental. The orders themselves did not
+  move.
 - **`cybelle/ICS.prop` is not touched** ([#16](https://github.com/bedaHovorka/OpenCybele1/issues/16)).
 - **The `RoadAgent` travel jitter** (`500 * nextGaussian()` in `RoadAgent.travelStart`) is *not*
   externalised. It is an RNG draw, not a timer period, and it belongs with #15.
