@@ -41,6 +41,19 @@ public class Main {
 	    System.err.println("---   -D" + ScenarioConfig.KEY_RANDOM_MASTER_SEED + "="
 		    + config.getMasterSeed());
 	}
+	// The per-agent stream seeds, so a run's stderr is a complete manifest of its
+	// randomness (#24). Derived here from the configuration alone: RailwayMainAgent's
+	// Generator activity takes two streams, and every configured track takes one.
+	System.err.println("--- random streams ---");
+	System.err.println("  " + SimRandom.GENERATOR_OD_STREAM + " = "
+		+ SimRandom.seedFor(config.getMasterSeed(), SimRandom.GENERATOR_OD_STREAM));
+	System.err.println("  " + SimRandom.GENERATOR_INTERARRIVAL_STREAM + " = "
+		+ SimRandom.seedFor(config.getMasterSeed(), SimRandom.GENERATOR_INTERARRIVAL_STREAM));
+	for (String road : config.getRoadNames()) {
+	    System.err.println("  " + road + " = " + SimRandom.seedFor(config.getMasterSeed(), road));
+	}
+	System.err.println("----------------------");
+
 	final List<String> warnings = config.getGuiLayoutWarnings();
 	if (!warnings.isEmpty()) {
 	    // Not fatal: the canvas is outside the behavioural contract. But it must

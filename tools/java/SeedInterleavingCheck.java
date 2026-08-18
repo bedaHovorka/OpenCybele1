@@ -8,6 +8,9 @@
  * xhovor07@stud.fit.vutbr.cz
  */
 
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.PrintStream;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -38,7 +41,8 @@ import cz.vutbr.fit.ags.xhovor07.SimRandom;
  *     <em>per-trial</em> scheduling seed, so no two trials interleave the same way.</li>
  * <li><b>handoff</b> — each stream's draws are split into chunks executed by a
  *     <em>different thread each time</em> (serially, as Cybele dispatches one activity's
- *     events, INVENTORY SEM-04). This is the one that matters for the real system: agent
+ *     events, docs/INVENTORY.md SEM-04, on the jade-develop branch). This is the one that
+ *     matters for the real system: agent
  *     handlers do not run on a pinned thread, so a stream must not depend on thread
  *     identity — only on how many draws that agent has taken.</li>
  * <li><b>oversubscribed</b> — jitter plus CPU-burner threads, so the scheduler preempts
@@ -64,10 +68,22 @@ import cz.vutbr.fit.ags.xhovor07.SimRandom;
  */
 public final class SeedInterleavingCheck {
 
-    /** Streams exercised: the generator activity plus the seven road agents. */
-    private static final String[] STREAMS = {
-	SimRandom.GENERATOR_STREAM, "tr1", "tr2", "tr3", "tr4", "tr5", "tr6", "tr7",
-    };
+    /**
+     * Streams exercised: the generator activity's two, plus one per configured track.
+     * Taken from {@link ScenarioConfig} rather than hardcoded, so a run under a
+     * {@code -Dsim.topology} with different track names checks <em>those</em> streams
+     * instead of silently passing on tracks that no longer exist.
+     */
+    private static String[] streams() {
+	final ScenarioConfig config = ScenarioConfig.get();
+	final List<String> names = new ArrayList<String>();
+	names.add(SimRandom.GENERATOR_OD_STREAM);
+	names.add(SimRandom.GENERATOR_INTERARRIVAL_STREAM);
+	names.addAll(config.getRoadNames());
+	return names.toArray(new String[names.size()]);
+    }
+
+    private static String[] STREAMS = null;
 
     private static final long DEFAULT_MASTER_SEED = 20080415L;
     private static final int DEFAULT_TRIALS = 24;
@@ -87,6 +103,14 @@ public final class SeedInterleavingCheck {
      * @throws Exception if a worker thread cannot be joined
      */
     public static void main(String[] args) throws Exception {
+	// Optional: mirror everything printed into a file, so Gradle can treat this task as
+	// having an output and skip it when nothing changed (it used to re-run on every
+	// incremental build).
+	final String report = System.getProperty("rngproof.out");
+	if (report != null && report.length() > 0) {
+	    final PrintStream file = new PrintStream(new FileOutputStream(report), true, "UTF-8");
+	    System.setOut(new PrintStream(new TeeStream(System.out, file), true, "UTF-8"));
+	}
 	final String mode = (args.length > 0) ? args[0] : "check";
 	if ("plan".equals(mode)) {
 	    plan(Long.parseLong(args[1]), Integer.parseInt(args[2]));
@@ -96,6 +120,7 @@ public final class SeedInterleavingCheck {
 	    System.err.println("usage: SeedInterleavingCheck [check [seed] [trials] [draws] | plan <seed> <trains>]");
 	    System.exit(2);
 	}
+	STREAMS = streams();
 	final long masterSeed = (args.length > 1) ? Long.parseLong(args[1]) : DEFAULT_MASTER_SEED;
 	final int trials = (args.length > 2) ? Integer.parseInt(args[2]) : DEFAULT_TRIALS;
 	final int draws = (args.length > 3) ? Integer.parseInt(args[3]) : DEFAULT_DRAWS;
@@ -123,7 +148,12 @@ public final class SeedInterleavingCheck {
 		fail("seedFor(" + STREAMS[i] + ") is not a pure function");
 	    }
 	    for (int j = 0; j < i; j++) {
-		if (seeds[i] == seeds[j]) fail("seed collision: " + STREAMS[i] + " and " + STREAMS[j]);
+		// java.util.Random scrambles the seed into a 48-bit state, so two seeds
+		// agreeing in their low 48 bits produce the same stream even if the longs
+		// differ. Compare what the generator keeps, not what was handed to it.
+		if (((seeds[i] ^ seeds[j]) & ((1L << 48) - 1)) == 0) {
+		    fail("48-bit seed collision: " + STREAMS[i] + " and " + STREAMS[j]);
+		}
 	    }
 	    System.out.println(String.format("    %-9s seed = %20d  0x%016x", STREAMS[i], seeds[i], seeds[i]));
 	}
@@ -185,15 +215,18 @@ public final class SeedInterleavingCheck {
     // ------------------------------------------------------------------ drawing
 
     /**
-     * One stream's sequence. The three draw kinds are exactly the ones the simulation
-     * takes: {@code nextInt(6)} (Generator:66, six origin/destination pairs),
-     * {@code nextDouble()} (Generator:75, the exponential) and {@code nextGaussian()}
-     * (RoadAgent:101, the travel jitter).
+     * One stream's sequence. Each step takes all three draw kinds the simulation uses
+     * anywhere — {@code nextInt(pairs)} (`Generator.generateTrain`, the origin/destination
+     * choice), {@code nextDouble()} (`Generator.exp`, the exponential) and
+     * {@code nextGaussian()} (`RoadAgent.travelStart`, the travel jitter). <b>No single
+     * real stream takes all three</b>; mixing them here is a harness choice, so that one
+     * sequence exercises {@code nextGaussian}'s cached second value and the 48-bit state
+     * advance of each kind. It tests the generator, not a replay of the application.
      */
     private static long[] drawAll(Random r, int draws) {
 	final long[] out = new long[draws * LONGS_PER_DRAW];
 	for (int i = 0; i < draws; i++) {
-	    out[i * LONGS_PER_DRAW] = r.nextInt(6);
+	    out[i * LONGS_PER_DRAW] = r.nextInt(pairBound());
 	    out[i * LONGS_PER_DRAW + 1] = Double.doubleToLongBits(r.nextDouble());
 	    out[i * LONGS_PER_DRAW + 2] = Double.doubleToLongBits(r.nextGaussian());
 	}
@@ -203,11 +236,16 @@ public final class SeedInterleavingCheck {
     /** As {@link #drawAll} but for one chunk of a stream, so several threads can share it. */
     private static void drawRange(Random r, long[] out, int from, int to, Random jitter) {
 	for (int i = from; i < to; i++) {
-	    out[i * LONGS_PER_DRAW] = r.nextInt(6);
+	    out[i * LONGS_PER_DRAW] = r.nextInt(pairBound());
 	    out[i * LONGS_PER_DRAW + 1] = Double.doubleToLongBits(r.nextDouble());
 	    out[i * LONGS_PER_DRAW + 2] = Double.doubleToLongBits(r.nextGaussian());
 	    if (jitter != null) stumble(jitter);
 	}
+    }
+
+    /** The bound the application actually uses at its {@code nextInt} call site. */
+    private static int pairBound() {
+	return ScenarioConfig.get().getTrainPairs().length;
     }
 
     /** Perturb this thread's progress so no two trials line up the same way. */
@@ -337,6 +375,29 @@ public final class SeedInterleavingCheck {
 	}
     }
 
+    /** Console and file at once, so a captured report is exactly what was printed. */
+    private static final class TeeStream extends java.io.OutputStream {
+	private final java.io.OutputStream a;
+	private final java.io.OutputStream b;
+
+	TeeStream(java.io.OutputStream a, java.io.OutputStream b) {
+	    this.a = a;
+	    this.b = b;
+	}
+
+	@Override
+	public void write(int value) throws IOException {
+	    a.write(value);
+	    b.write(value);
+	}
+
+	@Override
+	public void flush() throws IOException {
+	    a.flush();
+	    b.flush();
+	}
+    }
+
     private static final class Burner implements Runnable {
 	private final AtomicBoolean live;
 
@@ -405,15 +466,19 @@ public final class SeedInterleavingCheck {
 	final ScenarioConfig config = ScenarioConfig.load();
 	final Serializable[][] pairs = config.getTrainPairs();
 	final long lambda = config.getArrivalLambdaMs();
-	final Random random = SimRandom.forAgent(masterSeed, SimRandom.GENERATOR_STREAM);
+	final Random od = SimRandom.forAgent(masterSeed, SimRandom.GENERATOR_OD_STREAM);
+	final Random interarrival = SimRandom.forAgent(masterSeed, SimRandom.GENERATOR_INTERARRIVAL_STREAM);
 	long clock = config.getArrivalFirstFireMs();
 	System.out.println("# generator plan for masterSeed=" + masterSeed
 		+ " lambdaMs=" + lambda + " firstFireMs=" + config.getArrivalFirstFireMs());
-	System.out.println("# train from to generatedAtMs");
+	System.out.println("# nominalAtMs is firstFireMs + the sum of the drawn gaps: what the");
+	System.out.println("# generator ASKS the timer for, not when a train is observed to depart");
+	System.out.println("# (the run's own delivery latency and the voting delay both move that).");
+	System.out.println("# train from to nominalAtMs");
 	for (int i = 0; i < trains; i++) {
-	    final Serializable[] pair = pairs[random.nextInt(pairs.length)];
+	    final Serializable[] pair = pairs[od.nextInt(pairs.length)];
 	    System.out.println("vl" + i + " " + pair[0] + " " + pair[1] + " " + clock);
-	    clock += Math.round(-((double) lambda) * Math.log(random.nextDouble()));
+	    clock += Math.round(-((double) lambda) * Math.log(interarrival.nextDouble()));
 	}
     }
 }

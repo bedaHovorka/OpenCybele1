@@ -72,7 +72,7 @@ Two build-side notes that belong with it:
 | `sim.gui.paces` | `Fast=8,Normal=1,Slow=0.3` | `Gui.createBar` toolbar buttons |
 | `sim.gui.mainLine` | `stA,stH,stG,stE,stD,stB` | `RailwayCanvas.mainRoads` |
 | `sim.gui.branches` | `stC:tr7,stF:tr6` | `RailwayCanvas.paint` branch coordinates |
-| `sim.random.masterSeed` | `random` | `Generator`'s `new Random()` — see [`docs/seeded-rng.md`](seeded-rng.md) |
+| `sim.random.masterSeed` | `random` | the single unseeded `new Random()` in `Generator`, which fed the generator's two draws **and** every `RoadAgent`'s travel jitter — now one seeded stream per agent, see [`docs/seeded-rng.md`](seeded-rng.md) |
 
 `sim.config` names the optional file. Ready-made scenarios live in [`scenarios/`](../scenarios):
 `default.properties` (every default written out, meant to be copied),
@@ -96,7 +96,7 @@ and a simulation that limps on. Discovered in `main`, the same bad value is an o
 uncaught exception with **exit status 1**:
 
 ```
-$ opencybele -Dsim.station.capacities=stA=6,stB=5,stC=2,stD=2,stE=5,stF=2,stG=3
+$ OPENCYBELE_OPTS=-Dsim.station.capacities=stA=6,stB=5,stC=2,stD=2,stE=5,stF=2,stG=3 opencybele
 Exception in thread "main" java.lang.IllegalArgumentException: sim.station.capacities: no entry for station 'stH' declared in sim.topology
 	at cz.vutbr.fit.ags.xhovor07.ScenarioConfig.checkKeySet(ScenarioConfig.java)
 	...
@@ -104,6 +104,16 @@ Exception in thread "main" java.lang.IllegalArgumentException: sim.station.capac
 $ echo $?
 1
 ```
+
+> **`OPENCYBELE_OPTS`, not a bare flag — this one is silent.** The example above deliberately
+> uses the environment variable. Gradle's generated start script routes everything in `$@` to
+> the **program's** arguments, so `opencybele -Dsim.foo=bar` does not set a system property: it
+> hands `Main` an argument it ignores. Nothing warns. With a validation key the run simply
+> proceeds on the default; with `-Dsim.random.masterSeed` it proceeds on a **freshly drawn
+> seed** while appearing to have accepted the pin, which is precisely how a golden gets
+> recorded under a seed nobody chose ([#24](https://github.com/bedaHovorka/OpenCybele1/issues/24)).
+> `./gradlew run -Dsim.…` is fine — the build file forwards those explicitly.
+
 
 Checked: numeric ranges; that capacities and delays name exactly the stations and tracks in
 `sim.topology` (a typo is an error, not a silently ignored entry); that the topology is a

@@ -120,9 +120,18 @@ with the command to replay it:
 
 ```bash
 ./gradlew run -Dsim.random.masterSeed=20080415        # pin the streams
-./gradlew rngProof                                    # the determinism check (also runs in `build`)
+./gradlew rngProof                                    # determinism check, ~1 s (also runs in `build`)
+./gradlew rngProof -Prng.full                         # the exhaustive sweep, ~15 s
 ./gradlew rngProof --args="plan 20080415 20"          # predict that seed's trains, offline
 ```
+
+Startup also prints a **stream table** to stderr — every stream name with the seed it will
+run on — so a captured run carries a complete manifest of its randomness.
+
+> `build/install/opencybele/bin/opencybele -Dsim.random.masterSeed=…` **does not work and does
+> not complain**: the generated start script passes `$@` to the program, not to the JVM, so the
+> run draws a fresh seed while looking pinned. Use `OPENCYBELE_OPTS=-Dsim.random.masterSeed=…`.
+> `./gradlew run -D…` is fine.
 
 Same seed ⇒ same per-agent draw sequences, on any thread interleaving and any JVM. It does
 **not** yet mean the same stdout: departure timestamps come from a real-time clock, and event

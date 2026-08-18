@@ -29,15 +29,31 @@ import java.util.Random;
  * <ul>
  * <li>a stream's sequence depends only on <em>how many</em> draws that agent has taken,
  *     never on what any other agent did, or when, or on which thread;</li>
- * <li>agents are seeded independently of their creation order — which matters here,
- *     because creation order is itself hash-order-dependent (INVENTORY NDT-01/NDT-02) and
- *     is <em>not</em> fixed on this branch;</li>
+ * <li>agents are seeded independently of the order they are created in — which matters
+ *     here, and keeps mattering after #19. #19 fixed the order in which
+ *     {@link RailwayMainAgent} <em>issues</em> the create requests (it was hash-order
+ *     dependent: {@code docs/INVENTORY.md} NDT-01/NDT-02, on the {@code jade-develop}
+ *     branch). It did not, and could not, fix the order in which the resulting agent
+ *     <em>constructors</em> run: {@code Cybele.createAgent} is asynchronous, and the
+ *     initialisation order was measured as six different orders in six runs of one build.
+ *     Seeding the n-th agent created would therefore have produced nondeterministic
+ *     streams even with #19 in place;</li>
  * <li>adding, removing or renaming an agent perturbs only that agent's stream.</li>
  * </ul>
  * <p>
+ * The seed itself comes from {@link ScenarioConfig#getMasterSeed()}, which is resolved
+ * once per JVM. Be aware that {@code ScenarioConfig} is the one configuration value that
+ * is <b>not idempotent</b>: with {@code sim.random.masterSeed} unset, each construction
+ * draws a <em>different</em> seed. {@link Main} calls {@code load()} on the main thread
+ * before the kernel starts and republishes the resolved number into the system properties,
+ * so every later {@code get()} in that JVM agrees with it. A second JVM — a remote Cybele
+ * container today, a second JADE container in phase 2 — resolves its own configuration and
+ * would therefore draw its <em>own</em> seed unless the resolved value is passed to it.
+ * Any port that distributes agents must transport the master seed explicitly.
+ * <p>
  * Note what this does <b>not</b> buy. Per-stream determinism is a property of each
  * sequence, not of the run: the simulation still reads a real-time clock, still dispatches
- * on a shared thread pool and still loses messages (INVENTORY DEF-02), so the same master
+ * on a shared thread pool and still loses messages ({@code docs/INVENTORY.md} DEF-02, on {@code jade-develop}), so the same master
  * seed does not yet make the whole run byte-identical. See {@code docs/seeded-rng.md} for
  * exactly what is and is not reproducible today, and what blocks the rest (#16, #19).
  * <p>
@@ -53,11 +69,25 @@ import java.util.Random;
 public final class SimRandom {
 
     /**
-     * Stream name of the {@link Generator} activity — the origin/destination choice and
-     * the exponential inter-arrival time. Not an agent name: the generator is an activity
-     * of {@link RailwayMainAgent}, and it is the only draw-taking activity that agent has.
+     * Stream name of the {@link Generator} activity's origin/destination choice.
+     * <p>
+     * Not an agent name: the generator is an activity of {@link RailwayMainAgent}, and it
+     * is the only draw-taking activity that agent has. Its two draws get <b>one stream
+     * each</b>, rather than sharing one. They could have shared: both are taken inside a
+     * single {@code generateTrain} invocation, in an order fixed by the source text, so a
+     * shared stream would also have been interleaving-independent. The reason not to is
+     * alignment stability — with a shared stream, adding or reordering a draw in that
+     * handler shifts every subsequent value of <em>both</em> series, which surfaces later
+     * as a golden diff that reads like a behaviour regression. Separate streams cost
+     * nothing and make each series depend only on its own call site.
      */
-    public static final String GENERATOR_STREAM = "Generator";
+    public static final String GENERATOR_OD_STREAM = "Generator.od";
+
+    /**
+     * Stream name of the {@link Generator} activity's exponential inter-arrival time.
+     * See {@link #GENERATOR_OD_STREAM} for why the two draws do not share a stream.
+     */
+    public static final String GENERATOR_INTERARRIVAL_STREAM = "Generator.interarrival";
 
     /** FNV-1a 64-bit offset basis. */
     private static final long FNV_OFFSET_BASIS = 0xCBF29CE484222325L;

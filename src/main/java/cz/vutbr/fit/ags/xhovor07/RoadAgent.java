@@ -90,6 +90,11 @@ public class RoadAgent extends StaticRailwayObject {
 	this.leftStation = leftStation;
 	this.rightStation = rightStation;
 	this.state = State.FREE;
+	// Ties this agent's stream key to the configured track names, which is what Main's
+	// stderr stream table is computed from: a road agent named anything else would make
+	// that table a fiction.
+	assert ScenarioConfig.get().getRoadNames().contains(getName())
+		: "road agent name '" + getName() + "' is not a configured track";
 	this.random = SimRandom.forAgent(getName());
 	Activity.openChannel(TRAVEL_START+getName(), "travelStart", this);
 	sendState();
@@ -106,6 +111,7 @@ public class RoadAgent extends StaticRailwayObject {
     public synchronized void travelStart(CybeleEvent ev) {
 	final Serializable[] message = ev.getMessage();
 	traveledTrain = (String) message[0];
+	// Adding or reordering a draw on this stream re-aligns every later value of it.
 	final long delay2 = delayInSeconds() + (long)(500*random.nextGaussian());
 	Activity.setTimer(RailwayMainAgent.CLOCK_ID, delay2, this, "travelEnd");
     }

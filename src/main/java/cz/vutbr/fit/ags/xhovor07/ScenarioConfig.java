@@ -321,6 +321,14 @@ public final class ScenarioConfig implements Serializable {
      * If {@link #load()} has not run, this resolves from system properties and
      * defaults alone (never from a file) so it can never disagree with a
      * {@link #load()} that already published its values.
+     * <p>
+     * <b>One value here is not idempotent:</b> {@link #KEY_RANDOM_MASTER_SEED} defaults to
+     * drawing a seed, so <em>constructing</em> a configuration twice with the property unset
+     * yields two different seeds. Within one JVM that cannot happen — the instance is
+     * memoised and the resolved number is republished into the system properties by both
+     * {@link #load()} and this method — but it does mean a <b>second JVM</b> (a remote Cybele
+     * container now, a second JADE container in phase 2) resolves its own seed unless the
+     * number is passed to it explicitly. See {@link SimRandom}.
      *
      * @return the resolved configuration
      */
