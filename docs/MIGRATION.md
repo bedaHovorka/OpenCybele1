@@ -25,6 +25,11 @@
 
 ### Important note on repository access
 
+> **Superseded (issue #9).** The repository has since been read in full and inventoried in
+> [`docs/INVENTORY.md`](INVENTORY.md). Wherever this guide labels something an ASSUMPTION about
+> OpenCybele1, `INVENTORY.md` is the authority. The paragraph below is kept only to explain why
+> the assumptions are there. (A full pass over the remaining sections is tracked separately.)
+
 At the time of writing, the target repository `https://github.com/bedaHovorka/OpenCybele1` (develop branch) **could not be programmatically accessed** by the research tooling — neither web-search indexing nor direct fetch/GitHub API were reachable through the available tools. The GitHub account `bedaHovorka` (numeric user id 5263405) was verified to exist through an unrelated issue thread on `tkohout/OSTRAJava` (two Czech-language issues opened January 2021), but the repository files, class names, build files, configuration, and commit history could not be verified, and it could not be determined whether the repo is private, deleted, or simply unindexed.
 
 **Consequently, every statement in this guide that names specific OpenCybele1 classes, packages, or files is a clearly-labeled ASSUMPTION** based on standard OpenCybele/Cybele conventions and must be checked against the real code before use. To obtain the concrete contents, run locally:
@@ -82,18 +87,40 @@ and then replace the ASSUMED sections below with the real class inventory.
 | "Keep running / maintain a condition" | Recursive maintenance-goal plan. |
 | "Coordinate with other agents" | `.send`/`.broadcast` with `tell`/`achieve`/`askOne`/`askAll`. |
 
-### 4. Assumed structure of OpenCybele1 (VERIFY against the real repo)
+### 4. Actual structure of OpenCybele1 — see `INVENTORY.md`
 
-> ASSUMED layout typical of an OpenCybele course/demo project. Replace with the actual tree after cloning.
+> **Superseded.** This section previously carried an ASSUMED layout, written when the repository
+> could not be read. The real code has since been inventoried in full.
+> **[`docs/INVENTORY.md`](INVENTORY.md) is the authoritative Stage-0 inventory** — 19 files,
+> 2 415 lines, covering agents (`AG-*`), activities (`ACT-*`), all 15 channels (`CH-*`), events
+> (`EVT-*`), all 4 timer sites (`TMR-*`), mutable state (`ST-*`), hardcoded configuration
+> (`CFG-*`), nondeterminism (`NDT-*`), observable output (`OUT-*`), GUI coupling (`GUI-*`),
+> empirically-determined Cybele runtime semantics (`SEM-*`) and known defects (`DEF-*`).
+> Cite those ids; do not re-derive the facts here.
 
-- **Build:** an Ant `build.xml` or a Maven `pom.xml`, with `cybele.jar` / OpenCybele libraries on the classpath (OpenCybele historically shipped as jars, not a Maven-central artifact).
-- **Source:** a `src/` tree with a small number of agent classes, each extending a Cybele `Agent` base type and registering one or more `Activity` subclasses.
-- **Config:** one or more agent/community descriptor files (commonly `.def`, `.config`, `.properties`, or XML) naming agents, community, and startup parameters.
-- **Domain logic:** a simulation or messaging demo (e.g., agents exchanging messages on a timer, or a producer/consumer / ping-pong interaction — plausible for a semester project).
+Thirty-second orientation, all of it detailed in `INVENTORY.md`:
+
+- **Build:** Gradle Kotlin DSL (`build.gradle.kts`), JDK 21 toolchain, the two source-less vendor
+  jars resolved from `mavenLocal()` as `com.iai:cybele-api:1.0` / `com.iai:cybele-impl:1.0`, and the
+  launch flag `--patch-module java.base=cybelle`. Not Ant, not Maven.
+- **Source:** `src/main/java/cz/vutbr/fit/ags/xhovor07/` — **4 agent types** (`RailwayMainAgent` ×1,
+  `Station` ×8, `RoadAgent` ×7, `Train` dynamic) and **4 activity types** (`Planning`, `Generator`,
+  `VoteCollecting`, `PathFinding`). See `INVENTORY.md` §2–§3.
+- **There is no Cybele `Agent` base class to extend.** `cybele.kernel.Handler` is a bare marker
+  interface; `Agent` and `Activity` are `final` static-only containers. Agents are instantiated by
+  class name via reflection and handler methods are bound by **string method name**, so nothing is
+  checked at compile time. See `INVENTORY.md` §1.
+- **Config:** none for the application — the topology, capacities, delays, arrival rate and
+  origin/destination pairs are all hardcoded Java (`INVENTORY.md` §9, `CFG-01`…`CFG-10`).
+  `cybelle/cybele.prop` and `cybelle/ICS.prop` configure the *kernel* only (`CFG-11`…`CFG-14`).
+- **Domain logic:** a railway simulation whose one non-trivial interaction is a distributed
+  voting/election protocol over the whole path of each train (`INVENTORY.md` §7).
+- **Zero test code exists** (`INVENTORY.md` CNT-12), and all 33 `assert` statements are disabled at
+  runtime (`CNT-07`, `CNT-08`).
 
 ### 5. Step-by-step migration process
 
-**Step 0 — Inventory the OpenCybele project.** Enumerate: (a) every agent class, (b) every activity class and whether one-shot or periodic, (c) every message type sent/received and its handler code, (d) every timer, (e) all mutable state fields, (f) all config files. Build a table *agent → activities → events handled → state → messages*. This drives everything else.
+**Step 0 — Inventory the OpenCybele project. — DONE, see [`docs/INVENTORY.md`](INVENTORY.md).** Enumerate: (a) every agent class, (b) every activity class and whether one-shot or periodic, (c) every message type sent/received and its handler code, (d) every timer, (e) all mutable state fields, (f) all config files. Build a table *agent → activities → events handled → state → messages*. This drives everything else.
 
 **Step 1 — Create the Jason project.** Install Jason 3.x (needs a JDK; 3.3.0 targets Java 21). For developers:
 ```
@@ -195,7 +222,17 @@ Prefer option 3 for deterministic cross-agent timing; option 1 for simple per-ag
 
 ### 7. Concrete before/after examples
 
-> "Before" snippets are ILLUSTRATIVE reconstructions in the OpenCybele/CybelePro idiom (the real repo could not be read). Match them to your actual code.
+> **Superseded as a description of this repository.** The "before" snippets below are ILLUSTRATIVE
+> reconstructions in the generic OpenCybele/CybelePro idiom, written before the code could be read.
+> **They do not resemble OpenCybele1's actual code** and must not be used as a model of it:
+> OpenCybele1 has no `Agent` base class to extend, no `initialize()`, no `addActivity`, no
+> `PeriodicActivity`, no `registerMessageHandler`, and no `Message` type — see
+> [`docs/INVENTORY.md`](INVENTORY.md) §1. The real idiom is
+> `Activity.openChannel(name, "methodName", handler)` + `Activity.sendAll(name, Serializable[])`
+> with untyped positional payloads (`INVENTORY.md` §4), and one-shot `Activity.setTimer` only —
+> there are **zero** repeating timers (`INVENTORY.md` §6, `TMR-01`…`TMR-04`), so `TickerBehaviour`
+> / a self-looping `!produce` plan is *not* the default mapping. Keep the snippets below only as
+> generic Jason-side examples; take the "before" side from `INVENTORY.md`.
 
 **7.1 Periodic producer activity — OpenCybele (illustrative):**
 ```java
