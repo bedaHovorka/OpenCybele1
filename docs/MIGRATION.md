@@ -115,8 +115,8 @@ Thirty-second orientation, all of it detailed in `INVENTORY.md`:
   `cybelle/cybele.prop` and `cybelle/ICS.prop` configure the *kernel* only (`CFG-11`…`CFG-14`).
 - **Domain logic:** a railway simulation whose one non-trivial interaction is a distributed
   voting/election protocol over the whole path of each train (`INVENTORY.md` §7).
-- **Zero test code exists** (`INVENTORY.md` C-12), and all 33 `assert` statements are disabled at
-  runtime (`C-07`, `C-08`).
+- **Zero test code exists** (`INVENTORY.md` CNT-12), and all 33 `assert` statements are disabled at
+  runtime (`CNT-07`, `CNT-08`).
 
 ### 5. Step-by-step migration process
 

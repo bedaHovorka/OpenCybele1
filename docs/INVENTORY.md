@@ -5,8 +5,10 @@ table demanded by [`MIGRATION.md` §5 Step 0](MIGRATION.md#5-step-by-step-migrat
 [`Phase1.md` L19](Phase1.md). It supersedes `MIGRATION.md` §4 (which was written without repo access
 and was explicitly labelled ASSUMED) and the illustrative "before" snippets in `MIGRATION.md` §7.
 
-Every row carries a stable id (`AG-`, `ACT-`, `CH-`, `EVT-`, `TMR-`, `ST-`, `CFG-`, `NDT-`,
-`OUT-`, `GUI-`, `SEM-`, `DEF-`). Later issues and `COVERAGE.md` cite these ids; they do not
+Every row carries a stable id — `CNT-` (counts, §1), `AG-` (agents), `ACT-` (activities), `CH-`
+(channels), `EVT-` (events), `TMR-` (timers), `ST-` (state), `CFG-` (configuration), `NDT-`
+(nondeterminism), `OUT-` (observable output), `GUI-` (GUI coupling), `SEM-` (Cybele runtime
+semantics) and `DEF-` (defects). Later issues and `COVERAGE.md` cite these ids; they do not
 re-derive the facts. Every claim carries a `file:line` reference. Source comments are partly in
 Czech; this document is in English.
 
@@ -23,23 +25,23 @@ re-derives it.
 
 | id | Fact | Command | Output |
 |---|---|---|---|
-| C-01 | 19 Java files, 2 415 lines | `find src -name '*.java' \| wc -l` / `find src -name '*.java' \| xargs wc -l \| tail -1` | `19` / `2415 total` |
-| C-02 | **15** `Activity.openChannel` call sites | `grep -r 'openChannel' src/ \| wc -l` | `15` |
-| C-03 | **15** `Activity.sendAll` call sites | `grep -r 'sendAll' src/ \| wc -l` | `16` — the 16th is the Javadoc `{@link Activity#sendAllBlock}` at `PathFinding.java:20`; 16 − 1 = **15** |
-| C-04 | **15** channel constants | see §4; cross-checks against C-02 and C-03 | 15 = 15 = 15 |
-| C-05 | 17 `public static final String`, 18 `static final String` | `grep -rn 'static final String' src/ \| wc -l` | `18` — 17 public + the package-private `CHANNEL_TRAIN_STATE` (`RailwayMainAgent.java:67`). Neither number is the channel count: 3 of the publics (`CLOCK_ID`, `MAIN_AGENT_NAME`, `KILLED`) are **not** channels. **The channel count is 15.** |
-| C-06 | Subscriber count per channel **name** = exactly 1 for all 15 | every constant appears in exactly one `openChannel` site (C-02) and channel names are `constant + uniqueOwnerName` | 1 subscriber each — see §4 |
-| C-07 | **33** `assert` statements | `grep -rn 'assert ' src/ \| wc -l` | `34` — the 34th is the Javadoc line `util/Util.java:49` (`* assert and cast routine`); 34 − 1 = **33** |
-| C-08 | asserts are **disabled** at runtime | `grep -n 'applicationDefaultJvmArgs' build.gradle.kts` | `applicationDefaultJvmArgs = listOf("--patch-module", "java.base=cybelle")` — no `-ea`, so all 33 are no-ops. Input to #14 |
-| C-09 | **4** timer sites | `grep -rn 'setTimer' src/` | `Generator.java:50`, `Generator.java:65`, `Planning.java:111`, `RoadAgent.java:102` |
-| C-10 | **0** repeating timers | `grep -rn 'setTimer(' src/ \| grep -E 'true\|false' \| wc -l` | `0` — the `setTimer(..., boolean repeating, ...)` overload is never used. `TickerBehaviour` is **not** the default JADE mapping. Input to #33 |
-| C-11 | **0** channel/timer teardown | `grep -rn 'closeChannel\|clearTimer\|Cybele.terminate' src/` | one hit only: `Gui.java:69`, and it is **commented out**. Nothing is ever un-subscribed or cancelled |
-| C-12 | **0** test code | `ls src/test` / `find . -name '*Test*.java'` | `No such file or directory` / (empty) |
-| C-13 | **2** application `println` sites | `grep -rn 'System.out\|System.err\|printStackTrace' src/` | `Planning.java:125`, `Train.java:70`, plus `util/Util.java:69` `printStackTrace` — see OUT-03, unreachable |
-| C-14 | **1** `Agent.die()` site | `grep -rn 'Agent.die' src/` | `Train.java:92` |
-| C-15 | **3** files touch Swing/AWT/Observable | `grep -rln 'javax\.swing\|java\.awt\|java\.util\.Observ' src/` | `Gui.java`, `RailwayCanvas.java`, `RailwayMainAgent.java` |
-| C-16 | **1** unseeded `Random`, static, JVM-wide | `grep -rn 'Random\|nextInt\|nextDouble\|nextGaussian' src/` | decl `Generator.java:42`; consumed `Generator.java:60`, `Generator.java:69`, `RoadAgent.java:101` |
-| C-17 | **8** `Cybele` clock API sites | `grep -rn 'createClock\|pauseClock\|resumeClock\|setPace\|getTime(' src/` | `RailwayMainAgent.java:111,112`, `Planning.java:78,108,109,112`, `RoadAgent.java:132,134,167,169,210`, `Gui.java:98`, `RailwayCanvas.java:92` |
+| CNT-01 | 19 Java files, 2 415 lines | `find src -name '*.java' \| wc -l` / `find src -name '*.java' \| xargs wc -l \| tail -1` | `19` / `2415 total` |
+| CNT-02 | **15** `Activity.openChannel` call sites | `grep -r 'openChannel' src/ \| wc -l` | `15` |
+| CNT-03 | **15** `Activity.sendAll` call sites | `grep -r 'sendAll' src/ \| wc -l` | `16` — the 16th is the Javadoc `{@link Activity#sendAllBlock}` at `PathFinding.java:20`; 16 − 1 = **15** |
+| CNT-04 | **15** channel constants | see §4; cross-checks against CNT-02 and CNT-03 | 15 = 15 = 15 |
+| CNT-05 | 17 `public static final String`, 18 `static final String` | `grep -rn 'static final String' src/ \| wc -l` | `18` — 17 public + the package-private `CHANNEL_TRAIN_STATE` (`RailwayMainAgent.java:67`). Neither number is the channel count: 3 of the publics (`CLOCK_ID`, `MAIN_AGENT_NAME`, `KILLED`) are **not** channels. **The channel count is 15.** |
+| CNT-06 | Subscriber count per channel **name** = exactly 1 for all 15 | every constant appears in exactly one `openChannel` site (CNT-02) and channel names are `constant + uniqueOwnerName` | 1 subscriber each — see §4 |
+| CNT-07 | **33** `assert` statements | `grep -rn 'assert ' src/ \| wc -l` | `34` — the 34th is the Javadoc line `util/Util.java:49` (`* assert and cast routine`); 34 − 1 = **33** |
+| CNT-08 | asserts are **disabled** at runtime | `grep -n 'applicationDefaultJvmArgs' build.gradle.kts` | `applicationDefaultJvmArgs = listOf("--patch-module", "java.base=cybelle")` — no `-ea`, so all 33 are no-ops. Input to #14 |
+| CNT-09 | **4** timer sites | `grep -rn 'setTimer' src/` | `Generator.java:50`, `Generator.java:65`, `Planning.java:111`, `RoadAgent.java:102` |
+| CNT-10 | **0** repeating timers | `grep -rn 'setTimer(' src/ \| grep -E 'true\|false' \| wc -l` | `0` — the `setTimer(..., boolean repeating, ...)` overload is never used. `TickerBehaviour` is **not** the default JADE mapping. Input to #33 |
+| CNT-11 | **0** channel/timer teardown | `grep -rn 'closeChannel\|clearTimer\|Cybele.terminate' src/` | one hit only: `Gui.java:69`, and it is **commented out**. Nothing is ever un-subscribed or cancelled |
+| CNT-12 | **0** test code | `ls src/test` / `find . -name '*Test*.java'` | `No such file or directory` / (empty) |
+| CNT-13 | **2** application `println` sites | `grep -rn 'System.out\|System.err\|printStackTrace' src/` | `Planning.java:125`, `Train.java:70`, plus `util/Util.java:69` `printStackTrace` — see OUT-03, unreachable |
+| CNT-14 | **1** `Agent.die()` site | `grep -rn 'Agent.die' src/` | `Train.java:92` |
+| CNT-15 | **3** files touch Swing/AWT/Observable | `grep -rln 'javax\.swing\|java\.awt\|java\.util\.Observ' src/` | `Gui.java`, `RailwayCanvas.java`, `RailwayMainAgent.java` |
+| CNT-16 | **1** unseeded `Random`, static, JVM-wide | `grep -rn 'Random\|nextInt\|nextDouble\|nextGaussian' src/` | decl `Generator.java:42`; consumed `Generator.java:60`, `Generator.java:69`, `RoadAgent.java:101` |
+| CNT-17 | **13** `Cybele` clock API sites (8 create/pause/resume + 4 `getTime` + 1 `setPace`) | `grep -rn 'createClock\|pauseClock\|resumeClock\|setPace\|getTime(' src/` | `RailwayMainAgent.java:111,112`, `Planning.java:78,108,109,112`, `RoadAgent.java:132,134,167,169,210`, `Gui.java:98`, `RailwayCanvas.java:92` |
 
 ### Cybele's programming model (why "no compile-time checking anywhere")
 
@@ -139,29 +141,40 @@ depending on who receives it. Any typed-message migration must split CH-03 into 
 
 ## 5. Events handled, per agent/activity (EVT)
 
-| id | Owner | Handler method | Bound at | Trigger | Effect summary |
-|---|---|---|---|---|---|
-| EVT-01 | AG-01 | `pathFind` `RailwayMainAgent.java:141` | CH-15 | Station asks for a direction | `Util.pathDirection(net, from, to)` → CH-09 |
-| EVT-02 | AG-01 | `recieveStationInfo` `:155` | CH-10 | Station occupancy changed | `stationInfos.put`, `fireChange()` → GUI repaint |
-| EVT-03 | AG-01 | `recieveRoadState` `:166` | CH-11 | Road direction/free changed | `roadAgentStates.put`, `fireChange()` |
-| EVT-04 | AG-01 | `recieveTrainState` `:178` | CH-12 | Train status text or `"KILL"` | `trainStates.put`/`remove`, `fireChange()` |
-| EVT-05 | ACT-01 | `planTrain` `Planning.java:68` | CH-13 | Generator created a train | Blocking election, see §7 |
-| EVT-06 | ACT-01 | `placeTrainIntoFirstStation` `:120` | TMR-03 | Planned departure time reached | `queue.poll()`, `println`, CH-05 |
-| EVT-07 | ACT-02 | `generateTrain` `Generator.java:57` | TMR-01 / TMR-02 | Poisson arrival | open CH-12, `createAgent`, CH-13, re-arm TMR-02 |
-| EVT-08 | ACT-03 | `vote` `VoteCollecting.java:42` | CH-14 | A static object voted | `votes.put`, `latch.countDown()` |
-| EVT-09 | ACT-04 | `pathFindReply` `PathFinding.java:42` | CH-09 | AG-01 answered | `pathDirs.put`, `station.notify()` |
-| EVT-10 | AG-02/AG-03 | `voteRequest` `StaticRailwayObject.java:58` | CH-01 | Election started | `computeDifference` → CH-14 |
-| EVT-11 | AG-02/AG-03 | `voteResult` `:71` | CH-02 | Election concluded | `addToPlan(train, time)` |
-| EVT-12 | AG-02 | `enter` `Station.java:87` (`synchronized`) | CH-03 | Train requests entry | admit (`occupied++`, CH-06) or enqueue |
-| EVT-13 | AG-02 | `leave` `Station.java:115` (`synchronized`) | CH-04 | Train left | `occupied--` or admit head of queue; `timetable.removeValue` |
-| EVT-14 | AG-03 | `enter` `RoadAgent.java:118` (`synchronized`) | CH-03 | Train requests entry | `acceptTrain` (set direction, CH-06) or `push` |
-| EVT-15 | AG-03 | `leave` `RoadAgent.java:150` (`synchronized`) | CH-04 | Train left the track | FREE or admit head of priority queue |
-| EVT-16 | AG-03 | `travelStart` `RoadAgent.java:98` (`synchronized`) | CH-08 | Train started travelling | arm TMR-04 |
-| EVT-17 | AG-03 | `travelEnd` `RoadAgent.java:113` (`synchronized`) | TMR-04 | Travel time elapsed | CH-07 |
-| EVT-18 | AG-04 | `start` `Train.java:69` (`synchronized`) | CH-05 | Departure authorised | `println`, CH-03 to the origin station |
-| EVT-19 | AG-04 | `entered` `Train.java:81` (`synchronized`) | CH-06 | Entry granted | CH-04 to the old object, then CH-03 or CH-08 or `Agent.die()` |
-| EVT-20 | AG-04 | `travelEnd` `Train.java:104` (`synchronized`) | CH-07 | Road traversal finished | CH-03 to `nextPosition` |
-| EVT-21 | AG-04 | `destroy` `Train.java:123` (`synchronized`) | Cybele destructor, bound by name | agent dying | CH-04 (again — DEF-08), CH-12 with `"KILL"` |
+Two columns, deliberately: the **handler object** is the agent (whose fields the handler mutates),
+but the **dispatching activity** is whichever activity called `openChannel` — and per SEM-04 that
+is what decides serialisation. Handlers on the *same* dispatching activity can never run
+concurrently; handlers on *different* activities can.
+
+| id | Handler object | Dispatching activity | Handler method | Bound at | Trigger | Effect summary |
+|---|---|---|---|---|---|---|
+| EVT-01 | AG-01 | AG-01 main | `pathFind` `RailwayMainAgent.java:141` | CH-15 | Station asks for a direction | `Util.pathDirection(net, from, to)` → CH-09 |
+| EVT-02 | AG-01 | AG-01 main | `recieveStationInfo` `:155` | CH-10 | Station occupancy changed | `stationInfos.put`, `fireChange()` → GUI repaint |
+| EVT-03 | AG-01 | AG-01 main | `recieveRoadState` `:166` | CH-11 | Road direction/free changed | `roadAgentStates.put`, `fireChange()` |
+| EVT-04 | AG-01 | **ACT-02** — the channel is opened at `Generator.java:59`, not by AG-01 | `recieveTrainState` `:178` | CH-12 | Train status text or `"KILL"` | `trainStates.put`/`remove`, `fireChange()` |
+| EVT-05 | ACT-01 | ACT-01 | `planTrain` `Planning.java:68` | CH-13 | Generator created a train | Blocking election, see §7 |
+| EVT-06 | ACT-01 | ACT-01 | `placeTrainIntoFirstStation` `:120` | TMR-03 | Planned departure time reached | `queue.poll()`, `println`, CH-05 |
+| EVT-07 | ACT-02 | ACT-02 | `generateTrain` `Generator.java:57` | TMR-01 / TMR-02 | Poisson arrival | open CH-12, `createAgent`, CH-13, re-arm TMR-02 |
+| EVT-08 | ACT-03 | ACT-03 | `vote` `VoteCollecting.java:42` | CH-14 | A static object voted | `votes.put`, `latch.countDown()` |
+| EVT-09 | ACT-04 | ACT-04 (one per station) | `pathFindReply` `PathFinding.java:42` | CH-09 | AG-01 answered | `pathDirs.put`, `station.notify()` |
+| EVT-10 | AG-02/AG-03 | that agent's main | `voteRequest` `StaticRailwayObject.java:58` | CH-01 | Election started | `computeDifference` → CH-14 |
+| EVT-11 | AG-02/AG-03 | that agent's main | `voteResult` `:71` | CH-02 | Election concluded | `addToPlan(train, time)` |
+| EVT-12 | AG-02 | AG-02 main | `enter` `Station.java:87` (`synchronized`) | CH-03 | Train requests entry | admit (`occupied++`, CH-06) or enqueue |
+| EVT-13 | AG-02 | AG-02 main | `leave` `Station.java:115` (`synchronized`) | CH-04 | Train left | `occupied--` or admit head of queue; `timetable.removeValue` |
+| EVT-14 | AG-03 | AG-03 main | `enter` `RoadAgent.java:118` (`synchronized`) | CH-03 | Train requests entry | `acceptTrain` (set direction, CH-06) or `push` |
+| EVT-15 | AG-03 | AG-03 main | `leave` `RoadAgent.java:150` (`synchronized`) | CH-04 | Train left the track | FREE or admit head of priority queue |
+| EVT-16 | AG-03 | AG-03 main | `travelStart` `RoadAgent.java:98` (`synchronized`) | CH-08 | Train started travelling | arm TMR-04 |
+| EVT-17 | AG-03 | AG-03 main | `travelEnd` `RoadAgent.java:113` (`synchronized`) | TMR-04 | Travel time elapsed | CH-07 |
+| EVT-18 | AG-04 | AG-04 main | `start` `Train.java:69` (`synchronized`) | CH-05 | Departure authorised | `println`, CH-03 to the origin station |
+| EVT-19 | AG-04 | AG-04 main | `entered` `Train.java:81` (`synchronized`) | CH-06 | Entry granted | CH-04 to the old object, then CH-03 or CH-08 or `Agent.die()` |
+| EVT-20 | AG-04 | AG-04 main | `travelEnd` `Train.java:104` (`synchronized`) | CH-07 | Road traversal finished | CH-03 to `nextPosition` |
+| EVT-21 | AG-04 | AG-04 main | `destroy` `Train.java:123` (`synchronized`) | Cybele destructor, bound by name | agent dying | CH-04 (again — DEF-08), CH-12 with `"KILL"` |
+
+**Consequence of EVT-04's dispatching activity.** EVT-02, EVT-03 and EVT-04 all mutate AG-01's
+GUI-facing maps and all call `fireChange()`, but EVT-04 dispatches on **ACT-02**'s thread while
+EVT-02/EVT-03 dispatch on AG-01's main activity — so they run **concurrently**. `stationInfos`,
+`roadAgentStates` and `trainStates` are `synchronizedMap` (ST-02…ST-04), which makes the individual
+`put`/`remove` safe, but `fireChange()` → `TableModel.update` is not (DEF-24).
 
 `destroy` (EVT-21) is a **lifecycle callback bound by convention, not by `openChannel`** — it is
 the only handler in the codebase that has no channel. Any migration must preserve it as a
@@ -172,7 +185,7 @@ the only handler in the codebase that has no channel. Any migration must preserv
 ## 6. Timers (TMR) — 4 sites, 0 repeating
 
 All four use `Activity.setTimer(clockId, delayMillis, handler, methodName)` — the **one-shot**
-overload. The `repeating` overload is never used (C-10). All four are on the single global clock
+overload. The `repeating` overload is never used (CNT-10). All four are on the single global clock
 `CLOCK_ID = "myClock"` (CFG-05).
 
 | id | Site | Delay expression | Where the expression lives | Re-armed by |
@@ -183,10 +196,19 @@ overload. The `repeating` overload is never used (C-10). All four are on the sin
 | TMR-04 | `RoadAgent.java:102` | `delayInSeconds() + (long)(500*Generator.getRandom().nextGaussian())` = `delay*1000 + (long)(500*g)` | `RoadAgent.java:101`, `delayInSeconds()` at `:105-107` | one per road traversal |
 
 **TMR-04 can be negative.** For `delay == 1` (roads `tr1`, `tr2` — CFG-04) the value is negative
-whenever `g < -2`, i.e. ≈2.3 % of traversals. Measured behaviour (EXP-E): Cybele fires a
-negative-delay timer **immediately**, so the effect is an instantaneous traversal, not a lost
-train. A JADE `WakerBehaviour` with a negative delay behaves the same way, but this must be
-asserted, not assumed.
+whenever `g < -2`, i.e. ≈2.3 % of traversals. Cybele fires a negative-delay timer **immediately**,
+so the effect is an instantaneous traversal, not a lost train. SEM-06 establishes only *that* such
+a timer fires; the timing was measured separately, with timestamps:
+
+| requested delay | observed latency to fire |
+|---|---|
+| −1500 ms | 1–5 ms |
+| 0 ms | 1–5 ms |
+| 500 ms | 500–515 ms |
+| 2000 ms | 2001–2010 ms |
+
+A JADE `WakerBehaviour` with a negative delay behaves the same way, but this must be asserted, not
+assumed.
 
 ---
 
@@ -202,13 +224,18 @@ Sequence for one train, all line refs in `Planning.java` unless noted:
 6. ACT-03 stores each vote and counts the latch down (`VoteCollecting.java:51,54`) **on a different thread** — this is the whole reason ACT-03 exists.
 7. `planTrain` blocks on `latch.await()` (`:88`), then takes `Collections.max(v)` (`:97`) — the protocol is *max of all requested delays*, i.e. the most constrained resource dictates the departure.
 8. CH-02 is broadcast to every element of `path` with the agreed absolute times (`:100-106`).
-9. TMR-03 is armed for the departure instant (`:111`), bracketed by `pauseClock`/`resumeClock` (`:108`, `:112`) — which, per SEM-02, does **not** actually freeze the clock across that bracket.
+9. TMR-03 is armed for the departure instant (`:111`), bracketed by `pauseClock`/`resumeClock` (`:108`, `:112`) — which, per SEM-02, **does** freeze the clock for the duration of the bracket (time-shifted by a sub-2 ms delivery latency). Removing the bracket would change behaviour.
 10. `placeTrainIntoFirstStation` (`:120`) polls the `PriorityBlockingQueue`, prints (OUT-01), and sends CH-05 (`:126`).
 
-Note step 10 polls the **globally earliest** `TrainPlan`, not the one whose timer fired — with two
-trains planned out of order the printed line and the started train belong to a different plan than
-the expired timer. Observed in the live run: `vl6 in stA at 45760` was printed before
-`vl5 in stC at 48760`.
+Note step 10 polls the **globally earliest** `TrainPlan`, not the one whose timer fired, so the
+printed line and the started train are not structurally tied to the expired timer. In practice the
+decoupling is close to unreachable: a plan enters the queue at `:110` immediately *before* its own
+timer is armed at `:111`, and a timer armed at `a` for departure `d` fires at `max(a, d)`, so any
+queued plan with a strictly smaller departure has necessarily already fired and been polled. The
+residual exposure is a **tie** on `departure` or a same-tick burst — see DEF-17. Nothing in stdout
+can reveal which timer expired, so the printed order is not evidence either way: a run that prints
+`vl6 in stA at 45760` before `vl5 in stC at 48760` is showing exactly what a *correct*
+implementation prints, since the queue is ordered by departure and 45 760 < 48 760.
 
 ---
 
@@ -226,7 +253,7 @@ the expired timer. Observed in the live run: `vl6 in stA at 45760` was printed b
 | ST-08 | ACT-01 | `queue : PriorityBlockingQueue<TrainPlan>` | `Planning.java:47` | ordered by `TrainPlan.compareTo` (`:147`) |
 | ST-09 | ACT-01 | `votes : UnorientedGraph<String,Long>` | `Planning.java:48` | keyed by the **unordered** `Doubleton(voter, train)` — DEF-05. Guarded by `synchronized(votes)` at `:91` and `VoteCollecting.java:50` |
 | ST-10 | ACT-01 | `trainCountDowns : Map<String,CountDownLatch>` | `Planning.java:49` | `synchronizedMap` |
-| ST-11 | ACT-02 | `openedChannels : Map<String,String>` | `Generator.java:37` | accumulates channel tickets forever; nothing ever calls `closeChannel` (C-11) → unbounded leak. The author's own `// EXTENSION jak delat ruseni?` at `:36` |
+| ST-11 | ACT-02 | `openedChannels : Map<String,String>` | `Generator.java:37` | accumulates channel tickets forever; nothing ever calls `closeChannel` (CNT-11) → unbounded leak. The author's own `// EXTENSION jak delat ruseni?` at `:36` |
 | ST-12 | ACT-02 | `index : int` | `Generator.java:41` | monotonic train counter (`"vl" + index`) |
 | ST-13 | ACT-02 | `random : static final Random` | `Generator.java:42` | see NDT-05 |
 | ST-14 | AG-02 | `roads : Collection<String>` | `Station.java:35` | injected via the constructor; never read except by the unused getter `:74` |
@@ -278,7 +305,7 @@ Four hash-iteration sites decide **behaviour**, not merely display order. Captur
 | NDT-01 | `RailwayMainAgent.java:116` `net.nodeSet()` (`HashSet` built at `util/HashMapGraph.java:150`) | **Station agent creation order** | `[stB, stA, stD, stC, stF, stE, stH, stG]` |
 | NDT-02 | `RailwayMainAgent.java:123` `net.values()` (`HashMap.values()`, `util/HashMapGraph.java:187`) | **RoadAgent creation order** | `[tr1, tr4, tr7, tr5, tr3, tr6, tr2]` |
 | NDT-03 | `RailwayMainAgent.java:125` `net.allNodesWithEdge(road)` (`util/HashMapGraph.java:134-145`) → `:129-130` | **Which station is `leftStation` vs `rightStation`** (`RoadAgent.java:81`), hence the meaning of `TRAVEL_LEFT`/`TRAVEL_RIGHT` | tr1 L=stA R=stH · tr2 L=stH R=stG · tr3 L=stG R=stE · tr4 L=stE R=stD · tr5 L=stD R=stB · tr6 L=stF R=stE · tr7 L=stC R=stF |
-| NDT-04 | `util/Util.java:106` + `:123` — `privatePath`'s local `nodesToEdges` `HashMap.entrySet()` | **Which route a train takes**, hence *who votes* and how long the journey is | stA→stB `[stA,tr1,stH,tr2,stG,tr3,stE,tr4,stD,tr5,stB]` · stA→stC `[stA,tr1,stH,tr2,stG,tr3,stE,tr6,stF,tr7,stC]` · stB→stA reverse of the first · stB→stC `[stB,tr5,stD,tr4,stE,tr6,stF,tr7,stC]` · stC→stB reverse · stC→stA `[stC,tr7,stF,tr6,stE,tr3,stG,tr2,stH,tr1,stA]` |
+| NDT-04 | `util/Util.java:106` + `:123` — `privatePath`'s local `nodesToEdges` `HashMap.entrySet()`; **also** the hash order of `HashMapGraph.get(node)` → `allIndicesJoinsWith` (`util/HashMapGraph.java:103-117`, `:190-192`), reached at `util/Util.java:107`, which fixes the order the candidate edges are tried in | **Which route a train takes**, hence *who votes* and how long the journey is | stA→stB `[stA,tr1,stH,tr2,stG,tr3,stE,tr4,stD,tr5,stB]` · stA→stC `[stA,tr1,stH,tr2,stG,tr3,stE,tr6,stF,tr7,stC]` · stB→stA reverse of the first · stB→stC `[stB,tr5,stD,tr4,stE,tr6,stF,tr7,stC]` · stC→stB reverse · stC→stA `[stC,tr7,stF,tr6,stE,tr3,stG,tr2,stH,tr1,stA]` |
 | NDT-05 | `Generator.java:42` — one **unseeded `private static final Random`**, static and shared JVM-wide | inter-arrival times, OD choice, per-road travel noise | consumed concurrently by ACT-02 (`nextInt` `:60`, `nextDouble` `:69`) and by **every** `RoadAgent` event thread (`nextGaussian` `RoadAgent.java:101`). `java.util.Random` is thread-safe but the *interleaving* is not reproducible, so seeding alone will not make runs deterministic — #19 needs per-agent generators |
 
 **Stability of NDT-01…NDT-04.** `Doubleton.hashCode()` (`util/Doubleton.java:72-76`) sums two
@@ -290,6 +317,17 @@ hazard is real in principle (`HashMap` iteration order is implementation-defined
 been observed between JDK 21 and 25. It is a portability risk to pin, not a per-run flake.
 `Doubleton("stA","stH").hashCode() == Doubleton("stH","stA").hashCode() == 228359` — the
 commutativity the unordered-pair key relies on holds.
+
+**Invariant NDT-04 must preserve (behaviour-preservation landmine for `COVERAGE.md`).** `Planning`
+votes on the *whole* route returned by `Util.path(net, from, to)` (`Planning.java:73`), but each
+train is then steered **station by station** by `Util.pathDirection(net, current, to)`, resolved
+lazily per station through CH-15/CH-09 (`Station.java:104`, `RailwayMainAgent.java:146`). These are
+two independent traversals of the same hash-ordered structures. **If they ever diverge, a train
+traverses stations and roads that never voted on it** — the election guarantees nothing and
+capacity/timetable planning silently decouples from the actual movement. Verified today: for all
+six OD pairs (CFG-07) the per-station `pathDirection` chain reproduces the `Util.path` route
+exactly. `docs/probes/Order.java` SITE-4 and SITE-4b print both; any change to the graph, the
+topology, or the JDK must re-check that they still agree.
 
 ---
 
@@ -319,9 +357,9 @@ This is the **entire** observable surface for a headless regression test today �
 
 | id | GUI coupling |
 |---|---|
-| GUI-01 | Only `Gui.java`, `RailwayCanvas.java` and `RailwayMainAgent.java` touch Swing/AWT/`Observable` (C-15). Everything else is Swing-free |
+| GUI-01 | Only `Gui.java`, `RailwayCanvas.java` and `RailwayMainAgent.java` touch Swing/AWT/`Observable` (CNT-15). Everything else is Swing-free |
 | GUI-02 | `RailwayMainAgent extends java.util.Observable` (`:41`) and owns an inner `TableModel extends AbstractTableModel implements Observer` (`:253-297`) |
-| GUI-03 | `RailwayMainAgent` constructs the `Gui` **unconditionally** at `:108-109`, *inside the agent constructor* and *before* the clock (`:111`) and all sub-agents (`:116-134`). There is no headless switch: on a headless JVM the constructor throws `HeadlessException` and the whole simulation fails to boot |
+| GUI-03 | `RailwayMainAgent` constructs the `Gui` **unconditionally** at `:108-109`, *inside the agent constructor* and *before* the clock (`:111`) and all sub-agents (`:116-134`). There is no headless switch: on a headless JVM the constructor throws `HeadlessException` and the whole simulation fails to boot. This ordering is also an **accidental barrier** that keeps `createClock` out of the SEM-02 registration race — see DEF-15 |
 | GUI-04 | Repaints are driven by `fireChange()` (`:198-201`) from EVT-02/03/04; `RailwayCanvas.update` (`:168-170`) calls `repaint(100)` |
 | GUI-05 | `RailwayCanvas` overrides `paint(Graphics)` (`:60`) rather than `paintComponent`, and draws with hand-computed `AffineTransform` translations (`:91-117`) — not layout-managed |
 | GUI-06 | `Gui.PaceChangeAction` (`:87-100`) calls `Cybele.setPace(CLOCK_ID, pace)` — the only user input in the program |
@@ -330,23 +368,49 @@ This is the **entire** observable surface for a headless regression test today �
 
 ## 12. Cybele runtime semantics — empirically determined (SEM)
 
-Cybele ships as **source-less** jars (`com.iai:cybele-api:1.0`, `com.iai:cybele-impl:1.0`;
-`cybelle/Cybele.jar`, `cybelle/CybeleImpl.jar`), so these were settled by running probe programs
-against the real jars, not by reading documentation. Probe sources are committed under
-`docs/probes/`; each is a standalone `main` and prints its own verdict.
+Cybele ships as **source-less** jars — `com.iai:cybele-api:1.0` and `com.iai:cybele-impl:1.0` in
+the local Maven repository, recovered from `cybelle/Cybele.jar` / `cybelle/CybeleImpl.jar`, which
+are **untracked in git** (`.gitignore: cybelle/*.jar`) and must be restored before anything here
+runs. So these facts were settled by running probe programs against the real jars, not by reading
+documentation. Probe sources are committed under `docs/probes/`; each is a standalone `main` in the
+default package and prints its own verdict.
 
-Harness used for every probe (from the probe directory, with `cybele.prop`/`ICS.prop` in
-`./cybelle/`):
+**Running them.** Use the committed harness — it handles the vendor-jar prerequisite, the
+`--patch-module` config copy, and the SEM-01 control config:
 
+```bash
+docs/probes/run.sh                 # compile everything, run nothing
+docs/probes/run.sh ExpA            # compile, then run one probe
+docs/probes/run.sh ExpA2 --control # ExpA2 with the SEM-01 positive-control config
+docs/probes/run.sh Order           # iteration-order probe (no Cybele; util classes only)
+docs/probes/run.sh --all           # every probe in turn
 ```
-javac -cp ~/.m2/repository/com/iai/cybele-api/1.0/cybele-api-1.0.jar -d classes src/probe/Exp*.java
-java --patch-module java.base=cybelle \
-     -cp classes:~/.m2/repository/com/iai/cybele-api/1.0/cybele-api-1.0.jar:\
-~/.m2/repository/com/iai/cybele-impl/1.0/cybele-impl-1.0.jar probe.ExpX
-```
 
-Environment: OpenJDK 21.0.11 (Red Hat), Fedora 43, unmodified `cybelle/cybele.prop` from
-`opencybele-baseline`.
+[`docs/probes/README.md`](probes/README.md) documents what each probe establishes and, importantly,
+the four caveats that make some results regime-dependent. Three things that are easy to get wrong
+if you assemble the command by hand, and that `run.sh` handles:
+
+* **The vendor jars are untracked** (`.gitignore: cybelle/*.jar`). A fresh clone must run
+  `scripts/bootstrap-vendor-jars.sh` (on `opencybele-baseline`, landed in #14) or the
+  `withoutGradle` recovery in the repository `README.md` first. `run.sh` checks and says so.
+* **Use `$HOME`, not `~`, in the classpath.** Bash does not tilde-expand after a `:` outside an
+  assignment, so `-cp classes:~/.m2/…` resolves to the literal string and the run dies with
+  `ClassNotFoundException: cybele.kernel.Cybele`.
+* **`cybele.prop`/`ICS.prop` must be copied into a directory next to the run.** Cybele loads
+  `/cybele.prop` via `Properties.class.getResourceAsStream`, a `java.base` class, so since JPMS it
+  resolves only through `--patch-module java.base=<plain directory>`; `docs/probes/` has no
+  `cybelle/` of its own. `run.sh` copies them into a git-ignored `docs/probes/.work/cybelle/`.
+
+Environment for the recorded results: OpenJDK 21.0.11 (Red Hat), Fedora 43, unmodified
+`cybelle/cybele.prop` from `opencybele-baseline`; cross-checked on OpenJDK 25.0.4 where noted.
+
+**Probe flakiness.** `ExpA2` and `ExpE` die roughly **1 run in 6** during startup with
+`NullPointerException … TimerAgent.register … because "this.ag" is null`, thrown from
+`com.iai.cybele.timer.IAITimerService.newClock`. This is the *same* startup race as SEM-02's
+registration race — a handler constructor calling `createClock` before the kernel's timer-service
+agent is up. Re-run; it is not a defect in the probe, and a few ms of sleep after
+`Cybele.startUp()` removes it (and closes the SEM-02 race at the same time). #16/#20/#29 will hit
+this.
 
 ---
 
@@ -387,9 +451,17 @@ recv tag=P_LOW  seq=6 prio=4
 
 Send order preserved exactly. **Not** priority, **not** LIFO.
 
-*Positive control* (`docs/probes/ExpA2.java`): the same probe with a TIMER event queued between
-message 2 and message 3, run twice — once with the stock file, once with
-`agent_queue merge_sort staticpriority_comp` enabled:
+*Positive control* (`docs/probes/ExpA2.java`, `run.sh ExpA2 --control`): the same probe with a
+TIMER event queued between message 2 and message 3, run twice — once with the stock file, once with
+the comparator moved onto the **agent** queue. That control config is **neither** of the two
+commented-out lines: `cybele.prop:66` puts `merge_sort` on the *system* queue only, and the agent
+queue is what dispatches application messages. The exact line, recorded verbatim so the control
+stays reproducible:
+
+```
+cybele.srv.evmgmt.app.param.iai = system_queue merge_sort staticpriority_comp;agent_queue merge_sort staticpriority_comp
+```
+
 
 ```
 DEFAULT   : MSG 1, MSG 2, TIMER, MSG 3, MSG 4      <- FIFO position kept
@@ -417,9 +489,13 @@ channel and timer belonging to that activity. This is exactly why ACT-03 and ACT
 
 ### SEM-02 — Are `Cybele.pauseClock` / `resumeClock` counted / reentrant?
 
-**Verdict: NO — they are a plain boolean flag, not a counter. AND, for the `Cybele.HOST`-scope
-clock the application uses, they are ASYNCHRONOUS: the clock is still running when `pauseClock()`
-returns.** Input to #29. Confidence: **high**.
+**Verdict: NO — they are a plain boolean flag, not a counter.** They are also **asynchronous**
+for the `Cybele.HOST`-scope clock the application uses — the clock is still running when
+`pauseClock()` returns — but the latency is under 2 ms and applies equally to `pause` and
+`resume`, so **under the real application's conditions the three bracketed sections do freeze the
+clock, for the duration of the bracketed work**. Input to #29. Confidence: **high** for both parts
+(n = 40 real-app runs for the second; the standalone `ExpB*` probes are subject to the
+registration race documented below and must not be read on their own).
 
 *Reentrancy* (`docs/probes/ExpB2.java`), with a 3 s settle window after each call:
 
@@ -437,9 +513,12 @@ returns.** Input to #29. Confidence: **high**.
 ##### scope LOCAL #####   (identical results)
 ```
 
-Two pauses followed by **one** resume leaves the clock **running**. Confirmed statically:
+Two pauses followed by **one** resume leaves the clock **running**. Confirmed statically, which is
+what makes this half of the verdict independent of the race below:
 `ContinuousClock.setPause()` begins `if (paused) return;` and `setResume()` begins
-`if (!paused) return;` — a single `boolean paused` field, no depth counter.
+`if (!paused) return;` — a single `boolean paused` field, no depth counter. (This particular run
+*won* the registration race — the pause visibly lands — so it also serves as a sample from the
+"registered" side of the boundary described below.)
 
 *The boolean return value does not mean "state changed."* From `javap -c
 com.iai.cybele.timer.IAITimerService.pauseClock`: it returns `false` only when the timer service is
@@ -452,31 +531,82 @@ pauseClock on unknown clock  false
 resumeClock on unknown clock false
 ```
 
-*Asynchrony.* `IAITimerService.pauseClock` branches on `clock.getType()`: only for `LOCAL` (type 1)
-does it call `localPause` directly; for `HOST`/`NETWORK` it calls `TimerAgent.sendPause(id)`, which
-is `Activity.sendAll(timerPrefix + clockId, {cmdPause})` — an ordinary asynchronous Cybele channel
-message, applied later by `TimerAgent.receiveNetCmd`. Latency bracketed with a fresh clock per
-trial (`docs/probes/ExpB4.java`):
+*Asynchrony.* `IAITimerService.pauseClock` branches on `clock.getType()`: only for `LOCAL`
+(type 1) does it touch the clock directly. For `HOST` (the scope the app uses) it calls
+`TimerAgent.sendPause`, i.e. `Activity.sendAll("Cybele.TimerService." + decoratedClockId,
+{cmdPause})` — an ordinary asynchronous channel send, where `decoratedClockId = clockId + "." +
+Cybele.getHost() + ".HOST"` (measured: `myClock.192.168.0.112.HOST`). The kernel's `TimerAgent`
+receives it on `receiveNetCmd`, recovers the clock id from the event tag, and calls
+`ContinuousClock.setPause()`. `resumeClock`, `setClockPace` and `setTime` use the same path.
+**So the clock is still running when `pauseClock()` returns; measured delivery latency is under
+2 ms (0–1 ms in 40/40 real-app runs).** Because `pause` and `resume` traverse the same channel with
+the same latency, a bracket freezes the clock for a window equal in *duration* to the bracket,
+merely time-shifted by that latency.
 
-```
-wait=0ms    after pauseClock -> isPaused=false clockAdvance(400ms real)=1
-wait=50ms   after pauseClock -> isPaused=true  clockAdvance(400ms real)=0
-wait=100ms  ... 5000ms                         all isPaused=true, advance=0
-```
+*Measured in the real app* — unmodified `RailwayMainAgent` (GUI + 15 agents + 2 activities,
+`pauseClock` issued from a separate agent handler thread), n = 40:
 
-**Consequence for the application.** `RoadAgent.push()` (`:132-134`), `RoadAgent.pop()`
-(`:167-169`) and `Planning.planTrain` (`:108-112`) all use the shape
-`pauseClock(); <a couple of statements>; resumeClock();`. Because the pause has not landed yet when
-`resumeClock()` is called microseconds later, **the clock is not frozen across those critical
-sections**. Measured over 50 back-to-back pause/resume pairs: 3 004 ms real elapsed vs 3 001 ms of
-clock elapsed — a ~3 ms total loss, i.e. the construct is effectively a no-op. A migration that
-implements pause/resume *synchronously* would change simulation behaviour; a migration that drops
-them entirely would not.
+| Scenario | Result |
+|---|---|
+| bare `pauseClock` | froze `myClock` **40/40** (advance 0–1 ms over 400 ms real) |
+| bracket around 10 ms of work | froze 9–11 ms, **22/22** |
+| bracket around 100 ms of work | froze 99–101 ms, **22/22** |
+| bracket around 500 ms of work | froze 499–502 ms, **22/22** |
+| 1000 brackets of the app's actual shape (a few statements, 50 ms apart) | ~35 µs frozen each, **0 failures** |
 
-*Known probe artefact:* `docs/probes/ExpB3.java` polls `Cybele.isPaused()` every 50 ms in a loop
-and then never observes the pause land (10 s). The poll-free bracket in `ExpB4` is the
-authoritative measurement; the polling variant is recorded because it shows the measurement is
-perturbable and any future probe of this must avoid tight polling on the clock monitor.
+**The three bracketed sections — `Planning.java:108-112`, `RoadAgent.java:132-134`,
+`RoadAgent.java:167-169` — do freeze the clock, always, for the duration of the bracketed work.**
+Input to #29: a synchronous `SimClock.pause()`/`resume()` is behaviour-preserving; *removing* the
+brackets is what changes behaviour.
+
+*Registration race — why standalone probes disagree.* `createClock` builds the `ContinuousClock`
+synchronously but announces it with `Activity.sendAll("Cybele.TimerService.newClock", …)`; only
+when the `TimerAgent` handles that broadcast does it `openChannel` the per-clock command channel.
+If `createClock` runs **within ~3.4 ms of `Cybele.startUp()` returning**, the `TimerAgent` has not
+yet subscribed to `Cybele.TimerService.newClock`, the announcement is silently dropped (SEM-06),
+the per-clock channel is never opened, and **every** `pauseClock` / `resumeClock` / `setClockPace`
+/ `setTime` on that clock id is a silent no-op **for the life of the JVM** — while `getTime` and
+`isPaused` continue to work, so the failure is invisible. Measured threshold: gap ≤ 3.4 ms → lost
+in 19/23 runs; gap ≥ 3.5 ms → landed in 66/66. The loss is **per-clock and permanent** (a clock
+created at t = 0 was still dead at t = 6.5 s while clocks created at t = 1.5 s in the *same* JVM
+worked, 8/8). Caller thread and pace are irrelevant, and settle time *after* `createClock` does not
+help. Identical on JDK 21 and JDK 25. Proof that the missing `TimerAgent` subscription is the
+mechanism: a spy agent that subscribed to the per-clock channel *after* the loss did receive
+`cmdPause` while the clock kept running (n = 14) — `sendAll` delivers fine, the subscriber is
+simply absent.
+
+**The app is immune**: `new Gui(this); gui.setVisible(true)` three lines above
+`RailwayMainAgent.java:111` puts the gap at 159–384 ms (n = 40), i.e. 45×–110× the window. Every
+`docs/probes/ExpB*` probe sits *inside* the window, which is why they report the pause "never
+landing"; where one of them reports it landing, the difference is an incidental delay (below), not
+a real semantic difference. **A JADE port must not reintroduce this: if `createClock` moves above
+the GUI construction, or the GUI is removed for a headless run, the app's clock silently stops
+responding to pause/resume/pace.** The GUI pace toolbar (GUI-06, `Cybele.setPace`) goes through the
+same channel and would silently stop working too. See #17.
+
+*The `"clk" + w` vs `"clk0"` artefact.* Editing `ExpB4`'s clock-name expression flips the result
+deterministically. This is **not** string identity, interning, or per-id state — it is the
+`invokedynamic`/`StringConcatFactory` bootstrap on first execution of a runtime `String`
+concatenation, worth about +3.5 ms, which straddles the race window:
+
+| Variant | `startUp`→`createClock` gap | Outcome |
+|---|---|---|
+| none | 2.4–3.1 ms | clock kept RUNNING 11/12 |
+| `sink = "clk" + w` (first execution, indy bootstrap) | 5.7–8.9 ms | clock FROZE 12/12 |
+| same expression, bootstrap **pre-paid** before `startUp` | 2.5–3.3 ms | clock kept RUNNING 6/9 |
+| `Thread.sleep(1)` | ~3.5 ms | clock FROZE 8/8 |
+
+On JDK 25 it is razor sharp: unwarmed 8/8 RUNNING, concat 8/8 FROZE. **Treat any `ExpB*` result as
+valid only alongside its measured `startUp`→`createClock` gap.** `ExpB4` pays the bootstrap on
+`"clk" + w` before its first `createClock` and therefore shows a frozen clock; `ExpB` uses a
+`static final String` literal and loses the race, hence its delta column. Both committed probes are
+correct measurements of different sides of the same 3.4 ms boundary. `docs/probes/README.md`
+Caveat 1 carries the operational version of this.
+
+*A note on the earlier reading of `adv=1`.* `isPaused()` and `getTime()` are both `synchronized`
+reads of the **same** `boolean paused` field on the **same** local `ContinuousClock` object, so
+`isPaused()` cannot be stale relative to `getTime()`. The correct reading of a 1 ms advance is that
+the pause landed ~1 ms *after* the `isPaused` sample — a race, not staleness.
 
 ---
 
@@ -501,7 +631,7 @@ invocations:
 All three work: two `openChannel` calls in the **same activity** with different callbacks; one in
 each of **two activities of the same agent**; one in each of **two different agents**. A probe
 agent can therefore tap any existing channel (CH-01…CH-15) without modifying the sender or the
-existing receiver — the application's 1-subscriber-per-channel property (C-06) is its own choice,
+existing receiver — the application's 1-subscriber-per-channel property (CNT-06) is its own choice,
 not a kernel limitation.
 
 ---
@@ -560,27 +690,30 @@ Recorded here so nothing is lost; **full triage is #22**. Each has a `file:line`
 
 | id | Site | Defect |
 |---|---|---|
-| DEF-01 | `Station.java:105` + `PathFinding.java:47` | **Untimed `wait()` with no predicate loop**, woken by `notify()` (not `notifyAll`) from a *different* activity. On a spurious/mis-targeted wakeup `pathDirs.get(target)` (`Station.java:106`) returns `null`; that `null` travels as `nextPosition` in CH-06; `Train.entered` (`Train.java:87-93`) treats a `null` `nextPosition` as "arrived" and calls `Agent.die()` **mid-route**. Also: `wait()` is called while holding the `synchronized` `Station` monitor from `enter`/`leave`, so the whole station stalls |
+| DEF-01 | `Station.java:105` + `PathFinding.java:47` | **Untimed `wait()` with no predicate loop**, woken by `notify()` (not `notifyAll`) from a *different* activity. On a spurious/mis-targeted wakeup `pathDirs.get(target)` (`Station.java:106`) returns `null`; that `null` travels as `nextPosition` in CH-06; `Train.entered` (`Train.java:87-93`) treats a `null` `nextPosition` as "arrived" and calls `Agent.die()` **mid-route**. Also: the station stalls for the whole round trip — not because the monitor is held (`Object.wait()` **releases** it, which is exactly why `PathFinding.pathFindReply`'s `synchronized (station)` at `:45` can acquire it at all), but because per SEM-04 the blocked handler occupies the station's own activity, starving its `enter`/`leave`/`voteRequest`/`voteResult` channels until the reply arrives. See DEF-23 for the case where it never does |
 | DEF-02 | `Planning.java:126` | The author's own `//BUG ne vzdy se doruci` ("not always delivered"). CH-05 may be sent before the `Train` agent has executed `Activity.openChannel(START+…)` at `Train.java:54`; per SEM-06 the message is then silently dropped and the train never starts |
 | DEF-03 | `RoadAgent.java:211` | `(int) (diff(time) - o.diff(time))` — narrowing a millisecond `long` to `int`. *Note:* `diff(t) - o.diff(t)` algebraically cancels `t`, so reading the live clock at `:210` does **not** make the ordering unstable; the truncation is the real defect. Same pattern at `Planning.java:148` |
 | DEF-04 | `RoadAgent.java:222` (in `frequency`, `:219-225`) | `i.equals(position)` compares an `OueueItem` to a `String`. `OueueItem` does not override `equals`, so this is **always false** and `frequency` always returns 0 — the entire secondary tie-break at `:213` is dead code |
-| DEF-05 | `Planning.java:48`, `:92`, `:96` | `votes` is keyed by the **unordered** `Doubleton(voter, train)` (`VoteCollecting.java:51`). A duplicate vote from the same voter **overwrites** the map entry while `latch.countDown()` (`VoteCollecting.java:54`) still fires, so the `assert v.size() == path.size()` at `:96` can fail (silently, since asserts are off — C-08) and `Collections.max` at `:97` then runs over a short list |
+| DEF-05 | `Planning.java:48`, `:92`, `:96` | `votes` is keyed by the **unordered** `Doubleton(voter, train)` (`VoteCollecting.java:51`). A duplicate vote from the same voter **overwrites** the map entry while `latch.countDown()` (`VoteCollecting.java:54`) still fires, so the `assert v.size() == path.size()` at `:96` can fail (silently, since asserts are off — CNT-08) and `Collections.max` at `:97` then runs over a short list |
 | DEF-06 | `RoadAgent.java:204` | `invertedTimetable.get(train) - time` — unboxing NPE if the train is not in the inverted timetable (e.g. it entered the queue before its `VOTE_RESULT` was applied, or after `leave` removed it at `:162`) |
 | DEF-07 | `Train.java:82-84` | `leaveObject(position)` (CH-04) is sent from `entered`, i.e. **after** the new object has already incremented its occupancy (`Station.java:93`). Peak occupancy is over-counted for the duration of the overlap, and admission decisions are made against the inflated number |
 | DEF-08 | `Train.java:123-126` | `destroy()` calls `leaveObject(position)` again, so a **second** CH-04 is sent for the final station after `Train.entered` already sent one at `:82`. `Station.leave` then decrements `occupied` twice or wrongly admits a queued train |
-| DEF-09 | `VoteCollecting.java:53-54` | `scrutator.getTrainCountDowns().get(train).countDown()` — a vote arriving after `Planning.java:89` removed the latch NPEs. The `assert` at `:53` that would have caught it is disabled |
-| DEF-10 | `Generator.java:37`, `:62` + C-11 | `openedChannels` accumulates one channel ticket per train forever; `Activity.closeChannel` is never called anywhere in the codebase. CH-12 channels leak for every train ever created. The author flagged it: `// EXTENSION jak delat ruseni?` at `:36` |
+| DEF-09 | `VoteCollecting.java:53-54` | `scrutator.getTrainCountDowns().get(train).countDown()` — a vote arriving after `Planning.java:89` removed the latch NPEs. The `assert` at `:53` that would have caught it is disabled. The NPE kills the `vote` handler *before* `countDown()`, so it is also one of the two ways to trigger DEF-22 |
+| DEF-10 | `Generator.java:37`, `:62` + CNT-11 | `openedChannels` accumulates one channel ticket per train forever; `Activity.closeChannel` is never called anywhere in the codebase. CH-12 channels leak for every train ever created. The author flagged it: `// EXTENSION jak delat ruseni?` at `:36` |
 | DEF-11 | `Train.java:61` | `(mess == KILLED)` — reference comparison of `String`s. Works only because both sides are compile-time constants; any refactor that computes the value breaks the `KILL` sentinel silently |
 | DEF-12 | `RailwayObject.java:27-31`, called from `PathFinding.java:35` | `getName()` reads the **thread-context** `Agent.getAgentId()`, so `station.getName()` returns the name of *the calling thread's* agent, not the receiver's. It happens to be correct today only because ACT-04 is an activity of the same agent. Any cross-agent call to `getName()` silently returns the wrong name |
 | DEF-13 | `Station.java:39,44,67` + `RailwayMainAgent.java:62` (SEM-05) | `Station.Info` is a non-static inner class shipped by reference over CH-10. `RailwayMainAgent.stationInfos` values are **live aliases** mutated by `Station.enter`/`leave` (`:93`, `:119`) on the station threads while the Swing EDT reads them in `RailwayCanvas.paintStation` (`RailwayCanvas.java:67-69`) — an unsynchronised cross-thread read of non-volatile `int` fields |
 | DEF-14 | `RoadAgent.java:100` | `traveledTrain` is a single slot overwritten by every `travelStart`; `travelEnd` (`:113-116`) notifies whatever is in it. Guarded today only by the road being single-occupancy |
-| DEF-15 | `RailwayMainAgent.java:108-109` (GUI-03) | The `Gui` is constructed unconditionally inside the agent constructor; no headless mode exists |
+| DEF-15 | `RailwayMainAgent.java:108-109` (GUI-03) | The `Gui` is constructed unconditionally inside the agent constructor; no headless mode exists. **Load-bearing beyond the GUI**: those two lines are also the only thing keeping `createClock` at `:111` clear of the SEM-02 registration race (they buy 159–384 ms against a ~3.4 ms window). Removing them for a headless run, or moving `createClock` above them, silently disables `pauseClock`/`resumeClock`/`setPace` on `myClock` for the life of the JVM. See #17 |
 | DEF-16 | `RoadAgent.java:102` (TMR-04) | Travel delay can be negative for `delay == 1` roads (`tr1`, `tr2`), ≈2.3 % of traversals. Cybele fires such a timer immediately (SEM-06) ⇒ instantaneous traversal |
-| DEF-17 | `Planning.java:121` vs `:111` | `placeTrainIntoFirstStation` polls the globally earliest `TrainPlan` rather than the plan whose timer fired, so the printed line and the started train can belong to a different plan than the expired timer. Observed live (§11) |
+| DEF-17 | `Planning.java:121` vs `:111` | `placeTrainIntoFirstStation` polls the globally earliest `TrainPlan` rather than the plan whose timer fired: one timer expiry consumes whatever is at the head of the queue. **Latent, not demonstrated** — a plan is enqueued at `:110` immediately before its own timer is armed at `:111`, and a timer armed at `a` for departure `d` fires at `max(a, d)`, so any queued plan with a strictly smaller departure has already fired and been polled. Reachable only on a **tie** in `departure` (broken by `train.compareTo` at `:150`, which orders `vl10` before `vl9` lexicographically) or a same-tick burst; then one train is started with another train's `poll.station`, and `assert clockTime >= departure` at `:124` is the only guard — and it is disabled (DEF-21). Nothing in stdout distinguishes the two cases, so **no observation can confirm or refute this from the outside**; #22 should triage it as a latent tie-race, not a sighting |
 | DEF-18 | `Station.java:135-136` | `timetable.lastKey()` on an empty `TreeMultiMap` throws `NoSuchElementException`; unreachable only because every capacity in CFG-02 is ≥ 2 |
 | DEF-19 | `RoadAgent.java:190` | Class name typo `OueueItem` (should be `QueueItem`); harmless but load-bearing for any grep-based refactor |
 | DEF-20 | `RailwayMainAgent.java:155,166,178` | Handler names are misspelled (`recieve…`) and bound by **string literal** at `:119`, `:128`, `Generator.java:59`. Renaming the methods without renaming the literals fails silently at runtime |
-| DEF-21 | C-08 | All 33 `assert`s are disabled — the codebase's only invariant checks never run. Input to #14 |
+| DEF-21 | CNT-08 | All 33 `assert`s are disabled — the codebase's only invariant checks never run. Input to #14 |
+| DEF-22 | `Planning.java:88` | **Unbounded `latch.await()` with no timeout — the most severe latent failure in the codebase.** The latch is sized `path.size()` at `:74` and counted down only from `VoteCollecting.java:54`. Two proven mechanisms lose a `countDown()`: a `VOTE_REQUEST` sent to a channel that is not open is **silently dropped** (SEM-06), and a late vote NPEs the `vote` handler before it counts down (DEF-09). Either one hangs ACT-01 **forever** — and since ACT-01 dispatches serially (SEM-04), CH-13 is never serviced again, so **no further train is ever planned for the rest of the run** while `Generator` keeps creating `Train` agents that never start. Silent: no exception, no log line, the GUI keeps ticking. Any port must use a bounded wait plus an explicit timeout branch |
+| DEF-23 | `Station.java:105` | The same unbounded-wait shape as DEF-22, one level down: `wait()` with no timeout, woken only by `PathFinding.pathFindReply` (`:47`). A `PATH_FIND` request dropped on the way out (SEM-06), or a reply lost on the way back, stalls **that station permanently** — every `enter`, `leave`, `voteRequest` and `voteResult` on it starves behind the blocked handler (SEM-04), which in turn can hang the next election on DEF-22. DEF-01 covers only the *spurious-wakeup* branch of the same line; this is the *no-wakeup* branch |
+| DEF-24 | `RailwayMainAgent.java:287-288` | `TableModel.update` iterates `trainStates.entrySet()` **off-lock** on the Swing EDT while agent threads mutate the `synchronizedMap` — `Collections.synchronizedMap` guarantees nothing for iteration without manual synchronisation on the map, so this is a `ConcurrentModificationException` risk on every repaint. It then caches the live `Map.Entry` views in `data` (`:288`); the behaviour of an `Entry` whose mapping has since been removed is **undefined**, and `getValueAt` (`:277-279`) reads them later from the EDT. Per EVT-04 the mutations arrive on ACT-02's thread and on AG-01's main activity concurrently. DEF-13 covers the analogous `Station.Info` aliasing, not this |
 
 ---
 
@@ -594,8 +727,17 @@ Recorded here so nothing is lost; **full triage is #22**. Each has a `file:line`
   dispatch *within* one activity; the probes did not isolate whether two activities of one agent
   can run handlers simultaneously (the thread-pool config CFG-12 suggests yes, and ACT-03/ACT-04
   only make sense if yes, but this was not measured directly).
-* **The upper bound on the `pauseClock` asynchrony window under load.** Measured < 50 ms on an idle
-  JVM; not measured with 15 agents and a live event storm.
+* **The mechanism of pause/resume loss under artificial burst load.** With 50 back-to-back
+  `pauseClock`/`resumeClock` pairs issued with no gap while the full simulation runs, the clock was
+  left **permanently paused in 2 of 40 real-app runs (5 %)**. The failure did **not** reproduce
+  without the app's event load (0/24, including 4 agents × 200 concurrent pairs) and did not occur
+  in 1000 brackets of the app's realistic shape (0/1000), so the app's three sites cannot plausibly
+  hit it. The most likely mechanism — non-serialised dispatch of two `receiveNetCmd` events for the
+  same channel across the 5–10-thread `thmgmt` pool (CFG-12), since `setPause`/`setResume` are
+  order-sensitive boolean writes — was **not isolated**. Input to #29: a JADE `SimClock` must not
+  rely on pause/resume ordering under burst — make it counted, or serialise it. Separately,
+  `ContinuousClock.getInfo()` calls `setPause()` and never resumes; no caller was found in the app
+  or in `CybeleImpl.jar`, but any future `getInfo` path would permanently stop the clock.
 * **Whether `Doubleton`-driven iteration order is stable on non-HotSpot JVMs or on JDK < 21.** Only
   OpenJDK 21.0.11 and 25.0.4 were tested (both identical).
 * **The behaviour of `Agent.die()` with respect to the dying agent's open channels.** Not probed;

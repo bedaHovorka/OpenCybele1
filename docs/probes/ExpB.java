@@ -1,5 +1,3 @@
-package probe;
-
 import java.util.concurrent.CountDownLatch;
 
 import cybele.kernel.Cybele;
@@ -10,6 +8,18 @@ import cybele.kernel.Handler;
  * i.e. after pause,pause does ONE resume restart the clock, or are two needed?
  * RoadAgent.push/pop and Planning.planTrain nest pause/resume around a critical
  * section, so a counted implementation vs. a boolean flag changes behaviour.
+ *
+ * WARNING — startup registration race (INVENTORY.md SEM-02). Cybele.createClock
+ * announces the new clock with an ASYNCHRONOUS sendAll; if it runs within about
+ * 3.4 ms of Cybele.startUp() returning, the kernel's TimerAgent has not yet
+ * subscribed, the announcement is silently dropped, and every subsequent
+ * pauseClock/resumeClock/setPace/setTime on that clock id is a permanent silent
+ * no-op while getTime/isPaused keep working. Every ExpB* probe sits inside that
+ * window. A result from these probes is only meaningful next to a measured
+ * startUp -> createClock gap; sleep >= 5 ms before createClock (or measure and
+ * report the gap) if you re-run them. The real application is immune: the GUI
+ * construction three lines above RailwayMainAgent.java:111 puts its gap at
+ * 159-384 ms.
  */
 public class ExpB {
     static final String CLOCK = "probeClock";

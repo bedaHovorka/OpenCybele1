@@ -1,12 +1,24 @@
-package probe;
-
 import java.util.concurrent.CountDownLatch;
 
 import cybele.kernel.Cybele;
 import cybele.kernel.Handler;
 
-/** Experiment B, refined: HOST scope (what the app uses) vs LOCAL scope, with a
- *  long settle window after each pause so an ASYNCHRONOUS pause would still show. */
+/**
+ * Experiment B, refined: HOST scope (what the app uses) vs LOCAL scope, with a
+ * long settle window after each pause so an ASYNCHRONOUS pause would still show.
+ *
+ * WARNING — startup registration race (INVENTORY.md SEM-02). Cybele.createClock
+ * announces the new clock with an ASYNCHRONOUS sendAll; if it runs within about
+ * 3.4 ms of Cybele.startUp() returning, the kernel's TimerAgent has not yet
+ * subscribed, the announcement is silently dropped, and every subsequent
+ * pauseClock/resumeClock/setPace/setTime on that clock id is a permanent silent
+ * no-op while getTime/isPaused keep working. Every ExpB* probe sits inside that
+ * window. A result from these probes is only meaningful next to a measured
+ * startUp -> createClock gap; sleep >= 5 ms before createClock (or measure and
+ * report the gap) if you re-run them. The real application is immune: the GUI
+ * construction three lines above RailwayMainAgent.java:111 puts its gap at
+ * 159-384 ms.
+ */
 public class ExpB2 {
     static final CountDownLatch done = new CountDownLatch(1);
 

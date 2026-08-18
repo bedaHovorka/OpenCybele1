@@ -1,5 +1,3 @@
-package probe;
-
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -19,6 +17,18 @@ import cybele.kernel.Handler;
  *   (i) default (both app.param lines commented) and
  *   (ii) agent_queue merge_sort staticpriority_comp
  * shows whether the probe is capable of observing a re-ordering at all.
+ *
+ * The (ii) control line is NOT either of the commented-out lines in cybele.prop
+ * -- cybele.prop:66 puts merge_sort on the SYSTEM queue only. See
+ * docs/probes/README.md for the exact line to substitute.
+ *
+ * KNOWN FLAKINESS — roughly 1 run in 6 dies during startup with
+ *   NullPointerException ... TimerAgent.register ... because "this.ag" is null
+ * thrown from com.iai.cybele.timer.IAITimerService.newClock. This is the same
+ * startup race as INVENTORY.md SEM-02: a handler constructor calls createClock
+ * before the kernel's timer-service agent is up. Re-run; it is not a defect in
+ * the probe. Sleeping a few ms after Cybele.startUp() and before the first
+ * createClock makes it go away (and also closes the SEM-02 race).
  */
 public class ExpA2 {
     static final List<String> log = Collections.synchronizedList(new ArrayList<String>());

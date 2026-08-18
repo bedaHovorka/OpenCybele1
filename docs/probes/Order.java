@@ -1,8 +1,9 @@
 import java.util.*;
 import cz.vutbr.fit.ags.xhovor07.util.*;
 
-/** Experiment D: capture today's actual iteration order at the four
- *  HashMap/HashSet sites that decide BEHAVIOUR (not just display). */
+/** Capture today's actual iteration order at the four HashMap/HashSet sites
+ *  that decide BEHAVIOUR, not just display: INVENTORY.md NDT-01..NDT-04.
+ *  Default package, no Cybele dependency; needs the app's util classes only. */
 public class Order {
     public static void main(String[] a) {
         UnorientedGraph<String,String> net = new HashMapGraph<String,String>();

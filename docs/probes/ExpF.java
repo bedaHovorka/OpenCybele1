@@ -1,5 +1,3 @@
-package probe;
-
 import java.io.Serializable;
 import java.util.concurrent.CountDownLatch;
 

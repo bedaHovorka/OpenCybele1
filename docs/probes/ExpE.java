@@ -1,5 +1,3 @@
-package probe;
-
 import java.io.Serializable;
 import java.util.concurrent.CountDownLatch;
 
@@ -13,7 +11,21 @@ import cybele.kernel.Handler;
  *  zero delay (Planning.java:111), and (3) is a sendAll to a not-yet-opened
  *  channel dropped (Planning.java:126 "//BUG ne vzdy se doruci")?
  *  NB every handler/ctor returns promptly: a Cybele activity dispatches its
- *  own events serially, so a blocking ctor would starve its own timers. */
+ *  own events serially, so a blocking ctor would starve its own timers.
+ *
+ *  NB this probe shows only THAT a negative/zero-delay timer fires within the
+ *  observation window, not how fast. The timing figures quoted in INVENTORY.md
+ *  TMR-04 (-1500 -> 1-5 ms, 0 -> 1-5 ms, 500 -> 500-515 ms, 2000 -> 2001-2010 ms)
+ *  come from a separate timestamped measurement, not from this file.
+ *
+ * KNOWN FLAKINESS — roughly 1 run in 6 dies during startup with
+ *   NullPointerException ... TimerAgent.register ... because "this.ag" is null
+ * thrown from com.iai.cybele.timer.IAITimerService.newClock. This is the same
+ * startup race as INVENTORY.md SEM-02: a handler constructor calls createClock
+ * before the kernel's timer-service agent is up. Re-run; it is not a defect in
+ * the probe. Sleeping a few ms after Cybele.startUp() and before the first
+ * createClock makes it go away (and also closes the SEM-02 race).
+ */
 public class ExpE {
     static final String CLOCK = "c";
     static volatile boolean negFired, zeroFired, posFired, lateEarly, lateAfter;
