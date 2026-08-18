@@ -44,6 +44,9 @@ RUN groupadd -g ${RUNTIME_GID} app \
 WORKDIR /app
 COPY --chown=app:app --from=builder /app/build/install/opencybele/ ./
 COPY --chown=app:app cybelle/cybele.prop cybelle/ICS.prop ./cybelle/
+# Ready-made scenario files, so `-Dsim.config=scenarios/short.properties` works in
+# the container exactly as it does on the host. See docs/scenario-config.md.
+COPY --chown=app:app scenarios ./scenarios
 
 ENV DISPLAY=:0
 USER app

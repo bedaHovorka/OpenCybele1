@@ -18,6 +18,7 @@ import java.awt.Rectangle;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionListener;
 import java.awt.geom.AffineTransform;
+import java.util.List;
 import java.util.Observable;
 import java.util.Observer;
 
@@ -31,12 +32,25 @@ import cz.vutbr.fit.ags.xhovor07.Station.Info;
 
 /**
  * This is a main GUI component in a program. It show railway elements in a canvas.
- *
+ * <p>
+ * <b>The canvas is a second, independent statement of the topology.</b> It draws one
+ * straight main line plus branch stubs, at hand-computed coordinates; it cannot draw an
+ * arbitrary graph. The station order and the branches are configurable
+ * ({@code sim.gui.mainLine}, {@code sim.gui.branches}), but a configured
+ * {@code sim.topology} that this layout cannot represent is <em>not</em> an error -
+ * the GUI is outside the behavioural contract, goldens come from the trace rather than
+ * from the screen. What is not acceptable is drawing a network that is not the one
+ * being simulated, so every mismatch {@link ScenarioConfig#getGuiLayoutWarnings()}
+ * finds is printed at startup and painted here in red, and a main-line pair with no
+ * track between it is drawn as a red {@code ??} gap instead of quietly omitted.
+ * See {@code docs/scenario-config.md}.
  */
 public class RailwayCanvas extends JComponent implements Scrollable, MouseMotionListener, Observer {
     private static final long serialVersionUID = 1L;
     private static final int maxUnitIncrement = 35;
-    private final String[] mainRoads = new String[]{"stA", "stH", "stG", "stE", "stD", "stB"};
+    private final String[] mainRoads;
+    private final List<ScenarioConfig.Branch> branches;
+    private final List<String> layoutWarnings;
     private final int leftSpace = 50;
     private final int roadWidth = 75;
     private final int stationWidth = 45;
@@ -48,6 +62,11 @@ public class RailwayCanvas extends JComponent implements Scrollable, MouseMotion
      * @param mainAgent 
      */
     public RailwayCanvas(RailwayMainAgent mainAgent) {
+	final ScenarioConfig config = ScenarioConfig.get();
+	final List<String> mainLine = config.getGuiMainLine();
+	this.mainRoads = mainLine.toArray(new String[mainLine.size()]);
+	this.branches = config.getGuiBranches();
+	this.layoutWarnings = config.getGuiLayoutWarnings();
 	this.mainAgent = mainAgent;
 	mainAgent.addObserver(this);
 	setPreferredSize(new Dimension(780, 380));
@@ -89,7 +108,9 @@ public class RailwayCanvas extends JComponent implements Scrollable, MouseMotion
      * @param g graphics context
      */
     public void paint(Graphics2D g) {
+	final Color baseColor = g.getColor();
 	g.drawString(Cybele.getTime(RailwayMainAgent.CLOCK_ID)/1000 + " sec", 20, 20);
+	paintLayoutWarnings(baseColor, g);
 	g.setStroke(basicStroke);
 	final AffineTransform inicitialPos = g.getTransform();
 	g.translate(leftSpace, 250);
@@ -97,15 +118,46 @@ public class RailwayCanvas extends JComponent implements Scrollable, MouseMotion
 	    paintStation(mainRoads[i], g);
 	    g.translate(stationWidth, 0);
 	    if (i < mainRoads.length-1) {
+		// No `assert road != null` any more: with a configurable topology the
+		// existence of a track between two canvas-adjacent stations is a property
+		// of the configuration, not an invariant of the program. Draw the gap.
 		final String road = mainAgent.getNet().get(mainRoads[i], mainRoads[i+1]);
-		assert road != null;
-		paintRoad(road, g);
+		if (road == null) {
+		    paintMissingRoad(baseColor, g);
+		} else {
+		    paintRoad(road, g);
+		}
 	    }
 	    g.translate(roadWidth, 0);
 	}
 	
-	paintSecondRoad(leftSpace+roadWidth+stationWidth, 50, "stC", "tr7", inicitialPos, g);
-	paintSecondRoad(leftSpace+2*(roadWidth+stationWidth), 150, "stF", "tr6", inicitialPos, g);
+	// Branch stubs, at the same hand-computed coordinates as before: the n-th branch
+	// (1-based) sits at x = leftSpace + n*(roadWidth+stationWidth), y = 50 + (n-1)*100.
+	for (int n = 1; n <= branches.size(); n++) {
+	    final ScenarioConfig.Branch branch = branches.get(n-1);
+	    paintSecondRoad(leftSpace+n*(roadWidth+stationWidth), 50+(n-1)*100,
+		    branch.getStation(), branch.getRoad(), inicitialPos, g);
+	}
+    }
+    
+    private void paintLayoutWarnings(Color baseColor, Graphics2D g) {
+	if (layoutWarnings.isEmpty()) return;
+	g.setColor(Color.RED);
+	int y = 40;
+	g.drawString("GUI TOPOLOGY MISMATCH - this drawing is incomplete:", 20, y);
+	for (String warning : layoutWarnings) {
+	    y += 15;
+	    g.drawString("  * " + warning, 20, y);
+	}
+	g.setColor(baseColor);
+    }
+    
+    private void paintMissingRoad(Color baseColor, Graphics2D g) {
+	g.setColor(Color.RED);
+	g.drawString("??", roadWidth/2-7, stationWidth/2-3);
+	g.drawLine(0, stationWidth/2-6, roadWidth, stationWidth/2+6);
+	g.drawLine(0, stationWidth/2+6, roadWidth, stationWidth/2-6);
+	g.setColor(baseColor);
     }
     
     private void paintSecondRoad(int x, int y, String stationName, String roadName, AffineTransform inicitialPos, Graphics2D g) {

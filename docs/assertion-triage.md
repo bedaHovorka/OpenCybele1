@@ -316,3 +316,36 @@ must never be compared against a replay made without it.
 - Result 3's failure modes were produced by *synthetic* faults deliberately planted at
   three call sites. They characterise how the kernel reacts to a failing assertion; they
   are not evidence about any real invariant in this codebase.
+
+## Amendment — after #18 (scenario configuration)
+
+Everything above was measured against the tree at commit `efa7711`. Two things about it are
+now stale, and nothing else is.
+
+**1. Line numbers.** [#18](https://github.com/bedaHovorka/OpenCybele1/issues/18) externalised
+the hardcoded simulation parameters, which shifted lines in `Generator`, `Gui`,
+`RailwayCanvas`, `RailwayMainAgent`, `Main` and `Station`. The site tables above still name the
+pre-#18 lines; the *assertions* they name are unchanged and still identify their sites
+unambiguously by expression. Re-run the instrumentation pass before trusting the numbers.
+
+**2. One site was removed: `RailwayCanvas.java:101`, `assert road != null`** (1 430 evaluations
+in run 6). It asserted that two stations drawn next to each other on the canvas have a track
+between them. That was a real invariant while the canvas and the network were both hardcoded
+constants; once `sim.topology` and `sim.gui.mainLine` are independently configurable it is a
+property of the configuration instead, and an `AssertionError` was the wrong response to it —
+it would have fired on the **AWT event dispatch thread**, which § "Not every assertion goes
+through Cybele at all" above identifies as the case with no Cybele banner and no useful
+framing. It is replaced by a red crossed `??` gap painted in place of the missing track, plus a
+mismatch banner on stderr at startup and on the canvas. See
+[`scenario-config.md`](scenario-config.md) § "The canvas topology duplication".
+
+**The count is therefore 32 assertion sites, not 33** — 24 exercised and holding, 8 never
+reached. The one Javadoc false positive at `util/Util.java:49` is still excluded from the
+count, as before.
+
+Nothing else moved: no assertion was added, weakened or strengthened, and the
+`-ea` decision, the Result 3 mechanism and every caveat above stand unchanged. The new
+`ScenarioConfig` deliberately uses **exceptions, not assertions**, for configuration validation,
+and raises them from `Main.main` before the kernel starts — precisely because Result 3 shows
+that an assertion inside an agent is swallowed. That path *does* change the exit status to 1,
+which makes it the one failure mode in this codebase a runner can trust the exit status for.

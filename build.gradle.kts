@@ -21,6 +21,24 @@ application {
     applicationDefaultJvmArgs = listOf("-ea", "--patch-module", "java.base=cybelle")
 }
 
+tasks.withType<JavaCompile>().configureEach {
+    // Pin the source encoding rather than inheriting the daemon's platform default:
+    // this branch exists to make runs reproducible, and a build that depends on the
+    // ambient locale is not.
+    options.encoding = "UTF-8"
+}
+
+tasks.named<JavaExec>("run") {
+    // Forward -Dsim.* from the Gradle command line into the forked application JVM.
+    // Without this, `./gradlew run -Dsim.arrival.lambdaMs=800` would set the property
+    // on the Gradle daemon and the simulation would silently run with the defaults.
+    // See docs/scenario-config.md.
+    System.getProperties().forEach { key, value ->
+        val name = key.toString()
+        if (name.startsWith("sim.")) systemProperty(name, value.toString())
+    }
+}
+
 repositories {
     mavenLocal()
     mavenCentral()
