@@ -42,7 +42,12 @@ public class Generator implements Handler {
     private final long lambda;
  
     private int index = 0;
-    private static final Random random = new Random();
+    /**
+     * This activity's own stream. It used to be a {@code static final Random} shared with
+     * every {@link RoadAgent} and published through {@code getRandom()}; see
+     * {@link SimRandom} for why that could not be made reproducible by seeding alone.
+     */
+    private final Random random;
     private RailwayMainAgent mainAgent;
     
     /**
@@ -53,6 +58,7 @@ public class Generator implements Handler {
 	final ScenarioConfig config = ScenarioConfig.get();
 	this.hhh = config.getTrainPairs();
 	this.lambda = config.getArrivalLambdaMs();
+	this.random = SimRandom.forAgent(SimRandom.GENERATOR_STREAM);
 	Activity.setTimer(RailwayMainAgent.CLOCK_ID, config.getArrivalFirstFireMs(), this, "generateTrain");
     }
     
@@ -73,13 +79,5 @@ public class Generator implements Handler {
     
     private long exp(double mean) {
         return Math.round(-mean * Math.log(random.nextDouble()));
-    }
-
-    /**
-     * get random
-     * @return random object
-     */
-    public static Random getRandom() {
-        return random;
     }
 }

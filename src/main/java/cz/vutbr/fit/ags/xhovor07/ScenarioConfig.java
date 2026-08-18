@@ -108,6 +108,22 @@ public final class ScenarioConfig implements Serializable {
     /** Branch stations drawn above the main line, {@code stX:trZ} entries separated by commas. */
     public static final String KEY_GUI_BRANCHES = "sim.gui.branches";
 
+    /**
+     * Master seed every per-agent random stream is derived from
+     * ({@link SimRandom#seedFor(long, String)}): a signed 64-bit integer, or the literal
+     * {@value #MASTER_SEED_RANDOM}, which draws a fresh one for this run.
+     */
+    public static final String KEY_RANDOM_MASTER_SEED = "sim.random.masterSeed";
+
+    /**
+     * The {@link #KEY_RANDOM_MASTER_SEED} value that asks for a freshly drawn seed. It is
+     * the <b>default</b>, so an ordinary interactive run keeps varying as it always did;
+     * the drawn value is printed by {@link #describe()} (and, more loudly, by {@code Main})
+     * so any run can be replayed after the fact with
+     * {@code -Dsim.random.masterSeed=<the printed number>}.
+     */
+    public static final String MASTER_SEED_RANDOM = "random";
+
     // ---- defaults: byte-identical in effect to the pre-#18 hardcoded literals ----
 
     static final String DEF_ARRIVAL_LAMBDA = "8500";          // Generator.LAMBDA
@@ -126,6 +142,7 @@ public final class ScenarioConfig implements Serializable {
     static final String DEF_GUI_PACES = "Fast=8,Normal=1,Slow=0.3";
     static final String DEF_GUI_MAIN_LINE = "stA,stH,stG,stE,stD,stB";
     static final String DEF_GUI_BRANCHES = "stC:tr7,stF:tr6";
+    static final String DEF_RANDOM_MASTER_SEED = MASTER_SEED_RANDOM;  // was: unseeded new Random()
 
     private static final String[][] KEYS_AND_DEFAULTS = {
         {KEY_ARRIVAL_LAMBDA, DEF_ARRIVAL_LAMBDA},
@@ -140,6 +157,7 @@ public final class ScenarioConfig implements Serializable {
         {KEY_GUI_PACES, DEF_GUI_PACES},
         {KEY_GUI_MAIN_LINE, DEF_GUI_MAIN_LINE},
         {KEY_GUI_BRANCHES, DEF_GUI_BRANCHES},
+        {KEY_RANDOM_MASTER_SEED, DEF_RANDOM_MASTER_SEED},
     };
 
     private static volatile ScenarioConfig instance;
@@ -197,6 +215,8 @@ public final class ScenarioConfig implements Serializable {
     private final List<String> guiMainLine;
     private final List<Branch> guiBranches;
     private final List<String> guiLayoutWarnings;
+    private final long masterSeed;
+    private final boolean masterSeedDrawn;
 
     private ScenarioConfig(Properties p) {
         arrivalLambdaMs = positiveLong(p, KEY_ARRIVAL_LAMBDA);
@@ -223,6 +243,10 @@ public final class ScenarioConfig implements Serializable {
         guiMainLine = parseList(p, KEY_GUI_MAIN_LINE);
         guiBranches = parseBranches(p);
         guiLayoutWarnings = Collections.unmodifiableList(checkGuiLayout(stations, roads));
+
+        final String seed = require(p, KEY_RANDOM_MASTER_SEED);
+        masterSeedDrawn = MASTER_SEED_RANDOM.equals(seed);
+        masterSeed = masterSeedDrawn ? drawMasterSeed() : parseSeed(seed);
 
         checkReachability();
     }
@@ -281,6 +305,9 @@ public final class ScenarioConfig implements Serializable {
         }
 
         final ScenarioConfig cfg = new ScenarioConfig(resolved);
+        // A drawn master seed is only useful if it survives as a number: republish the
+        // value that was actually used, never the literal "random" that asked for it.
+        resolved.setProperty(KEY_RANDOM_MASTER_SEED, Long.toString(cfg.masterSeed));
         // Republish so a later get() needs neither the file nor this class' static state.
         for (String[] kd : KEYS_AND_DEFAULTS) {
             System.setProperty(kd[0], resolved.getProperty(kd[0]));
@@ -308,6 +335,9 @@ public final class ScenarioConfig implements Serializable {
                         resolved.setProperty(kd[0], System.getProperty(kd[0], kd[1]).trim());
                     }
                     local = new ScenarioConfig(resolved);
+                    // Same reason as in load(): whoever reads the property later must see
+                    // the seed this JVM is actually running on, not the request for one.
+                    System.setProperty(KEY_RANDOM_MASTER_SEED, Long.toString(local.masterSeed));
                     instance = local;
                 }
             }
@@ -405,6 +435,24 @@ public final class ScenarioConfig implements Serializable {
         }
         if (!(d > 0)) throw new IllegalArgumentException(key + " must be > 0, was " + v);
         return d;
+    }
+
+    /**
+     * A seed nobody chose. {@code java.util.Random}'s no-arg constructor already mixes
+     * {@code nanoTime} with a per-JVM uniquifier, which is all that is wanted here: the
+     * value is printed and can be pinned, so it never has to be unguessable.
+     */
+    private static long drawMasterSeed() {
+        return new java.util.Random().nextLong();
+    }
+
+    private static long parseSeed(String value) {
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(KEY_RANDOM_MASTER_SEED + " must be a signed 64-bit"
+                    + " integer or '" + MASTER_SEED_RANDOM + "', got '" + value + "'");
+        }
     }
 
     private static List<String> parseList(Properties p, String key) {
@@ -739,6 +787,10 @@ public final class ScenarioConfig implements Serializable {
     public List<Branch> getGuiBranches() { return guiBranches; }
     /** @return human-readable mismatches between the configured topology and what the canvas can draw */
     public List<String> getGuiLayoutWarnings() { return guiLayoutWarnings; }
+    /** @return the master seed every per-agent stream is derived from; see {@link SimRandom} */
+    public long getMasterSeed() { return masterSeed; }
+    /** @return {@code true} if no seed was configured and this run drew one of its own */
+    public boolean isMasterSeedDrawn() { return masterSeedDrawn; }
 
     /**
      * The resolved configuration, one {@code key = value} line per parameter, in a
@@ -749,6 +801,15 @@ public final class ScenarioConfig implements Serializable {
     public String describe() {
         final StringBuilder sb = new StringBuilder();
         for (String[] kd : KEYS_AND_DEFAULTS) {
+            if (KEY_RANDOM_MASTER_SEED.equals(kd[0])) {
+                // Print the number in force, not the literal that asked for it, and say
+                // where it came from - a drawn seed is the only way to replay this run.
+                sb.append(kd[0]).append(" = ").append(masterSeed);
+                sb.append(masterSeedDrawn ? "    # drawn for this run; pass it back to replay"
+                                          : "    # default: " + kd[1]);
+                sb.append('\n');
+                continue;
+            }
             final String value = System.getProperty(kd[0], kd[1]);
             sb.append(kd[0]).append(" = ").append(value);
             if (!value.equals(kd[1])) sb.append("    # default: ").append(kd[1]);

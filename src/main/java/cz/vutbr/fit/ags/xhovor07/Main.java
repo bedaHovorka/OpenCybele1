@@ -32,6 +32,15 @@ public class Main {
 	System.err.println("--- scenario configuration ---");
 	System.err.print(config.describe());
 	System.err.println("------------------------------");
+	if (config.isMasterSeedDrawn()) {
+	    // Criterion of #15: a default (drawn) seed is worthless unless the run can be
+	    // replayed afterwards, so say it once, loudly, on stderr - stdout belongs to
+	    // the golden trace.
+	    System.err.println("--- no " + ScenarioConfig.KEY_RANDOM_MASTER_SEED + " given; drew "
+		    + config.getMasterSeed() + ". Replay this run's random streams with:");
+	    System.err.println("---   -D" + ScenarioConfig.KEY_RANDOM_MASTER_SEED + "="
+		    + config.getMasterSeed());
+	}
 	final List<String> warnings = config.getGuiLayoutWarnings();
 	if (!warnings.isEmpty()) {
 	    // Not fatal: the canvas is outside the behavioural contract. But it must

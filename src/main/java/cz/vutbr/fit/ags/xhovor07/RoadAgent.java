@@ -13,6 +13,7 @@ import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.PriorityQueue;
+import java.util.Random;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
@@ -40,6 +41,12 @@ public class RoadAgent extends StaticRailwayObject {
     private String traveledTrain;
     private Map<String, Long> invertedTimetable = new HashMap<String, Long>();
     private final SortedMap<Long, String> timetable = new TreeMap<Long, String>();
+    /**
+     * This road's own stream, keyed by its own name — every road agent draws its travel
+     * jitter from a different sequence, so a road's draws no longer depend on how many
+     * trains happened to be crossing the other six roads first. See {@link SimRandom}.
+     */
+    private final Random random;
 
     /**
      * 
@@ -83,6 +90,7 @@ public class RoadAgent extends StaticRailwayObject {
 	this.leftStation = leftStation;
 	this.rightStation = rightStation;
 	this.state = State.FREE;
+	this.random = SimRandom.forAgent(getName());
 	Activity.openChannel(TRAVEL_START+getName(), "travelStart", this);
 	sendState();
     }
@@ -98,7 +106,7 @@ public class RoadAgent extends StaticRailwayObject {
     public synchronized void travelStart(CybeleEvent ev) {
 	final Serializable[] message = ev.getMessage();
 	traveledTrain = (String) message[0];
-	final long delay2 = delayInSeconds() + (long)(500*Generator.getRandom().nextGaussian());
+	final long delay2 = delayInSeconds() + (long)(500*random.nextGaussian());
 	Activity.setTimer(RailwayMainAgent.CLOCK_ID, delay2, this, "travelEnd");
     }
 
