@@ -9,6 +9,8 @@
  */
 package cz.vutbr.fit.ags.xhovor07.util;
 
+import java.io.IOException;
+import java.io.ObjectInputStream;
 import java.io.Serializable;
 import java.util.AbstractCollection;
 import java.util.ArrayList;
@@ -18,6 +20,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.Map.Entry;
 
@@ -81,14 +84,40 @@ public class HashMapGraph<N, E> implements UnorientedGraph<N, E>, Serializable {
 	private transient NodeCollection nodeCollection;
 	
 	/**
-	 * Ulozene hrany.
+	 * Ulozene hrany. Instance je vzdy {@link LinkedHashMap} - viz {@link #readObject}.
 	 *
-	 * <p>DETERMINISMUS (#19): deklarovany typ zustava {@link HashMap} kvuli
-	 * serializaci, instance je ale {@link LinkedHashMap} - poradi vlozeni je
-	 * definovane a slouzi jako tie-breaker pro {@link #orderedKeys()}.
-	 * Zadny verejny pristupovy bod nevystavuje poradi prihradek HashMapu.</p>
+	 * <p>DETERMINISMUS (#19): poradi vlozeni je diky tomu definovane a slouzi jako
+	 * tie-breaker pro {@link #orderedKeys()}. Zadny verejny pristupovy bod
+	 * nevystavuje poradi prihradek HashMapu.</p>
+	 *
+	 * <p>Deklarovany typ zustava {@link HashMap} kvuli <b>ctení starych streamu</b>:
+	 * {@code serialVersionUID} je pevne 1L, takze o SUID nejde - jde o to, ze stream
+	 * zapsany pred #19 nese v tomto poli obycejnou {@link HashMap}, kterou by pole
+	 * deklarovane jako {@link LinkedHashMap} odmitlo.</p>
 	 */
 	private HashMap<Doubleton<N>, E> map = new LinkedHashMap<Doubleton<N>, E>();
+	
+	/**
+	 * Po deserializaci znormalizuje {@link #map} zpet na {@link LinkedHashMap}, aby
+	 * tie-break v {@link #orderedKeys()} nikdy nezavisel na poradi prihradek zive
+	 * {@link HashMap} (stream zapsany pred #19 nese prave takovou).
+	 *
+	 * <p><b>Zbytkove omezeni:</b> {@link HashMap} poradi vlozeni neserializuje, takze
+	 * u streamu zapsaneho pred #19 uz je deklaracni poradi neobnovitelne - prebira se
+	 * poradi, ve kterem stream entry nese. Od te chvile je ale zmrazene a nezavisle na
+	 * verzi JDK. Zadna varianta opravy (vcetne explicitniho citace vlozeni) to nedokaze
+	 * lepe, protoze ta informace ve starem streamu proste neni. Viz #27/#33.</p>
+	 *
+	 * @param in vstupni stream
+	 * @throws IOException z {@link ObjectInputStream#defaultReadObject()}
+	 * @throws ClassNotFoundException z {@link ObjectInputStream#defaultReadObject()}
+	 */
+	private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
+		in.defaultReadObject();
+		if (!(map instanceof LinkedHashMap)) {
+			map = new LinkedHashMap<Doubleton<N>, E>(map);
+		}
+	}
 	
 	/**
 	 * Klice v deterministickem poradi - jedine poradi, ve kterem se nad
@@ -185,13 +214,26 @@ public class HashMapGraph<N, E> implements UnorientedGraph<N, E>, Serializable {
 	}
 
 	/**
-	 * Zivy pohled na hrany v poradi vlozeni (backing mapa je {@link LinkedHashMap}).
-	 * Neni pouzit produkcnim kodem; pozorovatelna poradi vystavuji
-	 * {@link #values()}, {@link #nodeSet()} a {@link #get(Object)}.
+	 * Hrany ve stejnem deterministickem poradi jako {@link #values()} - viz
+	 * {@link #orderedKeys()}. Neni to zivy pohled: {@code remove} pres tento set
+	 * mapu nemeni (jednotlive {@link Entry} zapisuji hodnotu dal). Produkcni kod
+	 * tuto metodu nepouziva; serazena je proto, aby zadny pristupovy bod tridy
+	 * nevracel jine poradi nez to, ve kterem vznikaji agenti (#19).
 	 * @return entry set
 	 */
 	public Set<Entry<Doubleton<N>, E>> entrySet() {
-		return map.entrySet();
+		// HashMap zde slouzi vyhradne k vyhledani, nikdy se pres ni neiteruje,
+		// takze jeji poradi prihradek nema kudy uniknout ven.
+		final Map<Doubleton<N>, Entry<Doubleton<N>, E>> byKey =
+			new HashMap<Doubleton<N>, Entry<Doubleton<N>, E>>();
+		for (Entry<Doubleton<N>, E> entry : map.entrySet()) {
+			byKey.put(entry.getKey(), entry);
+		}
+		final Set<Entry<Doubleton<N>, E>> ordered = new LinkedHashSet<Entry<Doubleton<N>, E>>();
+		for (Doubleton<N> key : orderedKeys()) {
+			ordered.add(byKey.get(key));
+		}
+		return ordered;
 	}
 
 	

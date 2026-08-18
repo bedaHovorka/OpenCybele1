@@ -80,10 +80,11 @@ public final class Util {
 	 * poradi musi byt (a) stabilni a (b) totozne s tim, ktere baseline vykazuje dnes.</p>
 	 *
 	 * <p>Pravidlo: stabilni razeni podle {@link #orderRank(Object)} vzestupne;
-	 * prvky se shodnym rankem si drzi poradi vlozeni. Pro topologii z
-	 * {@code ScenarioConfig} to reprodukuje presne dnesni poradi - overuje
-	 * {@code docs/probes/OrderLock.java}. Na rozdil od HashMapu je ale pravidlo
-	 * cele v tomto kodu, takze se s JDK nemeni.</p>
+	 * prvky se shodnym rankem si drzi poradi vlozeni. Pro <b>vychozi</b> topologii
+	 * (klice stA..stH / tr1..tr7) to reprodukuje presne dnesni poradi - overuje
+	 * {@code docs/probes/OrderLock.java}. Pro jinou topologii zadne "dnesni poradi"
+	 * neexistuje a pozadavek je jen determinismus, ktery pravidlo splnuje vzdy.
+	 * Na rozdil od HashMapu je cele v tomto kodu, takze se s JDK nemeni.</p>
 	 *
 	 * @param <T> typ prvku
 	 * @param collection vstupni kolekce (poradi jejiho iteratoru je tie-breaker)
@@ -99,9 +100,20 @@ public final class Util {
 	 * Radici klic pouzity v {@link #stableOrder(Collection)}.
 	 *
 	 * <p>Je to tzv. hash spread ({@code h ^ (h >>> 16)}), tedy tataz funkce, kterou
-	 * pouziva {@code java.util.HashMap} pri vypoctu indexu prihradky. Diky tomu se
-	 * vysledne poradi shoduje s tim, ktere puvodni HashMap-ova implementace vykazovala,
-	 * ale pocita se zde a nikoli uvnitr JDK.</p>
+	 * {@code java.util.HashMap} pouziva pri vypoctu indexu prihradky.</p>
+	 *
+	 * <p><b>Pozor - neni to duvod, proc poradi vychazi stejne.</b> Razeni podle spreadu
+	 * NENI obecne totozne s poradim iterace HashMapu: to je {@code spread & (n-1)} plus
+	 * poradi v retezci plus historie zvetsovani tabulky, nikoli uplne usporadani podle
+	 * spreadu. Pro vychozi topologii se shoduje jen proto, ze hashe klicu stA..stH
+	 * a tr1..tr7 tvori <i>souvisly usek</i>, ktery se mapuje na po sobe jdouci prihradky
+	 * bez preteceni - to je vlastnost te rodiny jmen, ne te funkce. Merenim na nahodnych
+	 * sadach klicu se shoda trefi zhruba v 9 % pripadu; rozpadne se napr. pro
+	 * {@code s1..s8} nebo pro stA..stH plus jedno jmeno navic.</p>
+	 *
+	 * <p>Pro nas to staci: zachovat dnesni poradi je treba jen u vychozi topologie
+	 * (na ni jsou nahrany goldeny), u kazde jine se pozaduje pouze determinismus.
+	 * Nedovozujte z toho, ze pravidlo je ekvivalentni HashMapu - neni.</p>
 	 *
 	 * @param o prvek (smi byt null)
 	 * @return radici klic

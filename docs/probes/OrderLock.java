@@ -210,9 +210,28 @@ public class OrderLock {
                 new ArrayList<String>(ah).toString());
         check(true, "Doubleton iterates first then second (swapped)", "[stH, stA]",
                 new ArrayList<String>(ha).toString());
-        check(true, "Util.orderRank is the documented hash spread",
-                String.valueOf("stA".hashCode() ^ ("stA".hashCode() >>> 16)),
-                String.valueOf(Util.orderRank("stA")));
+        checkOrderRank();
+    }
+
+    /**
+     * Reflective on purpose. Util.orderRank does not exist on the pre-#19 tree, and this
+     * probe has to COMPILE AND RUN there unchanged - that is what makes the claim "the
+     * same probe passes before and after" reproducible instead of merely asserted.
+     */
+    private static void checkOrderRank() {
+        final int spread = "stA".hashCode() ^ ("stA".hashCode() >>> 16);
+        try {
+            final java.lang.reflect.Method method =
+                    Util.class.getMethod("orderRank", new Class[] { Object.class });
+            final Object actual = method.invoke(null, new Object[] { "stA" });
+            check(true, "Util.orderRank is the documented hash spread",
+                    String.valueOf(spread), String.valueOf(actual));
+        } catch (NoSuchMethodException absent) {
+            System.out.println("  skip Util.orderRank absent"
+                    + " - running against a pre-#19 tree, orders checked all the same");
+        } catch (Exception broken) {
+            fail("Util.orderRank", "callable", String.valueOf(broken));
+        }
     }
 
     private static void checkList(boolean report, String what, String[] expected, List<String> actual) {

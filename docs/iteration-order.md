@@ -16,8 +16,15 @@ is chosen**.
 `Util.stableOrder(Collection)` — a stable sort by `Util.orderRank(o) = h ^ (h >>> 16)` ascending,
 ties broken by the collection's own iteration order.
 
-* `orderRank` is the *hash spread* function `HashMap` uses when it computes a bucket index. Sorting
-  by it reproduces the bucket order the old code exhibited, for the topology in use.
+* `orderRank` is the *hash spread* function `HashMap` uses when it computes a bucket index.
+  **It is not equivalent to `HashMap` ordering, and the match is not causal.** `HashMap`'s order is
+  `spread & (n-1)` plus chain order plus resize history, not a total order by spread; over random
+  key sets the two agree only about 9% of the time, and they disagree for e.g. `s1..s8`, or for
+  `stA..stH` plus one extra name. They coincide for `stA..stH` / `tr1..tr7` because those hashes
+  form a *contiguous run* that maps to consecutive buckets without wraparound — a property of that
+  naming family, not of the function. That is enough: today's order only has to be preserved for
+  the **default** topology, the one goldens are recorded against. For any other topology there is
+  no "today's order" to preserve, only a determinism requirement, which the rule always meets.
 * The tie-break is now well defined, because `HashMapGraph`'s backing map is a `LinkedHashMap`
   (declared as `HashMap` so the serialized field signature is untouched). Ties therefore fall back
   on **`sim.topology` declaration order** (`ScenarioConfig`, #18) — our own configuration, not a JDK
@@ -44,8 +51,27 @@ Supporting orders, also unchanged: candidate-edge order per station —
 `stA [tr1]`, `stB [tr5]`, `stC [tr7]`, `stD [tr4, tr5]`, `stE [tr4, tr3, tr6]`, `stF [tr7, tr6]`,
 `stG [tr3, tr2]`, `stH [tr1, tr2]`.
 
-**No behavioural difference was found.** Every one of the four orderings, and every derived value
-listed above, is byte-for-byte what the pre-#19 tree produced.
+**No behavioural difference was found for the default topology.** Every one of the four orderings,
+and every derived value listed above, is byte-for-byte what the pre-#19 tree produced.
+
+**This does not generalise, and the scope matters.** On a topology containing a **cycle** the change
+*does* pick a different route — e.g. with a cyclic four-station network, `stA→stD` was
+`[stA, tr1, stB, tr2, stC, tr4, stD]` before and is `[stA, tr3, stC, tr4, stD]` after. That is the
+intended outcome, not a regression: no golden exists for a cyclic topology, the pre-#19 choice there
+was pure `HashMap` bucket order, and the whole point of this change is that such a route must stop
+depending on the JDK. But do not quote "nothing differs" as a general statement — it holds for the
+default `sim.topology` and for nothing else.
+
+Two smaller pre/post differences that the four-claim table above does not cover, both on methods no
+production code calls (verified by exhaustive grep), recorded so nobody diffing the trees thinks
+they have found something:
+
+* `remove(E)` returns `[stG, stE]` where it used to return `[stE, stG]`, and the returned collection
+  is a `LinkedHashSet` rather than a `HashSet`. It is now in `Doubleton` order like every other
+  endpoint accessor.
+* `entrySet()` now goes through `orderedKeys()` like `values()`. En route it briefly returned
+  insertion order; routing it through `orderedKeys()` puts it back on the pre-#19 order *and* stops
+  one public accessor disagreeing with the order agents are actually created in.
 
 ### The alternative that was rejected
 
@@ -67,8 +93,25 @@ Note *why* the routes survive either ordering: the default topology is a **tree*
 7 tracks, connected), so between any two stations there is exactly one simple path and the DFS in
 `Util.privatePath` cannot pick a different one. That is a property of the default `sim.topology`,
 not of the algorithm — since #18 the topology is configurable, and a topology with a cycle *would*
-make the candidate-edge order decide the route. This is precisely why claim 4 still had to be
-fixed even though the default network hides it.
+let iteration order decide the route. This is precisely why claim 4 still had to be fixed even
+though the default network hides it.
+
+### Claim 4 is *two* hash sites, not one
+
+`Util.privatePath` reached hash order twice, and a route can flip because of either. Anyone
+debugging a route change must check both:
+
+1. **Candidate-edge order** — `graph.get(start)` → `HashMapGraph.allIndicesJoinsWith` →
+   `map.entrySet()` (`Util.java:173`). Decides which incident edge is tried first.
+2. **Recursive-descent order** — the local `nodesToEdges` map, iterated at `Util.java:189`. Keyed on
+   the **edge label**, so it re-sorts the candidates by *their own* hashes before recursing.
+
+Site 2 is the easier one to miss and is the one that actually flipped the cyclic example above: the
+candidate-edge order was *identical* before and after, and the route changed only because pre-#19
+`nodesToEdges` was a `HashMap` keyed on the road label — `"tr1"` spreads to 115058 and `"tr3"` to
+115060, so the DFS descended into `tr1` first even though the candidate order was `[tr3, tr1]`.
+Both sites are fixed: site 1 by `orderedKeys()`, site 2 by making `nodesToEdges` a `LinkedHashMap`,
+which makes the descent follow the candidate order instead of re-sorting it.
 
 ## Claim 3: why the endpoint order was *not* touched
 
@@ -95,6 +138,31 @@ invert the `TRAVEL_LEFT` / `TRAVEL_RIGHT` symbol published on `ROAD.STATE`, whic
 trace. `OrderLock` pins all 7 endpoint pairs both as literals and as the structural rule
 "endpoint order == `put()` argument order", so a future cleanup cannot do this silently.
 
+## Coverage: these four sites are all that is left
+
+Swept for other trace-observable hash-iteration sites. `RailwayMainAgent.trainStates` is already a
+`LinkedHashMap`; `TreeMultiMap` is a `TreeMap` of `LinkedHashSet`. Every remaining `HashMap`
+(`Station.pathDirs`, `Generator.openedChannels`, `Planning.trainCountDowns`,
+`RailwayMainAgent.stationInfos` / `roadAgentStates` / `roadDelays` / `stationCapacities`,
+`RoadAgent.invertedTimetable`) is **lookup-only — never iterated**, so its bucket order cannot reach
+a trace. The four claims here cover the rest.
+
+## Latent: serialization
+
+`HashMapGraph.map` is declared `HashMap` so that a stream written *before* this change — which
+carries a plain `HashMap` in that field — still deserializes. `readObject` then normalises the field
+back to a `LinkedHashMap`, so `orderedKeys()`'s tie-break never depends on a live `HashMap`'s bucket
+order. (The declared type is not about `serialVersionUID`: that is an explicit `1L` and never fed a
+computed value.)
+
+**Residual, for #27/#33:** `HashMap` does not serialize insertion order, so for a pre-#19 stream the
+declaration order is already gone; what `readObject` freezes is the order the stream happened to
+carry. No variant of the fix — including an explicit insertion counter, which such a stream would
+not contain either — can do better, because the information is not in the stream. Streams written by
+this code or later carry a `LinkedHashMap` and are unaffected. Nothing serializes agents today
+(`cybelle/cybele.prop` sets `Local;NoSerialization`); this matters only if the JADE port persists
+agent state built from an older stream.
+
 ## How to check
 
 ```bash
@@ -102,7 +170,14 @@ docs/probes/run.sh OrderLock    # self-verdicting; exit 1 on any drift
 docs/probes/run.sh Order        # raw dump, for eyeballing / md5
 ```
 
-`OrderLock` rebuilds the graph 100 times and re-checks every order each time.
+`OrderLock` rebuilds the graph 100 times and re-checks every order each time. It compiles and passes
+**unchanged on the pre-#19 tree too** (its one reference to `Util.orderRank`, which does not exist
+there, is reflective and skips), so "the same probe passes before and after" is reproducible rather
+than merely asserted.
+
+The tie-break was checked independently of the one case it has to get right: re-declaring the same
+7 edges in **reverse** order gives the same answer before and after, so it genuinely mirrors
+`HashMap`'s chain-insertion behaviour rather than coincidentally matching a single arrangement.
 
 ## Scope: what this does *not* make deterministic
 

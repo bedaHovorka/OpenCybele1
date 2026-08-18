@@ -64,6 +64,12 @@ rule reproduces the old order exactly rather than merely being deterministic —
 the pre-#19 and post-#19 trees, and fails on a naive `LinkedHashMap` conversion. See
 `docs/iteration-order.md`.
 
+To run it against the **pre-#19 tree**, compile this file unchanged against those sources: its one
+reference to `Util.orderRank` (which does not exist there) goes through reflection and prints
+`skip Util.orderRank absent` instead of failing to compile. Every order check still runs. That is
+deliberate — a probe whose whole value is that it *can* fail is worth little if the claim "it also
+passes before the change" cannot be re-run.
+
 ## Caveat 1 — the clock registration race (affects every `ExpB*`)
 
 `Cybele.createClock` builds the `ContinuousClock` **synchronously** (so `getTime`/`isPaused` work at
