@@ -8,10 +8,11 @@
 > [#24](https://github.com/bedaHovorka/OpenCybele1/issues/24) (recording the goldens), and later by
 > `JadeLauncher` (#36) and `JasonLauncher` (#43).
 >
-> **What exists today is the skeleton.** The SPI, the runner, the spec format, the golden handling
-> and the contract levels are complete and exercised end to end against a stub implementation. The
-> normalizer is a placeholder by design (#21), and no adapter for a real implementation exists yet
-> (#13).
+> **What exists today is the skeleton, plus adapter 1.** The SPI, the runner, the spec format, the
+> golden handling and the contract levels are complete and exercised end to end against a stub
+> implementation, and — since #13 — against the real OpenCybele application in a child JVM. The
+> normalizer is still a placeholder by design (#21), which is what caps `opencybele-smoke` at a
+> `summary` contract; see "Adapter 1: OpenCybeleLauncher" below.
 
 ## Where things live
 
@@ -26,6 +27,7 @@ src/characterizationIT/java/cz/vutbr/fit/ags/parity/
   golden/             GoldenStore, TraceComparator
   normalize/          the placeholder normalizers (#21 replaces these)
   stub/               a stand-in implementation, so the SPI can be driven with no application present
+  opencybele/         adapter 1 (#13): the real application, in a child JVM, reached by path
   it/                 the JUnit entry points
 ```
 
@@ -353,6 +355,166 @@ three shapes — `--- ` rules, `!!! ` warnings and failures, and two-space-inden
 and trace lines are known never to start with any of them. An implementation that adds a new
 diagnostic shape declares it in its adapter rather than teaching the normalizer about it.
 
+That is not hypothetical. The baseline's resolved-configuration banner carries **none** of the three
+shapes — it is ~20 unindented `sim.<key> = <value>` lines — so `OpenCybeleLauncher` declares a
+fourth prefix for it rather than the application being changed to suit a filter it cannot see. See
+"Adapter 1: `OpenCybeleLauncher`" below.
+
+## Adapter 1: `OpenCybeleLauncher`
+
+Added by [#13](https://github.com/bedaHovorka/OpenCybele1/issues/13). It is the first adapter that
+drives a real implementation, and it drives it **by path**: the application lives on
+`opencybele-baseline` and the adapter names exactly one application symbol —
+`"cz.vutbr.fit.ags.xhovor07.Main"` — as a string.
+
+**A correction to how that separation has been described.** "This branch carries no Cybele, no
+application source and no vendor jar" is false and has been repeated: `jade-develop` still holds
+the 19 application sources under `src/main/java/cz/vutbr/fit/ags/xhovor07/` and still declares
+`com.iai:cybele-api`/`cybele-impl`, so `./gradlew build` here needs those jars in `~/.m2`. What is
+true — and what is *enforced* — is narrower and is the half that matters: the **harness source
+set** has no link to any implementation. `characterizationIT` does not extend `main`'s
+configurations, nothing named `com.iai` resolves on `characterizationITRuntimeClasspath`, and
+`HarnessSelfCheckIT` fails the build on an application import. Claim that, not the wider version.
+
+```bash
+cd ../wt/opencybele-ref && ./gradlew installDist
+./gradlew characterizationIT -Popencybele.dist=/abs/path/wt/opencybele-ref/build/install/opencybele
+./gradlew characterizationIT -Popencybele.dist=… -Dgolden.record=true   # record instead
+```
+
+Two directories matter and they are not the same one. The **dist** (`build/install/opencybele`)
+supplies the jars, `opencybele.jar` plus the two vendor jars `installDist` copied out of `~/.m2`.
+The **application home** — the project directory above it — supplies `cybelle/*.prop` and the
+`scenarios/*.properties` files, neither of which is part of a dist; it is found by walking up from
+the dist until a `cybelle/cybele.prop` appears, and can be pinned with `-Popencybele.home=…`.
+Without `-Popencybele.dist` the end-to-end test **skips** rather than fails: this branch must stay
+buildable and testable with no implementation checked out anywhere.
+
+### The command line, and why it is `java` and not `bin/opencybele`
+
+```
+<java.home>/bin/java -ea --patch-module java.base=cybelle -cp <dist/lib/*.jar, sorted> \
+    [-Dsim.config=<absolute>] -D<k>=<v>… cz.vutbr.fit.ags.xhovor07.Main <args>
+```
+
+Nothing is inherited. The classpath is exactly the dist's jars. `--patch-module java.base=cybelle`
+is required — Cybele reads `cybele.prop` through `Properties.class.getResourceAsStream`, which
+under JPMS no longer falls back to the classpath — and it resolves **relative to the child's
+working directory**, so the adapter stages `cybelle/*.prop` into the harness' per-run scratch
+directory and runs there. Only `*.prop` is staged, because `--patch-module` folds the *whole*
+directory into `java.base` and that checkout's `cybelle/` has historically also held the untracked
+vendor jars. A `launcher.config` is resolved against the application home and passed **absolute**,
+because the child's working directory is the scratch dir rather than the checkout.
+
+The start script is bypassed on purpose. A Gradle start script routes everything in `$@` to the
+*program's* arguments, so a positional `-Dsim.random.masterSeed=20080415` sets no system property
+and warns about nothing — re-measured while writing this: the positional form drew
+`4696735245841119171` while the same value in `OPENCYBELE_OPTS` pinned it. `OPENCYBELE_OPTS` works;
+assembling the `java` line directly is better still, because every element is explicit in the
+failure report, and because a launcher that forks instead of `exec`ing leaves the inherited stdout
+open after the child exits — which `ScenarioRunner` refuses as a truncated capture.
+
+**That the properties arrived is measured, not assumed — and the check is total.**
+`OpenCybeleSmokeIT` iterates `spec.launcher().properties()` and reads **every declared key** back
+out of the child's own resolved-configuration banner, matched whole-line and anchored.
+
+Both halves of that sentence were earned. An earlier revision checked six hard-coded keys out of
+ten, and dropping the unchecked `sim.station.voteWindowMs` alone moves the trace by exactly 2 lines
+per affected family — inside every tolerance, with the distinct-entity count and every train-level
+count unchanged, so it passes in both directions and the golden would freeze a configuration the
+scenario says it is not using. And `startsWith` accepted `sim.clock.pace = 80` as proof of `= 8`.
+Driving the loop from the spec also keeps the claim true the next time the scenario gains a knob.
+
+The all-or-nothing argument still holds as a second line of defence — with no `sim.stop.*` an
+ignored command line produces a run with no bound, which the harness kills — but it only ever
+covered a *wholesale* drop.
+
+`classifyExit` is deliberately **not** overridden — the default table in `LauncherAdapter` is the
+one measured on this very application — and `OpenCybeleLauncherIT` asserts all seven codes through
+the adapter rather than trusting that, including the two that postdate #12: `2`
+(`WINDOW_CLOSED_EARLY`, a run that did *not* finish) and `255`
+(`AGENT_CONSTRUCTION_THROWABLE`, a status the application never sets). That test asserts the
+**mapping only**. That the application actually emits each status was measured in
+[`headless-and-stop.md`](https://github.com/bedaHovorka/OpenCybele1/blob/opencybele-baseline/docs/headless-and-stop.md)
+by observing `$?`, and is not re-verified here — a green IT is not end-to-end proof that exit 4
+ever happens.
+
+### The configuration banner: declared, not indented
+
+`ScenarioConfig.describe()` writes ~20 `sim.<key> = <value>` lines to stderr with **no prefix and no
+indentation**, and `redirectErrorStream(true)` makes stderr part of the trace. None of the default
+prefixes matched them, so every one of those lines would have been recorded as behaviour — and with
+`sim.random.masterSeed` unpinned the banner republishes a *drawn* number, so such a golden could
+never match. Worse, adding an unrelated `sim.*` key (#20 added two) would change every golden in the
+suite for a reason that has nothing to do with behaviour. Configuration is a manifest recorded
+*alongside* a golden (#24), never inside it.
+
+Of the three candidate fixes, #13 took the third: `OpenCybeleLauncher.diagnosticPrefixes()` declares
+`"sim."` in addition to the defaults. Indenting or prefixing the banner in the application would
+work too, but #12 chose deliberately that a **new diagnostic shape is declared by the adapter that
+knows about it**, so the normalizer stays implementation-agnostic and the application stays unaware
+that a harness exists; indenting would additionally couple the application's output formatting to a
+filter rule it cannot see, and the next unindented line would reopen the hole silently.
+
+The prefix cannot collide with trace: field 1 of a canonical line is a station, track or train name
+(`stA`, `tr1`, `vl3` — never `Main`), the application's own two `println` families both begin
+`vl<n>`, and every key `ScenarioConfig` accepts begins `sim.`. Measured on a captured run: 0 of 623
+normalized lines start with `sim.`. #15's randomness manifest was **confirmed rather than assumed** —
+its rules start `--- `/`---` and its body lines with two spaces, so the default prefixes already
+remove all eleven of them.
+
+### `opencybele-smoke`, and what it can honestly claim
+
+`summary`, not `strict` or `causal` — because #21 has not landed. Three back-to-back runs at the
+pinned seed produce 623 identical-length normalized traces that still differ from one another from
+**line 10** onwards (`stD|1096|STATION_INFO…` against `stD|1016|…`), since five clock-derived
+numeric families are re-read every run. (`trace-format.md`'s "differs at line 30" is that
+document's own run of `short-bounded`, not this scenario.) `causal` is no easier than `strict`
+here: it compares each entity's projection exactly and the unattributed bucket exactly and with no
+tolerance. When #21 lands this scenario tightens by editing one word, with **no re-recording** —
+recording writes the full normalized trace at every level, and `GoldenStore.record` does so
+unconditionally.
+
+**The level is not the rule set, and the rule set is what a replay is actually held to.** The first
+version of this scenario declared six summary rules covering `PLAN_TRAIN`, `TRAIN_STATE`, `ENTER`,
+`STATION_INFO` and the two `println`s — **154 of 623 lines**. Nothing touched `VOTE`,
+`VOTE_REQUEST`, `VOTE_RESULT`, `ENTER_REPLY`, `LEAVE`, `TRAVEL_*`, `PATH_FIND*` or `START`.
+Measured against the real application: deleting all 279 VOTE-family lines from the golden still
+passed, and so did a golden cut down to 133 lines. Comparison is symmetric, so **a port that never
+emitted a single `VOTE` line would have passed identically** — and the distributed election is the
+system's core algorithm and precisely what #34 is expected to restructure.
+
+There is now one rule per channel, plus the two `println`s and the kernel banner: **623 of 623
+golden lines are inside a rule, none double-counted.** Two groups behave differently and the
+tolerances say which: the election families and `PLAN_TRAIN`/`START` are identical across all 17
+measured runs (93/93/93, 9, 5) because they complete long before the bound, while the movement and
+state families lose exactly 2 lines under CPU saturation, every time, because the run is halted
+promptly once the bound fires. Tolerances are 2 and 3 accordingly — the earlier 6 was slack nobody
+had measured, and unmeasured slack is exactly what let a dropped property hide.
+
+It remains a **count** contract: a rule proves a family exists at the right cardinality, not that
+any line's payload is right. That is the honest ceiling of `summary`, and pinning content is #21
+plus a `causal` contract — a one-word edit here, no re-record.
+
+Two claims about this scenario were also overstated in the first revision and are now true rather
+than softened. It declares **all twenty** `sim.*` keys, including the ten that sit at a current
+application default — the topology, the station capacities and the road delays are exactly what a
+port must replicate, and leaving them implicit means a change to a baseline default silently
+invalidates this golden. Declaring them is behaviour-neutral: three runs with the ten added produce
+byte-identical event counts to the run the golden was recorded from, so **no re-recording was
+needed**.
+
+One thing the scenario had to design around, and it is a **baseline defect rather than a harness
+one**: `Cybele.terminate()` tears the comm service down while agent threads are still running, so a
+train agent whose constructor is in flight at the stop instant reaches `Activity.openChannel` after
+`commReceiver` has been nulled, and the kernel prints `*** Activity.init  ->` with an NPE *after*
+the stop banner. The error scan is right to fail on that, so the scenario does not exempt it — it
+places its bound inside a 6.1 s gap in the arrival sequence instead, ~480 ms of wall clock clear of
+the last train creation. Measured: a bound of 30000 (0–40 simulated ms after an arrival) failed once
+in the first full-suite run and 3 times in 8 runs under an 8-way CPU load; the shipped bound of
+25000 gave 0 in 14 runs under the same load, 0 in 10 unloaded harness runs, and identical counts
+throughout. **Moving that number is not a cosmetic edit.**
+
 ## Deliberately left to other issues
 
 * **#21 — the normalizer.** What ships here is `DiagnosticFilter`, which drops the declared
@@ -366,15 +528,10 @@ diagnostic shape declares it in its adapter rather than teaching the normalizer 
   something a tolerance can absorb; and `entity`/`summary` patterns match **normalized** lines while
   `liveness`/`allowErrorLines` match raw ones, so projecting a field away can invalidate an
   `entity.pattern` that was copied from a liveness rule.
-* **#13 — `OpenCybeleLauncher`.** No adapter for a real implementation exists here. #13 is blocked
-  by this issue, so requiring its smoke test here would be circular; the stub adapter proves the SPI
-  instead, and differs from a real one only in what it points at. One thing it must get right that
-  the stub does not exercise: `launcher.properties` have to be rendered into `OPENCYBELE_OPTS`,
-  **not** into the start script's argv, because a Gradle start script routes `$@` to the program's
-  arguments — so `-Dsim.random.masterSeed=…` passed positionally is silently ignored and the run
-  draws a fresh seed while appearing to accept the pin.
-* **#23 / #24 — scenarios and goldens.** `smoke-stub` is the only scenario, and its golden is a
-  stub's output. Real scenarios are recorded against the OpenCybele branch, and every one proposed
-  for `strict` should first be run three times at a fixed seed with its entity-id sets diffed.
+* **#23 / #24 — scenarios and goldens.** There are two scenarios: `smoke-stub`, whose golden is a
+  stub's output, and `opencybele-smoke`, which is a smoke test for adapter 1 rather than coverage
+  of the application. Real coverage is recorded against the OpenCybele branch, and every scenario
+  proposed for `strict` should first be run three times at a fixed seed with its entity-id sets
+  diffed.
 * **#11 — how the harness is shared.** Everything here is addressed through `ParityLayout` so the
   eventual mechanism costs no edits to scenarios, goldens or adapters.

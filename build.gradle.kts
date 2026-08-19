@@ -61,8 +61,26 @@ val characterizationIT by tasks.registering(Test::class) {
     systemProperty("golden.record", providers.systemProperty("golden.record").getOrElse("false"))
     // Where scenarios/ and golden/ live; see ParityLayout.
     systemProperty("parity.root", providers.systemProperty("parity.root").getOrElse("parity-tests"))
-    // Path to a built implementation, for the adapters that need one (#13 uses this).
-    providers.gradleProperty("opencybele.dist").orNull?.let { systemProperty("opencybele.dist", it) }
+    // Paths to a built implementation, for the adapters that need one (#13's OpenCybeleLauncher).
+    //
+    //   ./gradlew characterizationIT -Popencybele.dist=/abs/path/to/build/install/opencybele
+    //
+    // `dist` supplies the jars; `home` (normally derived by walking up from the dist) supplies
+    // cybelle/*.prop and the scenarios/*.properties files, neither of which is part of the dist.
+    // `java` overrides the JVM the child runs on. Absent the first, OpenCybeleSmokeIT SKIPS rather
+    // than fails: this branch carries no implementation and must stay buildable without one.
+    //
+    // dist/home are made absolute, because the value is a path relative to the invoking shell
+    // while the test JVM's working directory is the project directory. `java` is NOT: it may be a
+    // bare command name resolved on PATH, and absolutising `java` to <project>/java produced a
+    // launch failure with error=2.
+    for (name in listOf("opencybele.dist", "opencybele.home")) {
+        (providers.gradleProperty(name).orNull ?: providers.systemProperty(name).orNull)
+            ?.let { systemProperty(name, file(it).absolutePath) }
+    }
+    (providers.gradleProperty("opencybele.java").orNull
+        ?: providers.systemProperty("opencybele.java").orNull)
+        ?.let { systemProperty("opencybele.java", it) }
 
     // A golden run is never up to date; there is no input Gradle can hash that captures "the
     // behaviour of a child process".
