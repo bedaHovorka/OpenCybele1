@@ -88,7 +88,10 @@ launcher:                           # everything here is implementation-NEUTRAL
     sim.stop.stallMs: "10000"
     sim.headless: "true"
   env:                              # optional environment additions
-    OPENCYBELE_OPTS: ""
+    # NOT a place to blank this out. A Gradle start script routes everything in $@ to the
+    # PROGRAM's arguments, so `opencybele -Dsim.foo=bar` sets no system property and warns about
+    # nothing. #13's adapter must render launcher.properties into OPENCYBELE_OPTS, not into argv.
+    OPENCYBELE_OPTS: "-Dsim.headless=true -Dsim.random.masterSeed=20080415"
   args: []                          # optional program arguments
 
 run:
@@ -97,7 +100,7 @@ run:
 
 liveness:                           # at least one rule is MANDATORY
   - pattern: '^vl\d+ started$'
-    atLeast: 40
+    atLeast: 40                     # must be >= 1; a floor of 0 asserts nothing
   - pattern: '^(vl\d+) in st[A-H] at \d+$'
     distinctGroup: 1                # count distinct group(1) values, not matches
     atLeast: 40
@@ -106,7 +109,8 @@ liveness:                           # at least one rule is MANDATORY
 entity:                             # required unless contract is strict
   pattern: '^(vl\d+)\b'
   group: 1                          # default 1
-  tolerance:                        # honoured under causal and summary; rejected under strict
+  tolerance:                        # honoured under causal and summary; rejected under strict,
+                                    # even when every value in it is zero
     missing: 0                      # ids in the golden that this run did not produce
     extra: 0                        # ids this run produced that the golden does not have
 
@@ -115,9 +119,18 @@ summary:                            # only under contract: summary; rejected els
     pattern: '^vl\d+ started$'
     tolerance: 3
 
-allowErrorLines:                    # optional error-scan exemptions
-  - '^Exception in thread "main" java\.lang\.IllegalArgumentException: sim\.'
+allowErrorLines:                    # optional error-scan exemptions; must be NARROW, and every
+  - '^Exception in thread "main" java\.lang\.IllegalArgumentException: sim\.'   # use is announced
 ```
+
+Three rules exist because each of them was a hole someone could fall into. A `liveness.atLeast`
+of `0` satisfies the mandate while asserting nothing, so it is rejected. An `entity.tolerance`
+block under `strict` reads as a licence it is not, so it is rejected even when its values are all
+zero. And an `allowErrorLines` pattern is a hole in the error scan: a bare `.` or `.*` silences
+every future throwable, and such a pattern was reproduced swallowing a real `AssertionError` and
+recording a golden with it. Patterns are probed against ordinary output at parse time and rejected
+if they match it, and every exemption a run actually uses is printed — count and lines — whether the
+run passes or fails.
 
 The live example is [`parity-tests/scenarios/smoke-stub.yaml`](../parity-tests/scenarios/smoke-stub.yaml).
 
@@ -176,9 +189,12 @@ level**, never a re-recorded golden.
 `causal` is also the level that survives the two interleaving residuals #21 has to handle. When two
 entities act in the same simulated millisecond their `println`s race — three orderings measured
 across six runs at one seed — so comparison has to be possible per entity id rather than per line
-position. Lines that carry no entity id form one bucket compared in order among themselves, so a
-startup block still has to match; it just does not have to interleave the way it did on the day the
-golden was recorded.
+position. Lines that carry no entity id form one bucket compared in order among themselves **and
+excluded from the tolerance budget**, so a startup block still has to match; it just does not have
+to interleave the way it did on the day the golden was recorded. That exclusion is not a detail:
+while the bucket counted as an entity, a replay that dropped the *entire* startup block passed at
+`tolerance.missing: 1`, because losing every unattributed line cost exactly one missing "entity" —
+and all of #21's startup-block work lands in that bucket.
 
 ## How a run is judged — and why in this order
 
@@ -187,45 +203,38 @@ golden was recorded.
 1. **Suite latch.** If an earlier scenario hit a suite-fatal condition, nothing is launched.
 2. **Launch and capture** the merged stdout+stderr stream (`redirectErrorStream(true)`, per
    TESTING.md §3.2), bounded by `run.harnessTimeoutMs`. A child the harness had to kill is
-   `HARNESS_TIMEOUT` and can never pass.
-3. **Error scan, on the raw stream, before any normalization.**
-4. **Exit classification.**
+   `HARNESS_TIMEOUT` and can never pass; so is a capture that never reached EOF.
+3. **Exit classification, and the suite latch.**
+4. **Error scan, on the raw stream, before any normalization**, followed by the
+   expected-disposition check.
 5. **Liveness**, also on the raw stream.
-6. **Normalize**, then record or compare at the declared contract level.
+6. **Normalize** — refusing an empty result — then record or compare at the declared contract level.
 
-### 3 — judge a run by its output, never by its exit status
+Steps 3 and 4 are in that order for a reason that was got wrong first time round. The latch used to
+sit *after* the scan, so a run that exited 5 **and** printed a throwable — the overwhelmingly likely
+shape, since a dead clock channel is usually preceded by a swallowed throwable — failed as an
+ordinary scenario and never latched. Every later scenario then launched into the same poisoned
+environment and, in record mode, froze goldens against a dead clock. Classifying first costs
+nothing: the failure report still leads with the throwable.
 
-A throwable inside a Cybele handler is wrapped in an `InvocationTargetException`, swallowed,
-printed to stderr, and **does not change the exit status**. No throwable location was found that
-does — including an uncaught one in `Main.main`, after which the simulation kept generating trains
-(`docs/assertion-triage.md`, Result 3). A harness that judged a run by `waitFor()` would pass every
-one of those.
+### 3 — "reached the bound" and "gave up" are different outcomes
 
-So the runner greps the captured stream for `AssertionError` and for `Exception in thread "`.
-Two consequences are worth stating in the code and are:
-
-* **Occurrence count is not failure count.** `AssertionError` appears twice per firing assertion —
-  the wrapper message and the cause line. The scanner reports hits and never converts them to a
-  number of failures.
-* **The scan runs before the normalizer.** With the streams merged, a firing assertion's stack
-  trace lands *inside* the captured trace. Normalizing first would either scrub the evidence into
-  invisibility or bake it into a golden as expected output. Fail fast, then normalize.
-
-A scenario that deliberately pins a failure (say, configuration rejection) exempts its own
-signature with `allowErrorLines`.
-
-### 4 — "reached the bound" and "gave up" are different outcomes
-
-The exit codes that do exist and are meaningful, from `docs/headless-and-stop.md`:
+The exit codes that do exist and are meaningful, from [`headless-and-stop.md`](https://github.com/bedaHovorka/OpenCybele1/blob/opencybele-baseline/docs/headless-and-stop.md) (on `opencybele-baseline`):
 
 | Code | Disposition | Meaning |
 |---|---|---|
 | 0 | `BOUND_REACHED` | a declared stop bound was reached |
 | 1 | `STARTUP_ERROR` | config/startup error, before the kernel |
+| 2 | `WINDOW_CLOSED_EARLY` | the GUI window was closed while a bound was armed and unreached — **the run did not finish** |
 | 3 | `WALL_CLOCK_TIMEOUT` | the safety net fired — **the run did not finish** |
 | 4 | `STALL` | the stall detector fired — generation died |
 | 5 | `CLOCK_COMMAND_DEAD` | the clock stopped answering its command channel |
+| 255 | `AGENT_CONSTRUCTION_THROWABLE` | a throwable escaped an agent **constructor**: the JVM dies in ~0.26 s, stack on stderr, no stop banner, no code the application set |
 | — | `HARNESS_TIMEOUT` | the harness killed the child |
+
+Code 255 is worth reading twice by anyone tempted to state a general rule about the kernel. The
+handler path swallows; the **construction** path does not. "Cybele swallows every throwable" is
+false, and the harness classifies the two paths separately rather than assuming either.
 
 Only `bound-reached` and `startup-error` can be *declared* by a scenario; `ExpectedOutcome` rejects
 the others at parse time, because a timeout must never look like a pass.
@@ -237,6 +246,59 @@ no reason to think the next scenario in the same environment fares better. The f
 latches: `ScenarioRunner` refuses to launch anything afterwards and says why. JUnit has no portable
 "abort the remaining tests", and the harness must be drivable from Jason's runner too, so latching
 plus a loud failure is the mechanism that works everywhere.
+
+### 4 — judge a run by its output, never by its exit status
+
+A throwable inside a Cybele handler is handed to the kernel's exception handler, printed to stderr,
+and **does not change the exit status**. No throwable location was found that does — including an
+uncaught one in `Main.main`, after which the simulation kept generating trains
+([`assertion-triage.md`](https://github.com/bedaHovorka/OpenCybele1/blob/opencybele-baseline/docs/assertion-triage.md) on `opencybele-baseline`, Result 3). A harness that
+judged a run by `waitFor()` would pass every one of those.
+
+#### The signature list, and how an earlier version of this section was wrong
+
+This section previously said the runner greps for `AssertionError` and `Exception in thread "`, and
+that **"two signatures cover it"**. They do not. `assertion-triage.md`, the cited evidence, only ever
+measured *planted `AssertionError`s*; its recommendation was correct for assertions and was then
+generalised into a claim about all throwables. For a **non-assertion** throwable swallowed in a
+handler — an NPE, an `IllegalStateException`, an `IndexOutOfBoundsException`, i.e. the shapes a real
+port bug actually produces — the captured stream contains **neither** string. Such a run was
+reproduced passing the scan and being **recorded as a golden**, with the NPE and its stack frames
+baked in as expected output.
+
+The list is now read out of the vendored kernel rather than inferred. `javap -c` on
+`com/iai/cybele/exception/IAIExceptionHandler` shows `print(header, throwable)` writing
+`"\n***" + header + " ->"` to `System.err` before anything else, then — by stack-trace option —
+`toString()` or `printStackTrace()`, plus `"Originated from --- "`,
+`"Exception thrown by target ---"`, `"Unsupported stack trace option"` and `"Thrown in Thread '"`.
+The same on `com/iai/cybele/thmgmt/IAIAgentThread` shows every reflective-dispatch failure routed
+through `handleException("Thread Mgmt Exception", …)` carrying one of
+`"InvocationTargetException occured in"`, `"ClassCastException occured in"`,
+`"General Exception occured in"` or `"Failed to invoke the method"` — the kernel's own spelling of
+"occured" included.
+
+| Group | Signatures |
+|---|---|
+| JVM | `AssertionError`, `Exception in thread "`, `OutOfMemoryError`, `StackOverflowError`, `^# A fatal error has been detected`, `java.lang.reflect.InvocationTargetException` |
+| `IAIExceptionHandler.print` | `^\*\*\*.* ->`, `Originated from --- `, `Exception thrown by target ---`, `Thrown in Thread '`, `Unsupported stack trace option` |
+| `IAIAgentThread` dispatch | `Thread Mgmt Exception`, `Failed to invoke the method`, `(InvocationTargetException\|ClassCastException\|General Exception) occured in` |
+
+The banner line is emitted for **every** swallowed throwable regardless of its type or of the
+configured trace option, which is what makes it load-bearing rather than the type names. A
+self-check drives a stub that emits exactly the kernel's byte sequence around an NPE and asserts
+both that the scan catches it and that those bytes contain neither of the two original signatures.
+
+Two further consequences:
+
+* **Occurrence count is not failure count.** `AssertionError` appears twice per firing assertion —
+  the wrapper message and the cause line — and the kernel path adds a banner and a stack trace on
+  top. The scanner reports hits and never converts them to a number of failures.
+* **The scan runs before the normalizer.** With the streams merged, a firing assertion's stack
+  trace lands *inside* the captured trace. Normalizing first would either scrub the evidence into
+  invisibility or bake it into a golden as expected output. Fail fast, then normalize.
+
+A scenario that deliberately pins a failure (say, configuration rejection) exempts its own signature
+with `allowErrorLines` — narrowly, and never silently: see the rules under the format above.
 
 ### 5 — liveness, because a dead simulation is invisible to both checks above
 
@@ -253,11 +315,30 @@ independent halves and both are cheap.
 Liveness is evaluated on the **raw** lines rather than the normalized ones, so a rule authored today
 does not have to be re-authored when #21 lands.
 
+#### Which lines a pattern sees — an asymmetry worth knowing
+
+`liveness` and `allowErrorLines` match **raw** captured lines. `entity` and `summary` match
+**normalized** ones. That is deliberate — the first pair has to work before the normalizer runs,
+the second pair describes what a golden contains — but it means a pattern copied from one to the
+other can silently stop matching once #21 projects the `at <t>` field away. The harness fails a
+`causal` or `summary` run whose `entity.pattern` matches none of the normalized lines, rather than
+letting every line fall into the unattributed bucket and comparing nothing per entity.
+
 ### 6 — recording is last, on purpose
 
 `-Dgolden.record=true` (TESTING.md §3.2) writes the golden instead of comparing. Because recording
 is the last step, a run can only be frozen into the baseline after it has passed the error scan, the
-exit classification and the liveness check. A broken run is not recordable.
+exit classification and the liveness check. A broken run is not recordable, and **each** of those
+checks has its own self-check asserting that no golden file appears — the argument rests on the
+order, so the order cannot be held in place by a comment alone. (It was: a mutation that moved the
+liveness check after `record(…)` left the whole suite green, because the test only asserted on the
+failure message.)
+
+An **empty** normalized trace is refused on both sides, recording and comparing. A 0-byte golden
+matches an empty run and nothing else can ever fail against it — the "lock that cannot fail" shape
+this project has already rejected twice — and it is reachable by accident: the default diagnostic
+prefixes include two spaces, so a target whose lines happen to be indented normalizes to nothing.
+The refusal names the normalizer that ate the trace.
 
 ## Diagnostics versus trace
 
@@ -279,10 +360,19 @@ diagnostic shape declares it in its adapter rather than teaching the normalizer 
   order (`Cybele.createAgent` is asynchronous — six different orders measured in six runs, so the
   block must be sorted by agent name and there is no tick boundary to sort within) and
   equal-millisecond line interleaving are all untouched. The `TraceNormalizer` seam and its
-  position in the pipeline are what this issue fixes; the projection itself is #21's.
+  position in the pipeline are what this issue fixes; the projection itself is #21's. Two things to
+  take with it: the startup block lands in `causal`'s **unattributed bucket**, which is compared
+  unconditionally and excluded from the tolerance budget, so sorting it is a normalizer job and not
+  something a tolerance can absorb; and `entity`/`summary` patterns match **normalized** lines while
+  `liveness`/`allowErrorLines` match raw ones, so projecting a field away can invalidate an
+  `entity.pattern` that was copied from a liveness rule.
 * **#13 — `OpenCybeleLauncher`.** No adapter for a real implementation exists here. #13 is blocked
   by this issue, so requiring its smoke test here would be circular; the stub adapter proves the SPI
-  instead, and differs from a real one only in what it points at.
+  instead, and differs from a real one only in what it points at. One thing it must get right that
+  the stub does not exercise: `launcher.properties` have to be rendered into `OPENCYBELE_OPTS`,
+  **not** into the start script's argv, because a Gradle start script routes `$@` to the program's
+  arguments — so `-Dsim.random.masterSeed=…` passed positionally is silently ignored and the run
+  draws a fresh seed while appearing to accept the pin.
 * **#23 / #24 — scenarios and goldens.** `smoke-stub` is the only scenario, and its golden is a
   stub's output. Real scenarios are recorded against the OpenCybele branch, and every one proposed
   for `strict` should first be run three times at a fixed seed with its entity-id sets diffed.

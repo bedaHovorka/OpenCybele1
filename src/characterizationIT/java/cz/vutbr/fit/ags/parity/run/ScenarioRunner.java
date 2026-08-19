@@ -4,11 +4,13 @@ import cz.vutbr.fit.ags.parity.ParityLayout;
 import cz.vutbr.fit.ags.parity.golden.ComparisonResult;
 import cz.vutbr.fit.ags.parity.golden.GoldenStore;
 import cz.vutbr.fit.ags.parity.golden.TraceComparator;
+import cz.vutbr.fit.ags.parity.spec.ContractLevel;
 import cz.vutbr.fit.ags.parity.spec.LivenessRule;
 import cz.vutbr.fit.ags.parity.spec.ScenarioSpec;
 import cz.vutbr.fit.ags.parity.spi.LaunchSpec;
 import cz.vutbr.fit.ags.parity.spi.LauncherAdapter;
 import cz.vutbr.fit.ags.parity.spi.RunDisposition;
+import cz.vutbr.fit.ags.parity.spi.TraceNormalizer;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -35,16 +37,22 @@ import java.util.concurrent.atomic.AtomicReference;
  *   <li><strong>Suite latch.</strong> If an earlier scenario reported a dead clock command channel,
  *       nothing is launched at all.</li>
  *   <li><strong>Launch and capture</strong> the merged stdout+stderr stream, with a hard harness
- *       timeout that is never a pass.</li>
+ *       timeout that is never a pass, and a refusal to accept a truncated capture.</li>
+ *   <li><strong>Exit classification, and the suite latch.</strong> "Reached the bound it declared"
+ *       and "gave up" are different outcomes; only the first can pass. Exit 5 latches the suite
+ *       <em>here</em>, before any other check can throw — otherwise a run that both exited 5 and
+ *       printed a throwable would fail as an ordinary scenario and leave the latch unset, which is
+ *       precisely the case the latch exists for.</li>
  *   <li><strong>Error scan on the raw stream</strong>, before any normalization. A throwable does
  *       not change the exit status, and with the streams merged its stack trace is inside the
- *       trace — normalizing first would either scrub the evidence or freeze it into a golden.</li>
- *   <li><strong>Exit classification.</strong> "Reached the bound it declared" and "gave up" are
- *       different outcomes; only the first can pass. Exit 5 latches the suite.</li>
+ *       trace — normalizing first would either scrub the evidence or freeze it into a golden. The
+ *       expected-disposition check follows it, so a failure report still leads with the
+ *       throwable.</li>
  *   <li><strong>Liveness.</strong> A simulation whose generator died keeps its clock, reaches its
  *       simulated-time bound and exits 0 with nothing in the trace to grep for. Only a floor on how
  *       much it produced catches that.</li>
- *   <li><strong>Normalize</strong>, then record or compare at the declared contract level.</li>
+ *   <li><strong>Normalize</strong> — refusing an empty result — then record or compare at the
+ *       declared contract level.</li>
  * </ol>
  *
  * <p>Recording is deliberately last: a golden can only be written by a run that already passed
@@ -96,28 +104,44 @@ public final class ScenarioRunner {
         LaunchSpec launch = adapter.launch(spec, scratch);
         CapturedRun captured = execute(launch, spec, adapter);
 
-        // 3 — error scan, on the RAW stream, before anything is projected away.
-        List<String> errors = ErrorScanner.scan(captured.lines(), spec.allowErrorLines());
-        if (!errors.isEmpty()) {
-            throw new ScenarioFailedException(report(spec, adapter, captured,
-                    "the run printed a throwable. The exit status does not carry this:"
-                            + " the kernel wraps a throwable from an agent handler, prints it and"
-                            + " leaves the status alone. Occurrence count is not failure count —"
-                            + " one firing assertion prints 'AssertionError' twice.",
-                    errors));
-        }
-
-        // 4 — exit classification.
+        // 3 — classify the exit and LATCH a poisoned environment before anything else can throw.
+        //
+        // The latch used to sit after the error scan, which meant a run that exited 5 *and* printed
+        // a throwable — the overwhelmingly likely shape, since a dead clock channel is usually
+        // preceded by a swallowed throwable — failed as an ordinary scenario and never latched.
+        // Every later scenario then launched into the same poisoned environment and, in record
+        // mode, froze goldens against a clock whose pause/resume/setTimer are all no-ops. The
+        // message can still lead with the throwable; the latch cannot wait for it.
+        String fatal = null;
         if (captured.disposition() == RunDisposition.CLOCK_COMMAND_DEAD) {
-            String reason = "scenario '" + spec.id() + "' exited " + captured.exitCode()
+            fatal = "scenario '" + spec.id() + "' exited " + captured.exitCode()
                     + " (clock command channel dead). Every later run in this environment is suspect:"
                     + " the clock keeps advancing and the process exits green while every pause,"
                     + " resume and timer is a no-op, so a golden recorded now would be wrong with no"
                     + " symptom. Suite latched.";
-            SUITE_FATAL.compareAndSet(null, reason);
-            throw new SuiteFatalError(reason + System.lineSeparator()
-                    + report(spec, adapter, captured, "clock command channel dead", List.of()));
+            SUITE_FATAL.compareAndSet(null, fatal);
         }
+
+        // 4 — error scan, on the RAW stream, before anything is projected away.
+        ErrorScanner.ScanResult scan = ErrorScanner.scan(captured.lines(), spec.allowErrorLines());
+        announceExemptions(spec, scan);
+        if (fatal != null) {
+            throw new SuiteFatalError(fatal + System.lineSeparator()
+                    + report(spec, adapter, captured, scan.clean()
+                            ? "clock command channel dead"
+                            : "clock command channel dead, and the run also printed a throwable",
+                            scan.hits()));
+        }
+        if (!scan.clean()) {
+            throw new ScenarioFailedException(report(spec, adapter, captured,
+                    "the run printed a throwable. The exit status does not carry this:"
+                            + " the kernel hands a throwable from an agent handler to its exception"
+                            + " handler, prints it and leaves the status alone. Occurrence count is"
+                            + " not failure count — one firing assertion prints 'AssertionError'"
+                            + " twice, and the kernel path adds a banner and a stack trace.",
+                    scan.hits()));
+        }
+
         RunDisposition expected = spec.run().expect().disposition();
         if (captured.disposition() != expected) {
             throw new ScenarioFailedException(report(spec, adapter, captured,
@@ -142,7 +166,19 @@ public final class ScenarioRunner {
         }
 
         // 6 — normalize, then record or compare.
-        List<String> normalized = adapter.normalizer().normalize(captured.lines());
+        TraceNormalizer normalizer = adapter.normalizer();
+        List<String> normalized = normalizer.normalize(captured.lines());
+        if (normalized.isEmpty()) {
+            throw new ScenarioFailedException(report(spec, adapter, captured,
+                    "the normalized trace is EMPTY. " + normalizer.getClass().getName()
+                            + " projected away every one of the " + captured.lines().size()
+                            + " captured line(s). An empty golden matches an empty run and nothing"
+                            + " else can ever fail against it — the 'lock that cannot fail' shape"
+                            + " this project has already rejected twice. Check the adapter's"
+                            + " diagnostic prefixes against what the target actually prints.",
+                    List.of()));
+        }
+        checkEntityRuleMatches(spec, adapter, captured, normalized);
         if (GoldenStore.recording()) {
             Path written = goldenStore.record(spec.goldenFile(), normalized);
             return new RunReport(captured, normalized, true, written);
@@ -158,6 +194,45 @@ public final class ScenarioRunner {
                     comparison.failures()));
         }
         return new RunReport(captured, normalized, false, goldenStore.fileFor(spec.goldenFile()));
+    }
+
+    /**
+     * An exemption is a hole in the error scan, so it is never silent: the count and the lines are
+     * printed on every run that uses one, passing or failing.
+     */
+    private static void announceExemptions(ScenarioSpec spec, ErrorScanner.ScanResult scan) {
+        if (scan.exempted().isEmpty()) {
+            return;
+        }
+        System.err.println("parity: scenario '" + spec.id() + "' silenced " + scan.exempted().size()
+                + " error-scan hit(s) via allowErrorLines:");
+        for (String line : scan.exempted()) {
+            System.err.println("parity:   " + line);
+        }
+    }
+
+    /**
+     * A {@code causal} or {@code summary} contract that reads no entity id out of the normalized
+     * trace is not comparing anything: every line lands in the unattributed bucket. That is easy to
+     * author by accident, because {@code liveness} patterns match RAW lines while {@code entity}
+     * patterns match NORMALIZED ones — so a pattern copied from one to the other stops matching the
+     * moment the normalizer projects a field away.
+     */
+    private void checkEntityRuleMatches(ScenarioSpec spec, LauncherAdapter adapter,
+            CapturedRun captured, List<String> normalized) {
+        if (spec.entity() == null || spec.contract() == ContractLevel.STRICT) {
+            return;
+        }
+        boolean any = normalized.stream().anyMatch(line -> spec.entity().idOf(line).isPresent());
+        if (!any) {
+            throw new ScenarioFailedException(report(spec, adapter, captured,
+                    "entity.pattern /" + spec.entity().pattern() + "/ matched none of the "
+                            + normalized.size() + " NORMALIZED line(s), so a '"
+                            + spec.contract().yamlName() + "' contract would compare nothing per"
+                            + " entity. Note that liveness patterns match RAW lines and entity"
+                            + " patterns match normalized ones.",
+                    List.of()));
+        }
     }
 
     // --- process handling -------------------------------------------------------------------
@@ -217,6 +292,18 @@ public final class ScenarioRunner {
             disposition = adapter.classifyExit(exitCode);
         }
         joinQuietly(pump);
+        if (pump.isAlive()) {
+            // The child is gone but its stdout is not at EOF, which means something inherited the
+            // pipe — a grandchild, or a start script that did not exec. Whatever we captured is a
+            // PREFIX of the run, and a prefix is exactly what the error scan, the liveness check
+            // and the golden must never be handed: the missing tail is where a late AssertionError
+            // lives.
+            process.destroyForcibly();
+            throw new ScenarioFailedException("scenario '" + spec.id() + "': the child exited but its"
+                    + " output stream never reached EOF within 5 s, so the capture is truncated at "
+                    + lines.size() + " line(s). Something is still holding the inherited stdout"
+                    + " (a grandchild, or a launcher script that forks instead of exec'ing).");
+        }
         long elapsedMs = (System.nanoTime() - startedNanos) / 1_000_000L;
         return new CapturedRun(launch, exitCode, disposition, new ArrayList<>(lines), elapsedMs);
     }

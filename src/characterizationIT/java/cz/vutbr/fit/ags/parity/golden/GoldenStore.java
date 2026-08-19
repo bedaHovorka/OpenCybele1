@@ -52,14 +52,26 @@ public final class GoldenStore {
             throw new IllegalStateException("no golden at " + file
                     + " — record one with: ./gradlew characterizationIT -D" + RECORD_PROPERTY + "=true");
         }
+        List<String> lines;
         try {
-            return List.copyOf(Files.readAllLines(file, StandardCharsets.UTF_8));
+            lines = List.copyOf(Files.readAllLines(file, StandardCharsets.UTF_8));
         } catch (IOException e) {
             throw new UncheckedIOException("cannot read golden " + file, e);
         }
+        if (lines.isEmpty()) {
+            throw new IllegalStateException(file + " is empty. An empty golden matches an empty run"
+                    + " and nothing else can ever fail against it; it is a lock that cannot fail,"
+                    + " not a baseline. Delete it and find out why the normalizer produced nothing.");
+        }
+        return lines;
     }
 
     public Path record(String goldenName, List<String> lines) {
+        if (lines.isEmpty()) {
+            throw new IllegalArgumentException("refusing to record an empty golden for '" + goldenName
+                    + "'. A 0-byte golden matches an empty run and nothing else can ever fail"
+                    + " against it. The normalizer projected away everything the run printed.");
+        }
         Path file = fileFor(goldenName);
         try {
             Files.createDirectories(file.getParent());

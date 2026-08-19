@@ -34,8 +34,11 @@ public record LivenessRule(Pattern pattern, int atLeast, Integer atMost, int dis
         if (pattern == null) {
             throw new IllegalArgumentException("liveness rule needs a pattern");
         }
-        if (atLeast < 0) {
-            throw new IllegalArgumentException("liveness.atLeast must not be negative");
+        if (atLeast < 1) {
+            // atLeast: 0 satisfies the "every scenario needs a liveness rule" mandate while
+            // asserting nothing, which is worse than having no rule: it looks like a floor.
+            throw new IllegalArgumentException("liveness.atLeast must be at least 1 for /" + pattern
+                    + "/; a floor of 0 is satisfied by a run that produced nothing at all");
         }
         if (atMost != null && atMost < atLeast) {
             throw new IllegalArgumentException("liveness.atMost (" + atMost

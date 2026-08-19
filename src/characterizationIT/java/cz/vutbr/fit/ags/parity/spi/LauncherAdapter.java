@@ -41,9 +41,11 @@ public interface LauncherAdapter {
         return switch (exitCode) {
             case 0 -> RunDisposition.BOUND_REACHED;
             case 1 -> RunDisposition.STARTUP_ERROR;
+            case 2 -> RunDisposition.WINDOW_CLOSED_EARLY;
             case 3 -> RunDisposition.WALL_CLOCK_TIMEOUT;
             case 4 -> RunDisposition.STALL;
             case 5 -> RunDisposition.CLOCK_COMMAND_DEAD;
+            case 255 -> RunDisposition.AGENT_CONSTRUCTION_THROWABLE;
             default -> RunDisposition.UNKNOWN;
         };
     }

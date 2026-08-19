@@ -21,6 +21,14 @@ public enum RunDisposition {
     /** Exit 1 — configuration or startup error, raised before the agent kernel started. */
     STARTUP_ERROR,
 
+    /**
+     * Exit 2 — the GUI window was closed while a {@code sim.stop.*} bound was armed and unreached.
+     * The run did <em>not</em> finish. Closing the window of an unbounded interactive run is still
+     * exit 0; this code exists because a desktop, a session manager or a stray click used to end a
+     * bounded run with "a declared bound was reached".
+     */
+    WINDOW_CLOSED_EARLY,
+
     /** Exit 3 — the wall-clock safety net fired. The run did <em>not</em> finish. */
     WALL_CLOCK_TIMEOUT,
 
@@ -33,6 +41,14 @@ public enum RunDisposition {
      * and a golden recorded against a dead clock is wrong with no symptom.
      */
     CLOCK_COMMAND_DEAD,
+
+    /**
+     * Exit 255 — a throwable escaped an agent <em>constructor</em>. Unlike the handler path, this
+     * one is loud: the JVM dies in ~0.26 s with a stack trace on stderr, no stop banner, and no
+     * exit code the application ever set. Worth its own name precisely because it contradicts the
+     * tempting rule "Cybele swallows every throwable".
+     */
+    AGENT_CONSTRUCTION_THROWABLE,
 
     /** The harness itself killed the process after {@code run.harnessTimeoutMs}. Never a pass. */
     HARNESS_TIMEOUT,

@@ -49,9 +49,13 @@ val characterizationIT by tasks.registering(Test::class) {
     classpath = characterizationITSourceSet.runtimeClasspath
     useJUnitPlatform()
 
-    // Sequential on purpose: the goldens, the record-mode switch and (later) the implementations'
-    // JVM-singleton runtimes are all global state.
+    // Sequential on purpose: the goldens, the record-mode switch, ScenarioRunner's static
+    // suite-fatal latch and (later) the implementations' JVM-singleton runtimes are all global
+    // state. All three levers are pinned rather than left at a default that a future edit could
+    // flip: forkEvery = 0 keeps one JVM (so the latch cannot silently reset between forks), and
+    // src/characterizationIT/resources/junit-platform.properties disables parallel execution.
     maxParallelForks = 1
+    forkEvery = 0
 
     // Record mode, per TESTING.md §3.2:  ./gradlew characterizationIT -Dgolden.record=true
     systemProperty("golden.record", providers.systemProperty("golden.record").getOrElse("false"))

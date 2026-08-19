@@ -2,6 +2,7 @@ package cz.vutbr.fit.ags.parity.it;
 
 import cz.vutbr.fit.ags.parity.ParityLayout;
 import cz.vutbr.fit.ags.parity.golden.GoldenStore;
+import cz.vutbr.fit.ags.parity.run.ErrorScanner;
 import cz.vutbr.fit.ags.parity.run.RunReport;
 import cz.vutbr.fit.ags.parity.run.ScenarioFailedException;
 import cz.vutbr.fit.ags.parity.run.ScenarioRunner;
@@ -78,8 +79,7 @@ class HarnessSelfCheckIT {
         assertTrue(failure.getMessage().contains("-> BOUND_REACHED"),
                 "the run really did exit 0 and looked healthy: " + failure.getMessage());
         assertTrue(failure.getMessage().contains("AssertionError"));
-        assertFalse(Files.exists(parityRoot.resolve("golden").resolve("throwing.txt")),
-                "a run that printed a throwable must not be recordable as a golden");
+        assertNoGolden(parityRoot, "throwing");
     }
 
     @Test
@@ -92,6 +92,7 @@ class HarnessSelfCheckIT {
                 () -> withRecordMode(true, () -> runner.run(spec, new StubLauncher())));
         assertTrue(failure.getMessage().contains("liveness"), failure.getMessage());
         assertTrue(failure.getMessage().contains("-> BOUND_REACHED"), failure.getMessage());
+        assertNoGolden(parityRoot, "dead");
     }
 
     @Test
@@ -104,6 +105,7 @@ class HarnessSelfCheckIT {
                 () -> withRecordMode(true, () -> runner.run(spec, new StubLauncher())));
         assertTrue(failure.getMessage().contains("WALL_CLOCK_TIMEOUT"), failure.getMessage());
         assertTrue(failure.getMessage().contains("BOUND_REACHED"), failure.getMessage());
+        assertNoGolden(parityRoot, "timed-out");
     }
 
     @Test
@@ -115,13 +117,14 @@ class HarnessSelfCheckIT {
         ScenarioFailedException failure = assertThrows(ScenarioFailedException.class,
                 () -> withRecordMode(true, () -> runner.run(spec, new StubLauncher())));
         assertTrue(failure.getMessage().contains("HARNESS_TIMEOUT"), failure.getMessage());
+        assertNoGolden(parityRoot, "hanging");
     }
 
     @Test
     @DisplayName("a dead clock command channel latches the whole suite, not one scenario")
     void deadClockChannelLatchesTheSuite(@TempDir Path parityRoot) {
         ScenarioRunner runner = new ScenarioRunner(new ParityLayout(parityRoot));
-        ScenarioSpec fatal = spec("clock-dead", "strict", "clock-dead", 8, 0, "");
+        ScenarioSpec fatal = spec("clock-dead", "strict", "clock-dead", 8, 1, "");
         ScenarioSpec healthy = spec("later", "strict", "normal", 8, 8, "");
         try {
             SuiteFatalError first = assertThrows(SuiteFatalError.class,
@@ -270,7 +273,340 @@ class HarnessSelfCheckIT {
                 "the harness must have no compile-time link to an implementation: " + offenders);
     }
 
+    @Test
+    @DisplayName("a swallowed NON-assertion throwable is caught in the kernel's own byte shape")
+    void kernelSwallowedThrowableIsCaught(@TempDir Path parityRoot) {
+        // The shape a real port bug produces: an NPE inside an agent handler, routed through
+        // IAIAgentThread -> IAIExceptionHandler. The captured stream contains NEITHER
+        // "AssertionError" NOR "Exception in thread \"", which is exactly why the first version of
+        // the error scan passed this run and recorded it as a golden.
+        ScenarioRunner runner = new ScenarioRunner(new ParityLayout(parityRoot));
+        ScenarioSpec spec = spec("kernel-swallow", "strict", "kernel-swallow", 8, 8, "");
+
+        ScenarioFailedException failure = assertThrows(ScenarioFailedException.class,
+                () -> withRecordMode(true, () -> runner.run(spec, new StubLauncher())));
+        assertTrue(failure.getMessage().contains("-> BOUND_REACHED"),
+                "the run exited 0 and looked healthy: " + failure.getMessage());
+        assertTrue(failure.getMessage().contains("General Exception occured in"), failure.getMessage());
+        assertNoGolden(parityRoot, "kernel-swallow");
+
+        // And the load-bearing half, asserted on the lines rather than on the report: the very
+        // bytes the kernel emits contain neither of the two signatures the first version scanned
+        // for, yet are caught. Remove the kernel literals from ErrorScanner.SIGNATURES and this
+        // goes red while every other test stays green.
+        List<String> kernelLines = List.of(
+                "",
+                "***Thread Mgmt Exception -> cybele.exception.CybeleException:"
+                        + " General Exception occured in enter of the class Station",
+                "java.lang.NullPointerException: Cannot invoke \"java.util.List.size()\"",
+                "\tat cz.vutbr.fit.ags.xhovor07.Station.enter(Station.java:118)");
+        for (String line : kernelLines) {
+            assertFalse(line.contains("AssertionError") || line.contains("Exception in thread \""),
+                    "the kernel's shape must contain neither old signature: " + line);
+        }
+        assertFalse(ErrorScanner.scan(kernelLines, List.of()).clean(),
+                "the kernel's swallowed-throwable shape must be caught by the scan");
+    }
+
+    @Test
+    @DisplayName("exit 5 latches the suite even when the run also printed a throwable")
+    void deadClockLatchesEvenWhenItAlsoThrew(@TempDir Path parityRoot) {
+        // The overwhelmingly likely shape, and the one the latch exists for. The error scan used to
+        // throw first, so this run failed as an ordinary scenario and every later scenario launched
+        // into the same poisoned environment.
+        ScenarioRunner runner = new ScenarioRunner(new ParityLayout(parityRoot));
+        ScenarioSpec spec = ScenarioSpecParser.parse("""
+                id: dead-clock-and-throwable
+                contract: strict
+                launcher:
+                  properties:
+                    sim.random.masterSeed: "20080415"
+                    stub.mode: clock-dead
+                    stub.throwable: "true"
+                run:
+                  harnessTimeoutMs: 60000
+                  expect: bound-reached
+                liveness:
+                  - pattern: '^vl\\d+ started$'
+                    atLeast: 1
+                """, "<inline:dead-clock-and-throwable>");
+        try {
+            SuiteFatalError fatal = assertThrows(SuiteFatalError.class,
+                    () -> withRecordMode(true, () -> runner.run(spec, new StubLauncher())));
+            assertTrue(fatal.getMessage().contains("Suite latched"), fatal.getMessage());
+            assertTrue(fatal.getMessage().contains("also printed a throwable"), fatal.getMessage());
+            assertTrue(ScenarioRunner.suiteFatalReason().isPresent(),
+                    "the latch must be set even though the scan found a throwable first");
+        } finally {
+            ScenarioRunner.resetSuiteLatch();
+        }
+    }
+
+    @Test
+    @DisplayName("distinctGroup counts distinct captures, not matches")
+    void distinctGroupIsNotAMatchCount(@TempDir Path parityRoot) {
+        // Without this, `return matches;` inside LivenessRule.count passes the whole suite: the only
+        // other user is smoke-stub, whose 12 trains occupy 12 lines, so the two counts coincide.
+        ScenarioRunner runner = new ScenarioRunner(new ParityLayout(parityRoot));
+        String distinct = """
+                liveness:
+                  - pattern: '^(vl\\d+) started$'
+                    distinctGroup: 1
+                    atLeast: 5
+                """;
+        String plain = """
+                liveness:
+                  - pattern: '^(vl\\d+) started$'
+                    atLeast: 5
+                """;
+        ScenarioFailedException failure = assertThrows(ScenarioFailedException.class,
+                () -> withRecordMode(true, () -> runner.run(
+                        duplicateSpec("distinct-demo", distinct), new StubLauncher())));
+        assertTrue(failure.getMessage().contains("produced 1 distinct group(1) values"),
+                failure.getMessage());
+
+        // The same 12 lines, counted as matches instead: passes. The two rules disagree, which is
+        // the whole point of the option.
+        withRecordMode(true, () -> runner.run(duplicateSpec("plain-demo", plain), new StubLauncher()));
+    }
+
+    @Test
+    @DisplayName("causal compares the unattributed lines unconditionally, outside the tolerance")
+    void causalDoesNotSpendToleranceOnTheUnattributedBucket(@TempDir Path parityRoot) {
+        // The startup block carries no entity id, so it lands in one bucket. Treating that bucket as
+        // an entity let a replay that dropped the ENTIRE startup block pass at tolerance 1 — and all
+        // of #21's startup-block work lands there.
+        ScenarioRunner runner = new ScenarioRunner(new ParityLayout(parityRoot));
+        String entityBlock = """
+                entity:
+                  pattern: '^(vl\\d+)\\b'
+                  tolerance:
+                    missing: 1
+                    extra: 1
+                """;
+        withRecordMode(true, () -> runner.run(
+                spec("startup-drop", "causal", "normal", 6, 6, entityBlock), new StubLauncher()));
+
+        ScenarioSpec withoutStartup = ScenarioSpecParser.parse("""
+                id: startup-drop
+                contract: causal
+                launcher:
+                  properties:
+                    sim.random.masterSeed: "20080415"
+                    sim.stop.maxTrains: "6"
+                    stub.mode: normal
+                    stub.startup: "false"
+                run:
+                  harnessTimeoutMs: 60000
+                  expect: bound-reached
+                liveness:
+                  - pattern: '^vl\\d+ started$'
+                    atLeast: 6
+                """ + entityBlock, "<inline:startup-drop>");
+
+        ScenarioFailedException failure = assertThrows(ScenarioFailedException.class,
+                () -> withRecordMode(false, () -> runner.run(withoutStartup, new StubLauncher())));
+        assertTrue(failure.getMessage().contains("no entity id differ"), failure.getMessage());
+    }
+
+    @Test
+    @DisplayName("an empty normalized trace is refused rather than recorded")
+    void emptyNormalizedTraceIsRefused(@TempDir Path parityRoot) {
+        // Reachable with the DEFAULT diagnostic prefixes on any target whose lines are indented:
+        // "  " is one of them, so a fully indented stream normalizes to nothing, records a 0-byte
+        // golden, and then strict-matches a completely different run.
+        ScenarioRunner runner = new ScenarioRunner(new ParityLayout(parityRoot));
+        ScenarioSpec spec = ScenarioSpecParser.parse("""
+                id: all-indented
+                contract: strict
+                launcher:
+                  properties:
+                    sim.random.masterSeed: "20080415"
+                    sim.stop.maxTrains: "6"
+                    stub.mode: all-indented
+                run:
+                  harnessTimeoutMs: 60000
+                  expect: bound-reached
+                liveness:
+                  - pattern: 'vl\\d+ started$'
+                    atLeast: 6
+                """, "<inline:all-indented>");
+
+        ScenarioFailedException failure = assertThrows(ScenarioFailedException.class,
+                () -> withRecordMode(true, () -> runner.run(spec, new StubLauncher())));
+        assertTrue(failure.getMessage().contains("EMPTY"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("DiagnosticFilter"),
+                "the report must name the normalizer that ate the trace: " + failure.getMessage());
+        assertNoGolden(parityRoot, "all-indented");
+    }
+
+    @Test
+    @DisplayName("a causal entity pattern that matches no normalized line fails loudly")
+    void entityPatternMatchingNothingFails(@TempDir Path parityRoot) {
+        ScenarioRunner runner = new ScenarioRunner(new ParityLayout(parityRoot));
+        String wrongEntity = """
+                entity:
+                  pattern: '^(zz\\d+)\\b'
+                """;
+        ScenarioFailedException failure = assertThrows(ScenarioFailedException.class,
+                () -> withRecordMode(true, () -> runner.run(
+                        spec("no-entity-match", "causal", "normal", 6, 6, wrongEntity), new StubLauncher())));
+        assertTrue(failure.getMessage().contains("matched none of the"), failure.getMessage());
+        assertNoGolden(parityRoot, "no-entity-match");
+    }
+
+    @Test
+    @DisplayName("a truncated capture is refused rather than scanned and recorded")
+    void truncatedCaptureIsRefused(@TempDir Path parityRoot) {
+        ScenarioRunner runner = new ScenarioRunner(new ParityLayout(parityRoot));
+        ScenarioSpec spec = ScenarioSpecParser.parse("""
+                id: orphan
+                contract: strict
+                launcher:
+                  properties:
+                    sim.random.masterSeed: "20080415"
+                    stub.mode: orphan
+                run:
+                  harnessTimeoutMs: 30000
+                  expect: bound-reached
+                liveness:
+                  - pattern: '^vl\\d+ in st'
+                    atLeast: 1
+                """, "<inline:orphan>");
+
+        ScenarioFailedException failure = assertThrows(ScenarioFailedException.class,
+                () -> withRecordMode(true, () -> runner.run(spec, new StubLauncher())));
+        assertTrue(failure.getMessage().contains("never reached EOF"), failure.getMessage());
+        assertNoGolden(parityRoot, "orphan");
+    }
+
+    @Test
+    @DisplayName("a liveness floor of zero is rejected")
+    void zeroLivenessFloorIsRejected() {
+        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                () -> ScenarioSpecParser.parse("""
+                        id: x
+                        contract: strict
+                        run:
+                          harnessTimeoutMs: 1000
+                          expect: bound-reached
+                        liveness:
+                          - pattern: 'a'
+                            atLeast: 0
+                        """, "<inline>"));
+        assertTrue(failure.getMessage().contains("at least 1"), failure.getMessage());
+    }
+
+    @Test
+    @DisplayName("an over-broad allowErrorLines pattern is rejected")
+    void broadErrorExemptionsAreRejected() {
+        for (String broad : List.of("'.'", "'.*'", "'.*Assertion.*|.*'")) {
+            IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                    () -> ScenarioSpecParser.parse("""
+                            id: x
+                            contract: strict
+                            run:
+                              harnessTimeoutMs: 1000
+                              expect: bound-reached
+                            liveness:
+                              - pattern: 'a'
+                                atLeast: 1
+                            allowErrorLines:
+                              - %s
+                            """.formatted(broad), "<inline>"),
+                    "expected " + broad + " to be rejected");
+            assertTrue(failure.getMessage().contains("ordinary output"), failure.getMessage());
+        }
+        // A narrow, anchored exemption is still allowed.
+        ScenarioSpecParser.parse("""
+                id: x
+                contract: strict
+                run:
+                  harnessTimeoutMs: 1000
+                  expect: bound-reached
+                liveness:
+                  - pattern: 'a'
+                    atLeast: 1
+                allowErrorLines:
+                  - '^Exception in thread "main" java\\.lang\\.IllegalArgumentException: sim\\.'
+                """, "<inline>");
+    }
+
+    @Test
+    @DisplayName("an entity tolerance under a strict contract is rejected, even at zero")
+    void toleranceUnderStrictIsRejected() {
+        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                () -> ScenarioSpecParser.parse("""
+                        id: x
+                        contract: strict
+                        run:
+                          harnessTimeoutMs: 1000
+                          expect: bound-reached
+                        liveness:
+                          - pattern: 'a'
+                            atLeast: 1
+                        entity:
+                          pattern: '^(vl\\d+)'
+                          tolerance:
+                            missing: 0
+                        """, "<inline>"));
+        assertTrue(failure.getMessage().contains("all zero"), failure.getMessage());
+    }
+
+    @Test
+    @DisplayName("a malformed node is a schema error, not a ClassCastException")
+    void shapeErrorsStayInTheSchemaLayer() {
+        IllegalArgumentException asList = assertThrows(IllegalArgumentException.class,
+                () -> ScenarioSpecParser.parse("""
+                        id: x
+                        contract: strict
+                        launcher: [a, b]
+                        run:
+                          harnessTimeoutMs: 1000
+                          expect: bound-reached
+                        liveness:
+                          - pattern: 'a'
+                            atLeast: 1
+                        """, "<inline>"));
+        assertTrue(asList.getMessage().contains("must be a mapping"), asList.getMessage());
+
+        IllegalArgumentException nonStringKey = assertThrows(IllegalArgumentException.class,
+                () -> ScenarioSpecParser.parse("""
+                        id: x
+                        contract: strict
+                        1: two
+                        run:
+                          harnessTimeoutMs: 1000
+                          expect: bound-reached
+                        liveness:
+                          - pattern: 'a'
+                            atLeast: 1
+                        """, "<inline>"));
+        assertTrue(nonStringKey.getMessage().contains("unknown key"), nonStringKey.getMessage());
+    }
+
     // --- helpers ------------------------------------------------------------------------------
+
+    /** Every check that rejects a run must also leave no golden behind; the order is the design. */
+    private static void assertNoGolden(Path parityRoot, String id) {
+        assertFalse(Files.exists(parityRoot.resolve("golden").resolve(id + ".txt")),
+                "a run rejected by the harness must not be recordable as a golden (" + id + ".txt)");
+    }
+
+    private static ScenarioSpec duplicateSpec(String id, String livenessBlock) {
+        return ScenarioSpecParser.parse("""
+                id: %s
+                contract: strict
+                launcher:
+                  properties:
+                    sim.random.masterSeed: "20080415"
+                    sim.stop.maxTrains: "12"
+                    stub.mode: duplicate
+                run:
+                  harnessTimeoutMs: 60000
+                  expect: bound-reached
+                """.formatted(id) + livenessBlock, "<inline:" + id + ">");
+    }
 
     private static ScenarioSpec spec(String id, String contract, String mode, int maxTrains,
             int livenessFloor, String extraYaml) {

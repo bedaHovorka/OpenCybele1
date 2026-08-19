@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -70,12 +71,28 @@ public final class TraceComparator {
         Map<String, List<String>> goldenByEntity = groupByEntity(entity, golden);
         Map<String, List<String>> actualByEntity = groupByEntity(entity, actual);
 
+        List<String> failures = new ArrayList<>();
+
+        // The unattributed bucket is NOT an entity and never participates in the tolerance budget.
+        // It used to, and the consequence was measurable: a replay that dropped the ENTIRE startup
+        // block passed at tolerance 1, because losing every unattributed line cost exactly one
+        // "missing entity". Since all of #21's startup-block work lands in this bucket, that would
+        // have let a causal golden silently stop asserting any of it. It is compared in order,
+        // unconditionally, like the contract's javadoc has always claimed.
+        List<String> goldenUnattributed = goldenByEntity.remove(UNATTRIBUTED);
+        List<String> actualUnattributed = actualByEntity.remove(UNATTRIBUTED);
+        if (!Objects.equals(goldenUnattributed, actualUnattributed)) {
+            failures.add("causal contract: the lines carrying no entity id differ, and they are"
+                    + " compared unconditionally — no tolerance applies to them"
+                    + System.lineSeparator() + "    golden: " + summarise(goldenUnattributed)
+                    + System.lineSeparator() + "    actual: " + summarise(actualUnattributed));
+        }
+
         Set<String> missing = new LinkedHashSet<>(goldenByEntity.keySet());
         missing.removeAll(actualByEntity.keySet());
         Set<String> extra = new LinkedHashSet<>(actualByEntity.keySet());
         extra.removeAll(goldenByEntity.keySet());
 
-        List<String> failures = new ArrayList<>();
         if (missing.size() > entity.missingTolerance()) {
             failures.add("causal contract: " + missing.size() + " entity id(s) in the golden did not"
                     + " appear in this run, tolerance is " + entity.missingTolerance() + ": " + truncate(missing));
@@ -95,11 +112,18 @@ public final class TraceComparator {
         return failures.isEmpty() ? ComparisonResult.match() : ComparisonResult.mismatch(failures);
     }
 
+    private static String summarise(List<String> lines) {
+        if (lines == null) {
+            return "<none>";
+        }
+        return lines.size() <= 8 ? lines.toString()
+                : lines.subList(0, 8) + " … and " + (lines.size() - 8) + " more";
+    }
+
     /**
      * Groups lines by entity id, preserving each entity's own line order. Lines naming no entity go
-     * into one shared bucket under {@link #UNATTRIBUTED}, which is compared in order like any other
-     * entity — so a startup block or a summary line still has to match, it just does not have to
-     * interleave with the entity lines the same way it did when the golden was recorded.
+     * into one shared bucket under {@link #UNATTRIBUTED}, which {@link #causal} compares in order
+     * and excludes from the tolerance budget.
      */
     private static Map<String, List<String>> groupByEntity(EntityRule entity, List<String> lines) {
         Map<String, List<String>> grouped = new LinkedHashMap<>();

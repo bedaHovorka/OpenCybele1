@@ -63,7 +63,7 @@ public final class ScenarioSpecParser {
         return spec;
     }
 
-    /** Parses every {@code *.yaml} in a directory, sorted by id for a stable suite order. */
+    /** Parses every {@code *.yaml} in a directory, in file-name order, for a stable suite order. */
     public static List<ScenarioSpec> parseAll(Path directory) {
         try (Stream<Path> files = Files.list(directory)) {
             List<ScenarioSpec> specs = new ArrayList<>();
@@ -93,12 +93,15 @@ public final class ScenarioSpecParser {
         ContractLevel contract = ContractLevel.fromYaml(requireString(source, "contract", root.get("contract")));
         String golden = optionalString(root.get("golden"), id + ".txt");
 
-        ScenarioSpec.Launcher launcher = parseLauncher(source, (Map<String, Object>) root.get("launcher"));
-        ScenarioSpec.Run run = parseRun(source, (Map<String, Object>) root.get("run"));
+        ScenarioSpec.Launcher launcher = parseLauncher(source, optionalMap(source, "launcher", root.get("launcher")));
+        ScenarioSpec.Run run = parseRun(source, optionalMap(source, "run", root.get("run")));
         List<LivenessRule> liveness = parseLiveness(source, root.get("liveness"));
-        EntityRule entity = parseEntity(source, (Map<String, Object>) root.get("entity"));
+        EntityRule entity = parseEntity(source, contract, optionalMap(source, "entity", root.get("entity")));
         List<SummaryRule> summary = parseSummary(source, root.get("summary"));
         List<Pattern> allowErrorLines = parsePatternList(source, "allowErrorLines", root.get("allowErrorLines"));
+        for (Pattern allowed : allowErrorLines) {
+            rejectIfTooBroad(source, allowed);
+        }
 
         if (liveness.isEmpty()) {
             throw new IllegalArgumentException(source + ": at least one liveness rule is required."
@@ -118,13 +121,6 @@ public final class ScenarioSpecParser {
                     + " contract 'summary'; under '" + contract.yamlName() + "' they would look"
                     + " like assertions while asserting nothing. Remove them or raise the contract.");
         }
-        if (contract == ContractLevel.STRICT && entity != null
-                && (entity.missingTolerance() > 0 || entity.extraTolerance() > 0)) {
-            throw new IllegalArgumentException(source + ": entity.tolerance is honoured under"
-                    + " contracts 'causal' and 'summary'; under 'strict' every line must match, so a"
-                    + " tolerance here would look like a licence it is not. Remove it, or weaken"
-                    + " the contract to the level the scenario actually holds to.");
-        }
         return new ScenarioSpec(id, description, contract, golden, launcher, run, liveness, entity,
                 summary, allowErrorLines);
     }
@@ -137,8 +133,9 @@ public final class ScenarioSpecParser {
         checkKeys(source, "launcher.", node, LAUNCHER_KEYS);
         return new ScenarioSpec.Launcher(
                 optionalString(node.get("config"), null),
-                stringMap(source, "launcher.properties", (Map<String, Object>) node.get("properties")),
-                stringMap(source, "launcher.env", (Map<String, Object>) node.get("env")),
+                stringMap(source, "launcher.properties",
+                        optionalMap(source, "launcher.properties", node.get("properties"))),
+                stringMap(source, "launcher.env", optionalMap(source, "launcher.env", node.get("env"))),
                 stringList(source, "launcher.args", node.get("args")));
     }
 
@@ -178,12 +175,19 @@ public final class ScenarioSpecParser {
     }
 
     @SuppressWarnings("unchecked")
-    private static EntityRule parseEntity(String source, Map<String, Object> node) {
+    private static EntityRule parseEntity(String source, ContractLevel contract, Map<String, Object> node) {
         if (node == null) {
             return null;
         }
         checkKeys(source, "entity.", node, ENTITY_KEYS);
-        Map<String, Object> tolerance = (Map<String, Object>) node.get("tolerance");
+        if (contract == ContractLevel.STRICT && node.containsKey("tolerance")) {
+            throw new IllegalArgumentException(source + ": entity.tolerance is honoured under"
+                    + " contracts 'causal' and 'summary'; under 'strict' every line must match, so a"
+                    + " tolerance block here reads as a licence it is not — even one whose values are"
+                    + " all zero. Remove it, or weaken the contract to the level the scenario"
+                    + " actually holds to.");
+        }
+        Map<String, Object> tolerance = optionalMap(source, "entity.tolerance", node.get("tolerance"));
         int missing = 0;
         int extra = 0;
         if (tolerance != null) {
@@ -230,11 +234,33 @@ public final class ScenarioSpecParser {
         return patterns;
     }
 
+    /**
+     * An {@code allowErrorLines} entry is a hole in the error scan, so it has to be narrow enough to
+     * name the failure it silences. A pattern that also matches ordinary text (the classic being a
+     * bare {@code .} or {@code .*}) silences every future throwable too, and a run whose real
+     * AssertionError was swallowed this way was reproduced recording a golden with the assertion in
+     * it. The test is empirical rather than syntactic: if the pattern matches innocuous text that
+     * contains no error signature at all, it is not naming anything.
+     */
+    private static void rejectIfTooBroad(String source, Pattern allowed) {
+        List<String> innocuous = List.of("", "x", "vl1 started", "vl1 in stA at 30280", "stA 0/6");
+        for (String probe : innocuous) {
+            if (allowed.matcher(probe).find()) {
+                throw new IllegalArgumentException(source + ": allowErrorLines pattern /" + allowed
+                        + "/ also matches ordinary output (" + (probe.isEmpty() ? "an empty line" : "'" + probe + "'")
+                        + "), so it would silence every future throwable, not the one it is meant to"
+                        + " exempt. Anchor it and name the specific failure.");
+            }
+        }
+    }
+
     private static void checkKeys(String source, String prefix, Map<String, Object> node, Set<String> allowed) {
         List<String> unknown = new ArrayList<>();
-        for (String key : node.keySet()) {
-            if (!allowed.contains(key)) {
-                unknown.add(prefix + key);
+        // String.valueOf, not a cast: YAML keys need not be strings, and `1: two` used to escape
+        // the schema layer as a raw ClassCastException instead of being reported as an unknown key.
+        for (Object key : node.keySet()) {
+            if (!allowed.contains(String.valueOf(key))) {
+                unknown.add(prefix + String.valueOf(key));
             }
         }
         if (!unknown.isEmpty()) {
@@ -249,6 +275,11 @@ public final class ScenarioSpecParser {
         }
     }
 
+    /** As {@link #asMap} but tolerating absence; a present-but-wrong-shaped node still fails loudly. */
+    private static Map<String, Object> optionalMap(String source, String where, Object node) {
+        return node == null ? null : asMap(source, where, node);
+    }
+
     @SuppressWarnings("unchecked")
     private static Map<String, Object> asMap(String source, String where, Object node) {
         if (node instanceof Map) {
@@ -261,12 +292,15 @@ public final class ScenarioSpecParser {
     private static Map<String, String> stringMap(String source, String where, Map<String, Object> node) {
         Map<String, String> out = new LinkedHashMap<>();
         if (node != null) {
-            node.forEach((k, v) -> {
-                if (v == null) {
-                    throw new IllegalArgumentException(source + ": " + where + "." + k + " has no value");
+            // Entry<?, ?>, not Entry<String, ?>: a non-string YAML key would otherwise surface as a
+            // ClassCastException from inside a lambda rather than as a schema error.
+            for (Map.Entry<?, ?> entry : node.entrySet()) {
+                if (entry.getValue() == null) {
+                    throw new IllegalArgumentException(source + ": " + where + "."
+                            + String.valueOf(entry.getKey()) + " has no value");
                 }
-                out.put(String.valueOf(k), scalarToString(v));
-            });
+                out.put(String.valueOf(entry.getKey()), scalarToString(entry.getValue()));
+            }
         }
         return out;
     }

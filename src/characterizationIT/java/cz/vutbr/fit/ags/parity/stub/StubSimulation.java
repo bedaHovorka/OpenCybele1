@@ -15,6 +15,15 @@ import java.util.Random;
  *   <li>{@code normal} — a healthy bounded run, exit 0;</li>
  *   <li>{@code assert-error} — a throwable printed mid-run while the status stays 0, twice, as a
  *       firing assertion actually prints;</li>
+ *   <li>{@code kernel-swallow} — an NPE swallowed by the kernel's exception handler, in the exact
+ *       byte shape disassembled out of {@code IAIExceptionHandler} and {@code IAIAgentThread}:
+ *       no {@code AssertionError}, no {@code Exception in thread "}, status still 0;</li>
+ *   <li>{@code duplicate} — the same train line repeated, so a {@code distinctGroup} rule has
+ *       something to distinguish itself from a plain match count against;</li>
+ *   <li>{@code all-indented} — every line prefixed with two spaces, i.e. matched by the DEFAULT
+ *       diagnostic prefixes, so the normalized trace comes out empty;</li>
+ *   <li>{@code orphan} — exits while a grandchild still holds the inherited stdout, truncating the
+ *       capture;</li>
  *   <li>{@code silent-death} — generation stops early and the run still exits 0 with no error
  *       anywhere in the stream;</li>
  *   <li>{@code wall-clock-timeout} / {@code stall} / {@code clock-dead} — exits 3, 4 and 5;</li>
@@ -47,11 +56,28 @@ public final class StubSimulation {
         }
 
         banner(seed, maxTrains, mode);
-        startupBlock();
+        if (Boolean.parseBoolean(System.getProperty("stub.startup", "true"))) {
+            startupBlock();
+        }
 
         if ("clock-dead".equals(mode)) {
+            // A dead clock channel is usually PRECEDED by a swallowed throwable, which is the case
+            // that used to leave the suite latch unset: the error scan threw first.
+            if (Boolean.parseBoolean(System.getProperty("stub.throwable", "false"))) {
+                printKernelSwallowedThrowable();
+            }
             System.err.println("!!! FATAL: clock 'main' did not answer a pause/resume round trip");
             System.exit(5);
+        }
+
+        if ("orphan".equals(mode)) {
+            try {
+                new ProcessBuilder("sleep", "30").inheritIO().start();
+            } catch (java.io.IOException e) {
+                System.err.println("could not spawn grandchild: " + e);
+            }
+            System.out.println("vl1 in stA at 1100");
+            System.exit(0);
         }
 
         Random random = new Random(seed);
@@ -60,8 +86,23 @@ public final class StubSimulation {
         for (int i = 1; i <= generated; i++) {
             clock += 100 + random.nextInt(400);
             String origin = STATIONS[random.nextInt(STATIONS.length)];
+            if ("all-indented".equals(mode)) {
+                System.out.println("  vl" + i + " in " + origin + " at " + clock);
+                System.out.println("  vl" + i + " started");
+                continue;
+            }
+            if ("duplicate".equals(mode)) {
+                // Deliberately the SAME id and the same text every time: a distinctGroup rule must
+                // count one, a plain match count must count `generated`.
+                System.out.println("vl1 in stA at 1100");
+                System.out.println("vl1 started");
+                continue;
+            }
             System.out.println("vl" + i + " in " + origin + " at " + clock);
             System.out.println("vl" + i + " started");
+            if ("kernel-swallow".equals(mode) && i == 2) {
+                printKernelSwallowedThrowable();
+            }
             if ("assert-error".equals(mode) && i == 2) {
                 printSwallowedAssertion();
             }
@@ -93,12 +134,33 @@ public final class StubSimulation {
     }
 
     private static void startupBlock() {
+        String indent = "all-indented".equals(System.getProperty("stub.mode", "normal")) ? "  " : "";
         for (String track : TRACKS) {
-            System.out.println(track + " free");
+            System.out.println(indent + track + " free");
         }
         for (String station : STATIONS) {
-            System.out.println(station + " 0/2");
+            System.out.println(indent + station + " 0/2");
         }
+    }
+
+    /**
+     * The kernel's swallowed-throwable shape, byte for byte as disassembled from the vendored jar:
+     * {@code IAIAgentThread} routes a reflective-dispatch failure through
+     * {@code handleException("Thread Mgmt Exception", …)}, and {@code IAIExceptionHandler.print}
+     * emits a blank line, then {@code ***<header> -><throwable>}, then the stack trace.
+     *
+     * <p>Note what is NOT here: no {@code AssertionError}, no {@code Exception in thread "}. This is
+     * the shape a real port bug produces — an NPE inside an agent handler — and the first version
+     * of the error scan passed it and recorded it as a golden.
+     */
+    private static void printKernelSwallowedThrowable() {
+        System.err.println();
+        System.err.println("***Thread Mgmt Exception -> cybele.exception.CybeleException:"
+                + " General Exception occured in enter of the class"
+                + " cz.vutbr.fit.ags.xhovor07.Station");
+        System.err.println("java.lang.NullPointerException: Cannot invoke \"java.util.List.size()\""
+                + " because \"this.waiting\" is null");
+        System.err.println("\tat cz.vutbr.fit.ags.xhovor07.Station.enter(Station.java:118)");
     }
 
     /**
