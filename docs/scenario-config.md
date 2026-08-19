@@ -410,6 +410,13 @@ it should be re-examined once #15 and #17 make runs deterministic and bounded.
 
 ## What this does not do
 
+- **A load ceiling above which a fixed seed no longer departs the same trains.** Measured on
+  `scenarios/short.properties`: identical departure-id sets over three runs at 30 s, differing
+  sets at 45 s, with the generator provably unperturbed (same trains generated, same origins).
+  The cause is the pre-existing `START` race ([#22](https://github.com/bedaHovorka/OpenCybele1/issues/22)
+  item 1 / `INVENTORY` DEF-02), which denser arrivals hit more often. A scenario intended for a
+  golden must be validated below it — three runs at a fixed seed, diff the departure-id sets.
+  See [`seeded-rng.md`](seeded-rng.md) § "The load ceiling".
 - **No stop condition.** Every run above is `timeout`-truncated;
   [#17](https://github.com/bedaHovorka/OpenCybele1/issues/17) owns that, and until it lands
   a "short scenario" is short only in the sense that it does more per second.

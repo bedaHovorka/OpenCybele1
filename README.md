@@ -133,11 +133,13 @@ run on — so a captured run carries a complete manifest of its randomness.
 > run draws a fresh seed while looking pinned. Use `OPENCYBELE_OPTS=-Dsim.random.masterSeed=…`.
 > `./gradlew run -D…` is fine.
 
-Same seed ⇒ same per-agent draw sequences, on any thread interleaving and any JVM. It does
-**not** yet mean the same stdout: departure timestamps come from a real-time clock, and event
-ordering is still unpinned ([#16](https://github.com/bedaHovorka/OpenCybele1/issues/16),
-[#19](https://github.com/bedaHovorka/OpenCybele1/issues/19)). What a fixed seed does and does
-not pin is measured in [`docs/seeded-rng.md`](docs/seeded-rng.md).
+Same seed ⇒ same per-agent draw sequences, on any thread interleaving. It does **not** yet
+mean the same stdout: departure timestamps come from a real-time clock, event ordering is
+still unpinned ([#16](https://github.com/bedaHovorka/OpenCybele1/issues/16)), and above a
+measured arrival-density ceiling the same seed departs a different *subset* of the same
+generated trains — the pre-existing `START` race, not the RNG. What a fixed seed does and
+does not pin, and how to keep a scenario below that ceiling, is measured in
+[`docs/seeded-rng.md`](docs/seeded-rng.md).
 
 ### Assertions (`-ea`)
 

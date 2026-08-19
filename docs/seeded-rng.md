@@ -7,11 +7,12 @@
 > lucky runs. A fixed seed pins which trains run, from where, and in what order, over twelve
 > measured runs.
 >
-> **It does not make a whole run reproducible**, and two specific things it does not pin —
-> departure timestamps, and the order of stdout lines when two trains depart in the same
-> millisecond — decide what
-> [#21](https://github.com/bedaHovorka/OpenCybele1/issues/21)'s comparison has to normalise.
-> The last two sections give the measurements and the resulting requirement.
+> **It does not make a whole run reproducible.** Three things it does not pin — departure
+> timestamps, the order of stdout lines when two trains depart in the same millisecond, and,
+> above a measured arrival-density ceiling, *which* generated trains manage to depart at all —
+> decide what [#21](https://github.com/bedaHovorka/OpenCybele1/issues/21)'s comparison has to
+> normalise, and the third of them cannot be normalised away. The last three sections give the
+> measurements and the resulting requirements.
 
 Issue [#15](https://github.com/bedaHovorka/OpenCybele1/issues/15). Companion documents:
 [`docs/scenario-config.md`](scenario-config.md) for how `sim.*` is transported and
@@ -223,13 +224,27 @@ sequences, and three things still float:
    happens the run diverges no matter how well-seeded it is.
 
 There is a subtler consequence of (2) and (3) worth stating explicitly, because it is the
-thing that will bite whoever records the golden. **A stream is pinned by its own draw
-count, not by simulated time.** `tr3`'s fifth `nextGaussian` is always the same number — but
-*which train* takes it depends on how many trains have crossed `tr3` by then. Lose one train
-to DEF-02 and every later draw on that road attaches to a different traversal, even though
-the sequence itself never changed. Per-agent streams remove the *cross-agent* coupling
-(`tr3` no longer depends on what `tr5` did); they cannot remove the *within-agent*
-dependency on the run's own history.
+thing that will bite whoever records the golden. **A stream is pinned by its own draw count,
+not by simulated time.** `tr3`'s fifth `nextGaussian` is always the same number — but *which
+train* takes it depends on how many trains have crossed `tr3` by then. Per-agent streams
+remove the *cross-agent* coupling (`tr3` no longer depends on what `tr5` did); they cannot
+remove the *within-agent* dependency on the run's own history.
+
+That gives losing one train an **asymmetric blast radius**, and the two halves are worth
+stating separately because they are not equally bad:
+
+* **The generator streams are not perturbed at all.** `Generator.od` and
+  `Generator.interarrival` draw once per train *generated*, and generation is unaffected by
+  whether a train later departs. Measured: in three runs where the departing sets differed,
+  the highest train id was `vl663` in **all three**, and origins agreed for **every** shared
+  id. A lost train costs exactly one line of output from these streams; it does not shift
+  them by one draw.
+* **The road streams are perturbed.** `tr1`…`tr7` draw once per *traversal*, so a train that
+  never departs never traverses, and every later draw on the roads it would have used attaches
+  to a different traversal. The sequence is unchanged; the alignment is not.
+
+So one lost train is one missing departure plus a re-alignment of an unknown number of road
+draws — a larger blast radius than the single absent line suggests.
 
 ## Evidence
 
@@ -294,9 +309,12 @@ difference matters because this task is on the branch that gates golden recordin
 | | wall time |
 |---|---|
 | incremental `./gradlew build`, before this was tuned | **14.21 s** |
-| incremental `./gradlew build`, `rngProof` UP-TO-DATE | **0.55 s** |
+| incremental `./gradlew build`, `rngProof` UP-TO-DATE | **2.88 s** |
 | `rngProof` when it does re-run (6 × 500) | ~1 s |
 | `./gradlew rngProof -Prng.full` (24 × 4000) | 14.6 s |
+
+(The UP-TO-DATE figure is an independent measurement on a warm daemon. A 0.55 s best case was
+also observed here; the slower, reproducible number is the one quoted.)
 
 The task now declares its inputs (the compiled tool and application classes, the argument
 list, and any forwarded `sim.*` properties) and an output file, so an unchanged tree skips it
@@ -362,6 +380,15 @@ four per configuration.
 Against the unseeded 13–25 spread this branch used to show over 150 s
 (`docs/scenario-config.md`), four runs landing on exactly 17 and four on exactly 15 is not
 sampling luck. The two seeds also differ from each other, as they must.
+
+> **Read the S-series row as "at this density", not as a general claim.** Identical departure
+> sequences were measured at `short.properties` × **30 s**. At **45 s** of the same scenario,
+> same seed, same binary, the property fails: three runs produced 80 departures each but their
+> departure-**id sets** differed by 12, 10 and 2 ids (`vl107 vl315 vl326 vl439 vl550 vl605`
+> present in one run against `vl112 vl319 vl333 vl445 vl540 vl612` in another). See
+> [The load ceiling](#the-load-ceiling) below for why, and for what does still hold there. The
+> earlier revisions of this document twice stated a true observation past the sample it was
+> measured on; the bound is stated here rather than the best case for that reason.
 
 **Raw stdout is never identical, and — this is the part that matters for
 [#21](https://github.com/bedaHovorka/OpenCybele1/issues/21) — stripping timestamps is not
@@ -458,15 +485,64 @@ validation runs — **zero** `AssertionError` (including the new road-name asser
 seven times per run) and **zero** `Exception in thread "` in stdout *or* stderr. `./gradlew
 run` still opens the GUI and behaves as before; `./gradlew build` is clean.
 
+## The load ceiling
+
+There is an arrival density above which **the same seed stops producing the same set of
+departures**, and it is worth being exact about what does and does not survive it, because
+the difference decides whether a golden is recordable at all.
+
+Measured on `scenarios/short.properties` at seed `20080415` — same seed, same configuration,
+same binary, only the run length differing:
+
+| run length | departures | departure-**id** sets across three runs |
+|---|---|---|
+| 30 s | 54, 54, 54 | **identical** — 0 differences in all three pairings |
+| 45 s | 80, 80, 80 | **differ**, by 12, 10 and 2 ids |
+
+At 45 s the ids appearing in only one run were `vl107 vl315 vl326 vl439 vl550 vl605` against
+`vl112 vl319 vl333 vl445 vl540 vl612`.
+
+**This is not an RNG defect and #15 neither introduces nor can fix it.** In all three 45 s
+runs the *same number of trains was generated* — highest id `vl663` in every run — and the
+*origins agree for every shared id* (0 mismatches over the 74 shared of 80). The generator's
+draw sequence is provably unperturbed. What varies is **which** generated trains manage to
+depart, which is the author's own `//BUG ne vzdy se doruci` at `Planning.placeTrainIntoFirst-
+Station`: `START` is published to a channel the `Train` may not have opened yet, and SEM-06
+established that such a send is **silently dropped** (`INVENTORY` DEF-02). Denser arrivals hit
+that race more often, and hit different trains each time.
+
+So the same-seed guarantee has to be stated as:
+
+> **the same trains are generated, with the same origins and destinations, and the trains that
+> do depart depart in the same order** — *not* that the same set of trains departs.
+
+Two consequences:
+
+* **Above the ceiling, a lost train is absent, not reordered.** No normalisation recovers it:
+  a normalizer can canonicalise order and tolerate timestamps, but it cannot invent a line
+  that the run never printed, and it cannot distinguish "the port lost this train" from "the
+  baseline lost this train" without pinning the loss itself. This is the one item on the
+  normalizer list below that lives outside the normalizer.
+* **A scenario must be validated as sub-ceiling before it is used for a golden.** The cheap
+  test is the one used above: run it three times at a fixed seed and diff the departure-id
+  sets. [#23](https://github.com/bedaHovorka/OpenCybele1/issues/23) carries this for scenario
+  authoring and [#24](https://github.com/bedaHovorka/OpenCybele1/issues/24) for recording.
+
+`scenarios/short.properties` at its documented 15–30 s durations sits **below** the ceiling.
+Lengthening it is therefore not safe by default — 45 s of the same file is already above —
+and the file says so.
+
 ## Answering the question #21 will ask
 
 **Is a byte-identical stdout achievable at a fixed seed today? No.** What is achievable, and
 now measured over twelve runs in three configurations, is:
 
-* every train, its id, its origin, its destination and the **order departures occur in** —
-  **pinned by the seed**, and predictable offline before the run starts;
-* the number of trains generated and departed in a given window — pinned, up to where the
-  `timeout` cut falls;
+* every train **generated**, with its id, origin and destination — **pinned by the seed**,
+  and predictable offline before the run starts, at every density tested;
+* the **order** in which the trains that depart do depart — pinned;
+* the number of trains generated in a given window — pinned, up to where the `timeout` cut
+  falls. The number *departed* is pinned only **below the load ceiling**; above it the same
+  seed departs a different subset (see [The load ceiling](#the-load-ceiling));
 * every departure timestamp — **not** pinned. ±3 ms after removing the process-start offset
   at default settings (±8 ms in an independent measurement round; take ≤8 ms as the bound),
   ±16 ms absolute, and ±104 ms under `short.properties` at pace 8;
@@ -488,9 +564,15 @@ claim and the S-series disproves it. A golden comparison on this branch needs, i
    magnitude larger.
 3. **Per-train-id comparison, not per-line-position.** Under load, departures are not in id
    order (S-series: 54 departures with ids up to `vl445`).
+4. **A sub-ceiling scenario — which is not a normalizer feature at all.** Above the load
+   ceiling described above, the same seed departs a *different set* of trains, and a missing
+   line cannot be normalised into place. The scenario has to be chosen so the race is not hit;
+   validate it by running three times at a fixed seed and diffing the departure-id sets before
+   anything is recorded against it.
 
 A golden that pins raw stdout, or that normalises only timestamps, will flake at any seed
-that produces a departure tie — and it will look like a port bug when it does.
+that produces a departure tie — and it will look like a port bug when it does. A golden
+recorded above the load ceiling will flake regardless of how it is normalised.
 
 The three things standing between here and a byte-exact golden are named above: the real-time
 clock, kernel event/thread ordering
