@@ -41,7 +41,21 @@ startup, and the resolved values are printed to stderr. See [`scenario-config.md
 a safety net and a stall guard, running headless. It ends on its own — no `timeout` in front of
 it. It is deliberately **not** `short.properties` with a bound bolted on: at that density this
 machine is above the load ceiling, and three runs of that file bounded at 115 s of simulated time
-produced two distinct traces. The shipped file runs at `lambda = 2000` instead, and three runs of
+produced two distinct traces.
+
+> **Correction (#16) — the observation stands, the *ceiling* reading does not.** Two runs of
+> `short.properties` genuinely can differ; what does not follow is that a density threshold is the
+> reason. Measured headless: 114 consecutive runs at the same seed gave **one** departure-id
+> sequence, and a later session gave a second sequence in 7 of 9 runs — the same binary, the same
+> files, differing by `vl107/vl315/vl326` against `vl112/vl319/vl333`. So the drop is stochastic
+> and strongly autocorrelated within a session, with no cliff in density; a re-measurement at ~69
+> departures gave pairwise id-set differences of 0, 1 and 1. Three further effects inflate a
+> *whole-trace* difference count with no ceiling involved: ~19 %-per-site `started`-line tie flips,
+> `timeout` cutting the tail at an arbitrary wall instant, and `:0` window closes that read as
+> clean short runs. **Keep `lambda = 2000`** — a lower rate is a genuinely lower drop probability —
+> but note that no arrival rate removes the hazard, and the real guard is repeating a recording
+> and comparing departure-id sets. See
+> [`kernel-config.md`](kernel-config.md#supersedes-the-load-ceiling-claim-in-headless-and-stopmd). The shipped file runs at `lambda = 2000` instead, and three runs of
 it produce exit 0, 21 departures, 66 trains generated, and a **byte-identical departure stream**
 (the `started` stream differs by one transposition of two trains departing at the same instant —
 the pre-existing tie artifact, see "Evidence" below).
@@ -359,7 +373,15 @@ a dependency, not a headline.
 
 **At `short.properties` density on this machine** the run sits at the ceiling — the *baseline*
 alone produced 12 distinct normalised traces over 26 runs — so equality is not available there
-and neither side has it. What is available, and matches:
+and neither side has it.
+
+> **Correction (#16).** Those 26 runs were taken on the shared display `:0`, where a window close
+> ends a run silently with an unchanged exit status, and were compared as whole normalised traces
+> rather than per train id. Both inflate the count. Compared per departure id and headless,
+> `short.properties` gives 2 distinct sequences over 123 runs rather than 12 over 26 — still not
+> reproducible enough to record a golden against unrepeated, but the 12 are mostly `started`-line
+> tie flips and tail truncation, not distinct simulations. See
+> [`kernel-config.md`](kernel-config.md#supersedes-the-load-ceiling-claim-in-headless-and-stopmd). What is available, and matches:
 
 | | baseline (`601a2f1`) | this tree |
 |---|---|---|

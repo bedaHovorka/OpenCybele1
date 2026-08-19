@@ -202,9 +202,11 @@ OPENCYBELE_OPTS=-da build/install/opencybele/bin/opencybele
 
 ### Why `Local;NoSerialization`
 
-`cybelle/cybele.prop` sets `cybele.srv.comm.app.param.iai = Local;NoSerialization` so Cybele's comm service runs in local-only mode. Commented out — which is how the vendored file shipped — Cybele instead tries to reach an external `IAIDaemon`/license host that is not part of this vendored setup and never was reachable from here, and startup hangs or aborts with `Could not connect with IAIDaemon`. The setting is mandatory, not a tuning knob.
+`cybelle/cybele.prop` sets `cybele.srv.comm.app.param.iai = Local;NoSerialization` so Cybele's comm service runs in local-only mode. Commented out — which is how the vendored file shipped — `IAICommService` builds an `IAINetClient` that spawns an external `IAIDaemon`, and startup aborts with `Could not connect with IAIDaemon -- Execution aborted!` and exit status 1 (verified under [#16](https://github.com/bedaHovorka/OpenCybele1/issues/16)). The setting is mandatory, not a tuning knob.
 
-> `cybelle/ICS.prop` currently declares **two** `ICSBrowser` keys — an external IAI host (`63.122.105.110`) followed by `127.0.0.1`. Last-one-wins makes this harmless today, but reordering them would point startup at an external host. This is not intentional configuration; cleanup is tracked in [#16](https://github.com/bedaHovorka/OpenCybele1/issues/16).
+> `cybelle/ICS.prop` used to declare **two** `ICSBrowser` keys — an external IAI host (`63.122.105.110`) followed by `127.0.0.1`. Last-one-wins made it harmless, but reordering them would have pointed the spawned daemon at an external host. The external entry was removed under [#16](https://github.com/bedaHovorka/OpenCybele1/issues/16); one live key remains.
+
+The other two kernel knobs — the event-queue sort/compare strategy and the thread pool — were measured and deliberately left at their existing behaviour under #16; `cybelle/cybele.prop` now says so at each line, and [`docs/kernel-config.md`](docs/kernel-config.md) has the numbers.
 
 ### Why `--patch-module`
 
