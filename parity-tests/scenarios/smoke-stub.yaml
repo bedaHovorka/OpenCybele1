@@ -1,0 +1,45 @@
+# Parity harness smoke scenario.
+#
+# This is the one scenario the skeleton (#12) owns. It runs against the STUB adapter, not against
+# an implementation: its job is to prove that the SPI drives a run start to finish — build a
+# command line, start a child JVM, capture the merged stream, scan it for throwables, classify the
+# exit status, assert liveness, normalize, and compare against a golden — on a branch that carries
+# no application source at all.
+#
+# The real scenarios (#23) and the real goldens (#24) are recorded against the OpenCybele branch
+# through OpenCybeleLauncher (#13), which differs from the stub adapter only in what it points at.
+#
+# Format: docs/parity-harness.md.
+
+id: smoke-stub
+description: >
+  Bounded 12-train run of the stub simulation at a pinned seed. Deterministic by construction,
+  so it is entitled to a strict contract; a real scenario earns one by being run three times and
+  having its entity-id sets diffed.
+
+# strict | causal | summary — see docs/parity-harness.md and ContractLevel.
+contract: strict
+golden: smoke-stub.txt
+
+launcher:
+  # Implementation-neutral configuration. The adapter decides how these reach the target; on a JVM
+  # target they become -D flags. The harness never interprets them.
+  properties:
+    sim.random.masterSeed: "20080415"
+    sim.stop.maxTrains: "12"
+    stub.mode: normal
+
+run:
+  # A backstop for a child whose own safety net did not fire. Never a pass.
+  harnessTimeoutMs: 60000
+  # bound-reached | startup-error. A timeout, a stall or a dead clock channel cannot be declared.
+  expect: bound-reached
+
+# At least one rule is mandatory. Without it a run whose generator died silently — clock still
+# advancing, exit status still 0, not one line to grep for — would pass.
+liveness:
+  - pattern: '^vl\d+ started$'
+    atLeast: 12
+  - pattern: '^(vl\d+) in st[A-H] at \d+$'
+    distinctGroup: 1
+    atLeast: 12

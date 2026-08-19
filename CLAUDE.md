@@ -50,3 +50,19 @@ Everything is an **agent** or **activity** in the Cybele kernel, communicating e
 - **`util` package** — generic data structures used by the simulation logic: `UnorientedGraph`/`HashMapGraph` (graph of stations/tracks, plus `Util.path`/`Util.pathDirection` for pathfinding), `TreeMultiMap` (sorted multi-map used for station/road timetables), `Doubleton` (unordered pair, used as graph edge key).
 
 Comments and some Javadoc in the code are in Czech; class/method names and public APIs are in English.
+
+## Parity harness (`characterizationIT`)
+
+`src/characterizationIT/java` holds the L3 golden-master harness (issue #12): a `ScenarioRunner`
+that starts an implementation as a **child JVM** through a `LauncherAdapter`, and judges the run by
+its captured output rather than by its exit status. It has no compile-time link to any
+implementation — that is what lets it live on this branch and later drive OpenCybele, JADE and
+Jason unchanged — and it is a source set of its own, wired to nothing in `main`.
+
+```bash
+./gradlew characterizationIT                      # compare against parity-tests/golden/
+./gradlew characterizationIT -Dgolden.record=true # record them
+```
+
+Scenario specs are YAML data under `parity-tests/scenarios/`. Format, contract levels and the order
+in which a run is judged: [`docs/parity-harness.md`](docs/parity-harness.md).

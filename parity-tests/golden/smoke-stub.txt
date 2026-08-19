@@ -1,0 +1,39 @@
+tr1 free
+tr2 free
+tr3 free
+tr4 free
+tr5 free
+tr6 free
+tr7 free
+stA 0/2
+stB 0/2
+stC 0/2
+stD 0/2
+stE 0/2
+stF 0/2
+stG 0/2
+stH 0/2
+vl1 in stA at 1196
+vl1 started
+vl2 in stC at 1495
+vl2 started
+vl3 in stA at 1919
+vl3 started
+vl4 in stB at 2293
+vl4 started
+vl5 in stH at 2574
+vl5 started
+vl6 in stC at 3058
+vl6 started
+vl7 in stG at 3309
+vl7 started
+vl8 in stE at 3584
+vl8 started
+vl9 in stD at 3874
+vl9 started
+vl10 in stE at 4159
+vl10 started
+vl11 in stH at 4612
+vl11 started
+vl12 in stA at 4872
+vl12 started
