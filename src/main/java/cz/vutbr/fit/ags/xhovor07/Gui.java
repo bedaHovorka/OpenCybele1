@@ -15,6 +15,8 @@ import java.awt.HeadlessException;
 import java.awt.event.ActionEvent;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.util.Map.Entry;
 
 import javax.swing.AbstractAction;
@@ -64,13 +66,22 @@ public class Gui extends JFrame {
 		}
 	
 	});
-//	addWindowListener(new WindowAdapter() {
-//	    @Override
-//	    public void windowClosing(WindowEvent e) {
-//		Cybele.terminate();
-//	    }
-//	
-//	});
+	// This was commented out in 2008, so closing the window took EXIT_ON_CLOSE's
+	// System.exit and left the kernel to be torn down by the JVM. It now goes through
+	// RunControl, which prints the stop banner and terminates the kernel. It does NOT
+	// exist to flush the trace: every trace line is a System.out.println on an
+	// autoflushing stream, so EXIT_ON_CLOSE never truncated anything.
+	//
+	// The status is 0 for an unbounded run - closing the window is how you end one -
+	// and RunControl.EXIT_WINDOW_CLOSED_EARLY when a sim.stop.* bound was armed and
+	// never reached, because that run did not finish and must not look like it did.
+	addWindowListener(new WindowAdapter() {
+	    @Override
+	    public void windowClosing(WindowEvent e) {
+		RunControl.windowClosed();
+	    }
+	
+	});
 	setSize(800, 650);
     }
 

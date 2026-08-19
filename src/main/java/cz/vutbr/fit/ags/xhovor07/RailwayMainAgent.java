@@ -81,10 +81,23 @@ public class RailwayMainAgent extends Observable implements Handler {
 	// jsou totozne s puvodnimi literaly - viz docs/scenario-config.md.
 	
 	// vytvoreni gui
-	final Gui gui = new Gui(this);
-	gui.setVisible(true);
+	// sim.headless=true preskoci konstrukci okna. Pozorovatele se nemeni: tento agent
+	// je porad Observable a trainTableModel je porad zaregistrovan vyse - v bezhlavem
+	// rezimu se proste zadny pohled neprihlasi. Viz docs/headless-and-stop.md.
+	if (!config.isHeadless()) {
+	    final Gui gui = new Gui(this);
+	    gui.setVisible(true);
+	}
 	
 	Cybele.createClock(CLOCK_ID, Cybele.HOST, config.getClockStartMs(), config.getClockPace());
+	// The GUI construction above used to be what kept this line clear of the kernel's
+	// clock-registration race (INVENTORY SEM-02) - by accident, and only in GUI mode.
+	// The barrier now lives in Main; this is the check that it worked for THIS clock,
+	// because the registration is per-clock and its loss is silent and permanent.
+	// It pauses the clock and waits for the pause to land, which is inert here: no
+	// timer has been set on the clock and no other agent exists yet. The resumeClock
+	// below is the other half of the round trip and is unchanged.
+	RunControl.verifyClockControl(CLOCK_ID, config.getClockStartMs());
 	Cybele.resumeClock(CLOCK_ID);
 	
 	Activity.openChannel(PATH_FIND, "pathFind", this);
