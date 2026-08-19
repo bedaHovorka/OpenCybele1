@@ -55,6 +55,7 @@ Environment used for the recorded results: OpenJDK 21.0.11 (Red Hat), Fedora 43,
 | `ExpE.java` | Negative / zero timer delays; `sendAll` to an unopened channel | `SEM-06` |
 | `ExpF.java` | By-reference payload passing under `Local;NoSerialization` | `SEM-05` |
 | `ExpG.java` | **Self-verdicting**: `Cybele.terminate()` calls `System.exit(0)` and never returns; a shutdown hook's `Runtime.halt(code)` still overrides that status; and the *second*, recoverable way a clock command is lost — see below. The three facts `RunControl` (#17) is built on. | `SEM-02`, `SEM-06`, issue #17 |
+| `ExpH.java` | The two kernel facts #20's trace probe rests on beyond `SEM-03`: **H1** an earlier subscriber survives a later `openChannel` of the same name by another agent (so the probe can pre-open `TRAIN.STATE.<train>` before the train exists), **H2** `CybeleEvent.getClockTime()` is `-1` on a MESSAGE event and only populated for timer events (so a trace tick must come from `Cybele.getTime`), **H3** opening a channel nothing ever sends on is inert. | `SEM-03`, `SEM-05`, issue #20 |
 | `Order.java` | Iteration order at the four hash-order sites that decide behaviour | `NDT-01`…`NDT-04` |
 | `OrderLock.java` | **Self-verdicting** pin of those same orders: node/road creation order, every road's `(first, second)` endpoints, every station's candidate-edge order and all 56 origin/destination routes. Exits non-zero on any drift. Built against `ScenarioConfig.buildNet()`, so it locks the real production topology path. | `NDT-01`…`NDT-04`, issue #19 |
 

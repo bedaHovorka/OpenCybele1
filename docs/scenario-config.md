@@ -77,6 +77,8 @@ Two build-side notes that belong with it:
 | `sim.stop.maxClockMs` | `0` (off) | nothing (#17) |
 | `sim.stop.wallClockMs` | `0` (off) | nothing (#17) |
 | `sim.stop.stallMs` | `0` (off) | nothing (#17) |
+| `sim.trace.enabled` | `false` (off) | nothing — the application printed two lines and nothing else was observable ([#20](https://github.com/bedaHovorka/OpenCybele1/issues/20)), see [`docs/trace-format.md`](trace-format.md) |
+| `sim.trace.trainLookahead` | `32` | nothing (#20) — how many train-name slots the probe subscribes ahead of the generator; inert when the trace is off |
 | `sim.random.masterSeed` | `random` | the single unseeded `new Random()` in `Generator`, which fed the generator's two draws **and** every `RoadAgent`'s travel jitter — now one seeded stream per agent, see [`docs/seeded-rng.md`](seeded-rng.md) |
 
 `sim.config` names the optional file. Ready-made scenarios live in [`scenarios/`](../scenarios):

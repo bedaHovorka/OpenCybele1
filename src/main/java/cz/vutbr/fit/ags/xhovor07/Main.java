@@ -93,6 +93,17 @@ public class Main {
 	// RunControl.awaitTimerService() for what happens to a clock created too early.
 	RunControl.install(config);
 	RunControl.awaitTimerService();
+	if (config.isTraceEnabled()) {
+	    // BEFORE the main agent, and with a barrier in between. Cybele.createAgent is
+	    // asynchronous, so creating the two in one breath is a race the probe loses:
+	    // RailwayMainAgent's constructor creates the stations, and a Station sends its
+	    // first STATION.INFO from its own constructor. awaitReady() returns only once
+	    // every static channel is subscribed, so no message of the run can predate the
+	    // trace. Nothing else about the simulation changes - the probe only subscribes.
+	    // See docs/trace-format.md.
+	    Cybele.createAgent(TraceProbe.PROBE_AGENT_NAME, TraceProbe.class.getName());
+	    TraceProbe.awaitReady();
+	}
 	Cybele.createAgent(RailwayMainAgent.MAIN_AGENT_NAME, RailwayMainAgent.class.getName());
     }
 }
