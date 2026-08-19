@@ -62,7 +62,21 @@ cybele.srv.evmgmt.comp.iai.eventpriority_comp = com.iai.cybele.evmgmt.EventPrior
 cybele.srv.evmgmt.comp.iai.inheritedpriority_comp = com.iai.cybele.evmgmt.InheritedPriorityComparator
 cybele.srv.evmgmt.comp.iai.no_comp = com.iai.cybele.evmgmt.NoComparator
 
-#cybele.srv.evmgmt.app.param.iai = system_queue no_sort no_comp;agent_queue no_sort no_comp
+# Event-queue sort/compare strategy, per queue. Pinned explicitly by issue #16.
+#
+# This line names exactly the pair the kernel was ALREADY using with both selectors
+# commented out: IAIEventManagement.start skips its whole app-param block when the
+# property is absent, so sysSortStrategy/sysComparator and their agent-queue
+# counterparts keep the FIRST id of cybele.srv.evmgmt.sys.param.iai above -- no_sort
+# and no_comp. NoSortStrategy.sort(List, Comparator) is a bare `return`. So: strict
+# FIFO, priorities ignored. Measured indistinguishable from the commented-out state
+# over 12 vs 23 runs (identical departure sequence; docs/kernel-config.md).
+#
+# Do NOT enable a sorted AGENT queue without surfacing it as a behaviour change: under
+# staticpriority_comp a queued TIMER overtakes queued MESSAGEs -- `docs/probes/run.sh
+# ExpA2 --control` demonstrates it -- while message-vs-message order cannot change at
+# all, because CybeleEvent hardcodes priority 4 for every MESSAGE and has no setter.
+cybele.srv.evmgmt.app.param.iai = system_queue no_sort no_comp;agent_queue no_sort no_comp
 #cybele.srv.evmgmt.app.param.iai = system_queue merge_sort staticpriority_comp;agent_queue no_sort no_comp
 
 ##################################
@@ -71,6 +85,11 @@ cybele.srv.thmgmt.names = iai
 cybele.srv.thmgmt.default = iai
 
 cybele.srv.thmgmt.class.iai = com.iai.cybele.thmgmt.IAIThreadManagement
+# minThreads maxThreads checkpointCycleMs downDelay upDelay (IAIThreadManagement.start).
+# Left at the vendored value by issue #16, after measuring: every viable pool size gives
+# the same departure sequence and the same ~13-20% tie-flip rate, so shrinking the pool
+# buys no determinism; at 3 threads it still works, at 2 the simulation starves in 4 of 6
+# runs, and at 1 it never leaves RailwayMainAgent's constructor. See docs/kernel-config.md.
 cybele.srv.thmgmt.app.param.iai = 5 10 4000 3 5
 
 ##################################
@@ -87,6 +106,10 @@ cybele.srv.comm.default = iai
 
 cybele.srv.comm.class.iai = com.iai.cybele.comm.IAICommService
 
+# MANDATORY -- not a tuning knob. Commented out (the vendored default), IAICommService
+# builds an IAINetClient that spawns an IAIDaemon, and startup aborts with
+# "Could not connect with IAIDaemon -- Execution aborted!" and exit status 1. It also
+# selects by-reference payload passing (INVENTORY SEM-05). See docs/kernel-config.md.
 cybele.srv.comm.app.param.iai = Local;NoSerialization
 
 #cybele.srv.comm.sys.param.iai = 207.196.79.53;207.196.79.66;207.196.79.106;207.196.79.103
