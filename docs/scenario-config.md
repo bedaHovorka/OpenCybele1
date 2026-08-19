@@ -72,6 +72,11 @@ Two build-side notes that belong with it:
 | `sim.gui.paces` | `Fast=8,Normal=1,Slow=0.3` | `Gui.createBar` toolbar buttons |
 | `sim.gui.mainLine` | `stA,stH,stG,stE,stD,stB` | `RailwayCanvas.mainRoads` |
 | `sim.gui.branches` | `stC:tr7,stF:tr6` | `RailwayCanvas.paint` branch coordinates |
+| `sim.headless` | `false` | nothing — the GUI was built unconditionally ([#17](https://github.com/bedaHovorka/OpenCybele1/issues/17)) |
+| `sim.stop.maxTrains` | `0` (off) | nothing — there was no stop condition (#17) |
+| `sim.stop.maxClockMs` | `0` (off) | nothing (#17) |
+| `sim.stop.wallClockMs` | `0` (off) | nothing (#17) |
+| `sim.stop.stallMs` | `0` (off) | nothing (#17) |
 | `sim.random.masterSeed` | `random` | the single unseeded `new Random()` in `Generator`, which fed the generator's two draws **and** every `RoadAgent`'s travel jitter — now one seeded stream per agent, see [`docs/seeded-rng.md`](seeded-rng.md) |
 
 `sim.config` names the optional file. Ready-made scenarios live in [`scenarios/`](../scenarios):
@@ -417,9 +422,14 @@ it should be re-examined once #15 and #17 make runs deterministic and bounded.
   item 1 / `INVENTORY` DEF-02), which denser arrivals hit more often. A scenario intended for a
   golden must be validated below it — three runs at a fixed seed, diff the departure-id sets.
   See [`seeded-rng.md`](seeded-rng.md) § "The load ceiling".
-- **No stop condition.** Every run above is `timeout`-truncated;
-  [#17](https://github.com/bedaHovorka/OpenCybele1/issues/17) owns that, and until it lands
-  a "short scenario" is short only in the sense that it does more per second.
+- ~~**No stop condition**~~ — **landed since**, in
+  [#17](https://github.com/bedaHovorka/OpenCybele1/issues/17); see
+  [`headless-and-stop.md`](headless-and-stop.md). Every run measured *in this document* is still
+  `timeout`-truncated, because it predates the bound and the numbers are left as they were
+  recorded. New scenarios should declare `sim.stop.maxClockMs` (or `maxTrains`) and a
+  `sim.stop.wallClockMs` safety net instead; `scenarios/short-bounded.properties` is the worked
+  example. The five keys are in the table above, and all five default to off, so nothing in this
+  document's measurements changed.
 - **Seeded RNG landed separately.** [#15](https://github.com/bedaHovorka/OpenCybele1/issues/15)
   added `sim.random.masterSeed` to this same mechanism; see [`docs/seeded-rng.md`](seeded-rng.md).
   It fixes the *draw sequences*, not the run: departure timestamps are still read from a

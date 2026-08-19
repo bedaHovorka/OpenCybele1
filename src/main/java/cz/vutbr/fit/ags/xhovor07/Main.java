@@ -65,7 +65,32 @@ public class Main {
 	    System.err.println("!!! The simulation is unaffected; the drawing is incomplete. See docs/scenario-config.md.");
 	}
 
+	if (!config.isHeadless() && java.awt.GraphicsEnvironment.isHeadless()) {
+	    // Eagerly, for the same reason every other check in this method is eager: the
+	    // HeadlessException would otherwise be thrown by `new Gui(...)` inside
+	    // RailwayMainAgent's constructor, where Cybele swallows it to stderr and leaves
+	    // a process running with no main agent, no clock and no exit status to show
+	    // for it.
+	    throw new IllegalStateException("this JVM is headless (no display, or"
+		    + " -Djava.awt.headless=true) but " + ScenarioConfig.KEY_HEADLESS
+		    + "=false, so the GUI would be built and fail. Pass -D"
+		    + ScenarioConfig.KEY_HEADLESS + "=true to run without it.");
+	}
+	if (config.isHeadless() && !config.hasStopCondition()) {
+	    // Not fatal - an unbounded headless run is a legitimate thing to ask for - but
+	    // with no window to close it is also a run with no way to end it.
+	    System.err.println("!!! " + ScenarioConfig.KEY_HEADLESS + "=true with no"
+		    + " sim.stop.* bound: this run has no GUI to close and no stop condition,"
+		    + " so it will run until it is killed. See docs/headless-and-stop.md.");
+	}
+
 	Cybele.startUp();
+	// Install the exit-code hook and arm the bounds before anything can need them, then
+	// wait for the kernel's timer service. Both must happen before the main agent is
+	// created, because the main agent creates the simulation clock - see
+	// RunControl.awaitTimerService() for what happens to a clock created too early.
+	RunControl.install(config);
+	RunControl.awaitTimerService();
 	Cybele.createAgent(RailwayMainAgent.MAIN_AGENT_NAME, RailwayMainAgent.class.getName());
     }
 }

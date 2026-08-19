@@ -78,7 +78,12 @@ public class Generator implements Handler {
 	openedChannels.put(train, channelTicket);
 	index++;
 	Activity.sendAll(Planning.PLAN_TRAIN, new Serializable[]{train, serializables[0], serializables[1]});
-	Activity.setTimer(RailwayMainAgent.CLOCK_ID, exp(lambda), this, "generateTrain");
+	// sim.stop.maxTrains is enforced here rather than by the watchdog, so the bound is
+	// exact: the run generates that many trains and not one more. With the key unset
+	// this always returns true and the timer re-arms exactly as it always did.
+	if (RunControl.trainGenerated(index)) {
+	    Activity.setTimer(RailwayMainAgent.CLOCK_ID, exp(lambda), this, "generateTrain");
+	}
     }
     
     private long exp(double mean) {

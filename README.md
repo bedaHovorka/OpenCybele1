@@ -62,7 +62,38 @@ It is also the entry point used by the [`Dockerfile`](Dockerfile) builder stage 
 
 This launches `cz.vutbr.fit.ags.xhovor07.Main` with the two jars above on the classpath (resolved from `~/.m2`) plus the JVM flags `-ea` and `--patch-module java.base=cybelle`, configured as `applicationDefaultJvmArgs` in `build.gradle.kts`; Cybele reads its `ICS.prop`/`cybele.prop` config from `cybelle/` via that flag. A Swing window opens on launch showing the railway network, live station/track state, and a table of trains currently in transit. There is no automated test suite — verification is manual, through the GUI.
 
-The simulation has **no stop condition** — it generates trains until the process is killed (tracked in [#17](https://github.com/bedaHovorka/OpenCybele1/issues/17)). To run a bounded scenario, wrap it:
+### Headless and bounded runs
+
+By default the run is exactly as it always was: a window opens and it never stops on its own.
+Three additions, all opt-in:
+
+```bash
+# no window, no display needed
+OPENCYBELE_OPTS="-Djava.awt.headless=true -Dsim.headless=true -Dsim.stop.maxClockMs=115000" \
+  build/install/opencybele/bin/opencybele ; echo $?
+
+# a ready-made bounded, headless, seed-pinned scenario -- no `timeout` in front of it
+OPENCYBELE_OPTS=-Dsim.config=scenarios/short-bounded.properties \
+  build/install/opencybele/bin/opencybele ; echo $?
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `sim.headless` | `false` | skip the Swing window |
+| `sim.stop.maxTrains` | `0` (off) | **bound** — stop after this many trains generated (exact) |
+| `sim.stop.maxClockMs` | `0` (off) | **bound** — stop this far past `sim.clock.startMs`, in simulated ms |
+| `sim.stop.wallClockMs` | `0` (off) | **failure** — wall-clock safety net |
+| `sim.stop.stallMs` | `0` (off) | **failure** — no train generated for this long |
+
+Exit codes: `0` a declared bound (or the window closed), `1` configuration/startup error,
+`3` the wall-clock safety net fired, `4` train generation stalled, `5` the simulation clock does
+not answer its command channel. **A timeout never exits 0** — a run that did not reach its bound
+must not look like a pass. Details, the exit-code mechanics (`Cybele.terminate()` exits 0 and
+never returns, so the status is forced from a shutdown hook) and the clock-registration race that
+headless mode exposes: [`docs/headless-and-stop.md`](docs/headless-and-stop.md).
+
+Without any `sim.stop.*` key the process still runs until it is killed, so wrapping it works as
+before:
 
 ```bash
 timeout 300 ./gradlew run --console=plain
@@ -202,6 +233,7 @@ xhost -local:docker   # revoke access again once done
 - [`docs/scenario-config.md`](docs/scenario-config.md) — the `sim.*` parameter surface, the `LAMBDA` split, the canvas drift, and the short-scenario evidence
 - [`docs/assertion-triage.md`](docs/assertion-triage.md) — all assertion sites, and what Cybele does when one fires
 - [`docs/seeded-rng.md`](docs/seeded-rng.md) — the per-agent seeded RNG, the interleaving-independence proof, and what still blocks whole-run determinism
+- [`docs/headless-and-stop.md`](docs/headless-and-stop.md) — headless mode, the bounded stop condition, the exit-code table, and the kernel clock-registration race that removing the GUI exposes
 
 `dokumentace.pdf` and `prezentace.pdf` (in Czech) are the original project documentation and presentation submitted for the course.
 

@@ -109,6 +109,40 @@ public final class ScenarioConfig implements Serializable {
     public static final String KEY_GUI_BRANCHES = "sim.gui.branches";
 
     /**
+     * Whether to run without the Swing window. {@code false} (the default) keeps the GUI,
+     * so {@code ./gradlew run} is unchanged; {@code true} skips the {@link Gui}
+     * construction in {@link RailwayMainAgent} entirely, and nothing subscribes to the
+     * agent's {@link java.util.Observable} notifications. Required on a JVM started with
+     * {@code -Djava.awt.headless=true}; see {@code docs/headless-and-stop.md}.
+     */
+    public static final String KEY_HEADLESS = "sim.headless";
+
+    /**
+     * Stop after this many trains have been <em>generated</em>; {@code 0} disables the
+     * bound. Enforced inside {@link Generator}, so it is exact.
+     */
+    public static final String KEY_STOP_MAX_TRAINS = "sim.stop.maxTrains";
+    /**
+     * Stop once the simulated clock has advanced this many milliseconds past
+     * {@link #KEY_CLOCK_START}; {@code 0} disables the bound.
+     */
+    public static final String KEY_STOP_MAX_CLOCK_MS = "sim.stop.maxClockMs";
+    /**
+     * Safety net, in wall-clock milliseconds; {@code 0} disables it. Firing it is a
+     * <b>failure</b>, not a bound: the run exits {@link RunControl#EXIT_WALL_CLOCK_TIMEOUT}
+     * so a hang can never be mistaken for a completed scenario.
+     */
+    public static final String KEY_STOP_WALL_CLOCK_MS = "sim.stop.wallClockMs";
+    /**
+     * Fail if no train is generated for this many wall-clock milliseconds; {@code 0}
+     * disables it. Also a failure ({@link RunControl#EXIT_GENERATOR_STALLED}): a throwable
+     * inside {@code Generator.generateTrain} before the timer re-arms stops generation
+     * permanently while the process stays alive and green, which every other bound would
+     * read as a quiet, healthy run.
+     */
+    public static final String KEY_STOP_STALL_MS = "sim.stop.stallMs";
+
+    /**
      * Master seed every per-agent random stream is derived from
      * ({@link SimRandom#seedFor(long, String)}): a signed 64-bit integer, or the literal
      * {@value #MASTER_SEED_RANDOM}, which draws a fresh one for this run.
@@ -143,6 +177,11 @@ public final class ScenarioConfig implements Serializable {
     static final String DEF_GUI_MAIN_LINE = "stA,stH,stG,stE,stD,stB";
     static final String DEF_GUI_BRANCHES = "stC:tr7,stF:tr6";
     static final String DEF_RANDOM_MASTER_SEED = MASTER_SEED_RANDOM;  // was: unseeded new Random()
+    static final String DEF_HEADLESS = "false";                // was: the GUI, unconditionally
+    static final String DEF_STOP_MAX_TRAINS = "0";            // was: no stop condition at all
+    static final String DEF_STOP_MAX_CLOCK_MS = "0";
+    static final String DEF_STOP_WALL_CLOCK_MS = "0";
+    static final String DEF_STOP_STALL_MS = "0";
 
     private static final String[][] KEYS_AND_DEFAULTS = {
         {KEY_ARRIVAL_LAMBDA, DEF_ARRIVAL_LAMBDA},
@@ -158,6 +197,11 @@ public final class ScenarioConfig implements Serializable {
         {KEY_GUI_MAIN_LINE, DEF_GUI_MAIN_LINE},
         {KEY_GUI_BRANCHES, DEF_GUI_BRANCHES},
         {KEY_RANDOM_MASTER_SEED, DEF_RANDOM_MASTER_SEED},
+        {KEY_HEADLESS, DEF_HEADLESS},
+        {KEY_STOP_MAX_TRAINS, DEF_STOP_MAX_TRAINS},
+        {KEY_STOP_MAX_CLOCK_MS, DEF_STOP_MAX_CLOCK_MS},
+        {KEY_STOP_WALL_CLOCK_MS, DEF_STOP_WALL_CLOCK_MS},
+        {KEY_STOP_STALL_MS, DEF_STOP_STALL_MS},
     };
 
     private static volatile ScenarioConfig instance;
@@ -217,6 +261,11 @@ public final class ScenarioConfig implements Serializable {
     private final List<String> guiLayoutWarnings;
     private final long masterSeed;
     private final boolean masterSeedDrawn;
+    private final boolean headless;
+    private final long stopMaxTrains;
+    private final long stopMaxClockMs;
+    private final long stopWallClockMs;
+    private final long stopStallMs;
 
     private ScenarioConfig(Properties p) {
         arrivalLambdaMs = positiveLong(p, KEY_ARRIVAL_LAMBDA);
@@ -243,6 +292,12 @@ public final class ScenarioConfig implements Serializable {
         guiMainLine = parseList(p, KEY_GUI_MAIN_LINE);
         guiBranches = parseBranches(p);
         guiLayoutWarnings = Collections.unmodifiableList(checkGuiLayout(stations, roads));
+
+        headless = bool(p, KEY_HEADLESS);
+        stopMaxTrains = nonNegativeLong(p, KEY_STOP_MAX_TRAINS);
+        stopMaxClockMs = nonNegativeLong(p, KEY_STOP_MAX_CLOCK_MS);
+        stopWallClockMs = nonNegativeLong(p, KEY_STOP_WALL_CLOCK_MS);
+        stopStallMs = nonNegativeLong(p, KEY_STOP_STALL_MS);
 
         final String seed = require(p, KEY_RANDOM_MASTER_SEED);
         masterSeedDrawn = MASTER_SEED_RANDOM.equals(seed);
@@ -431,6 +486,17 @@ public final class ScenarioConfig implements Serializable {
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException(key + " must be an integer, was '" + v + "'", e);
         }
+    }
+
+    /**
+     * Strict boolean. {@code Boolean.parseBoolean} maps every typo to {@code false}, which
+     * is exactly the silent misconfiguration the unknown-key check exists to prevent.
+     */
+    private static boolean bool(Properties p, String key) {
+        final String v = require(p, key);
+        if ("true".equalsIgnoreCase(v)) return true;
+        if ("false".equalsIgnoreCase(v)) return false;
+        throw new IllegalArgumentException(key + " must be 'true' or 'false', was '" + v + "'");
     }
 
     private static double positiveDouble(Properties p, String key) {
@@ -799,6 +865,20 @@ public final class ScenarioConfig implements Serializable {
     public long getMasterSeed() { return masterSeed; }
     /** @return {@code true} if no seed was configured and this run drew one of its own */
     public boolean isMasterSeedDrawn() { return masterSeedDrawn; }
+    /** @return {@code true} if the Swing window must not be built; see {@link #KEY_HEADLESS} */
+    public boolean isHeadless() { return headless; }
+    /** @return train-generation bound, or {@code 0} for unbounded */
+    public long getStopMaxTrains() { return stopMaxTrains; }
+    /** @return simulated-time bound in ms past {@link #getClockStartMs()}, or {@code 0} for unbounded */
+    public long getStopMaxClockMs() { return stopMaxClockMs; }
+    /** @return wall-clock safety timeout in ms, or {@code 0} for none */
+    public long getStopWallClockMs() { return stopWallClockMs; }
+    /** @return generator stall timeout in ms, or {@code 0} for none */
+    public long getStopStallMs() { return stopStallMs; }
+    /** @return {@code true} if any bound at all is configured */
+    public boolean hasStopCondition() {
+        return stopMaxTrains > 0 || stopMaxClockMs > 0 || stopWallClockMs > 0 || stopStallMs > 0;
+    }
 
     /**
      * The resolved configuration, one {@code key = value} line per parameter, in a

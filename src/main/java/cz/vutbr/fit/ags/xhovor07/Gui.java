@@ -15,6 +15,8 @@ import java.awt.HeadlessException;
 import java.awt.event.ActionEvent;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.util.Map.Entry;
 
 import javax.swing.AbstractAction;
@@ -64,13 +66,17 @@ public class Gui extends JFrame {
 		}
 	
 	});
-//	addWindowListener(new WindowAdapter() {
-//	    @Override
-//	    public void windowClosing(WindowEvent e) {
-//		Cybele.terminate();
-//	    }
-//	
-//	});
+	// This was commented out in 2008, so closing the window took EXIT_ON_CLOSE's
+	// System.exit and left the kernel to be torn down by the JVM. It now goes through
+	// RunControl, which flushes the trace, prints the stop banner and terminates the
+	// kernel; the exit status stays 0, as EXIT_ON_CLOSE's always was.
+	addWindowListener(new WindowAdapter() {
+	    @Override
+	    public void windowClosing(WindowEvent e) {
+		RunControl.stop(RunControl.EXIT_OK, "GUI window closed");
+	    }
+	
+	});
 	setSize(800, 650);
     }
 

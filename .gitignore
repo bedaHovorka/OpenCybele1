@@ -23,3 +23,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Probe scratch directory (docs/probes/run.sh), as docs/probes/README.md says
+docs/probes/.work/

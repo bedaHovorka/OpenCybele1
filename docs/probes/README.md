@@ -54,6 +54,7 @@ Environment used for the recorded results: OpenJDK 21.0.11 (Red Hat), Fedora 43,
 | `ExpC.java` | Two simultaneous subscribers on one channel, three variants | `SEM-03` |
 | `ExpE.java` | Negative / zero timer delays; `sendAll` to an unopened channel | `SEM-06` |
 | `ExpF.java` | By-reference payload passing under `Local;NoSerialization` | `SEM-05` |
+| `ExpG.java` | **Self-verdicting**: `Cybele.terminate()` calls `System.exit(0)` and never returns; a shutdown hook's `Runtime.halt(code)` still overrides that status; and the *second*, recoverable way a clock command is lost — see below. The three facts `RunControl` (#17) is built on. | `SEM-02`, `SEM-06`, issue #17 |
 | `Order.java` | Iteration order at the four hash-order sites that decide behaviour | `NDT-01`…`NDT-04` |
 | `OrderLock.java` | **Self-verdicting** pin of those same orders: node/road creation order, every road's `(first, second)` endpoints, every station's candidate-edge order and all 56 origin/destination routes. Exits non-zero on any drift. Built against `ScenarioConfig.buildNet()`, so it locks the real production topology path. | `NDT-01`…`NDT-04`, issue #19 |
 
@@ -95,8 +96,22 @@ runtime concatenation `"clk" + w` before its first `createClock` pays the
 window. The clock-name string itself is irrelevant. Both files are correct measurements of
 different sides of the same 3.4 ms boundary.
 
-The real application is **immune**: `new Gui(this); gui.setVisible(true)` three lines above
-`RailwayMainAgent.java:111` puts its gap at 159–384 ms (n = 40).
+The real application **was** immune, by accident: `new Gui(this); gui.setVisible(true)` three
+lines above `RailwayMainAgent.java:111` put its gap at 159–384 ms (n = 40). Issue
+[#17](https://github.com/bedaHovorka/OpenCybele1/issues/17)'s `sim.headless=true` removes exactly
+that, and headless the gap measured **1.5–7 ms**, with the clock's command channel dead in 8/8
+runs of one build and 1/10 of another. It is now cleared deliberately, by a barrier in `Main`
+that waits for the timer service to demonstrate it works, and checked afterwards on the
+simulation's own clock. See [`../headless-and-stop.md`](../headless-and-stop.md).
+
+**There is a second, distinct loss that is not this race, and it changes how an `ExpB*` result
+should be read.** A command issued **immediately** after `createClock`, with no intervening
+statement, is dropped **6/6 even for a clock created 400 ms after `startUp()`** — the per-clock
+command channel is opened asynchronously as well, so the first command can fall into *that*
+window. That loss is recoverable: re-sending the command lands it (measured, within ~25 ms),
+whereas a lost *announcement* never recovers (400 re-sends over 2 s, still no). `ExpG` checks
+both. So a probe reporting "the pause never landed" is not on its own evidence of the startup
+race — check whether it re-sent.
 
 ## Caveat 2 — startup flakiness (`ExpA2`, `ExpE`)
 
