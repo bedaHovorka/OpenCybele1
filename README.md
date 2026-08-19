@@ -17,7 +17,8 @@ This is the reference environment the baseline is built and run in. Anything els
 | **Assertions** | `-ea` is on for `run`, and baked into the `installDist` start script and the Docker image — see [Assertions (`-ea`)](#assertions--ea) and [`docs/assertion-triage.md`](docs/assertion-triage.md) |
 | **Vendor jars** | `com.iai:cybele-api:1.0`, `com.iai:cybele-impl:1.0` in the local Maven repository — see [One-time setup](#one-time-setup-install-the-vendor-jars) |
 | **Scenario config** | `sim.*` system properties, defaults identical to the historical literals — see [Scenario configuration](#scenario-configuration-sim) and [`docs/scenario-config.md`](docs/scenario-config.md) |
-| **Tests** | none; verification is manual through the Swing GUI |
+| **Randomness** | per-agent streams from one master seed, `-Dsim.random.masterSeed`, defaulting to a drawn (printed) seed — see [Reproducing a run](#reproducing-a-run-simrandommasterseed) and [`docs/seeded-rng.md`](docs/seeded-rng.md) |
+| **Tests** | no test suite; verification is manual through the Swing GUI, plus `./gradlew rngProof` for the RNG determinism check |
 
 ## Requirements
 
@@ -106,6 +107,40 @@ Two couplings are worth knowing about before changing anything:
   at startup and a red mismatch list plus red `??` gaps on the canvas — never a plausible-looking
   wrong picture.
 
+### Reproducing a run (`sim.random.masterSeed`)
+
+Every random draw comes from a per-agent stream derived from one master seed. The default is
+to **draw** a seed, so an ordinary run keeps varying — but the drawn seed is printed to stderr
+with the command to replay it:
+
+```
+--- no sim.random.masterSeed given; drew 5605042205657107861. Replay this run's random streams with:
+---   -Dsim.random.masterSeed=5605042205657107861
+```
+
+```bash
+./gradlew run -Dsim.random.masterSeed=20080415        # pin the streams
+./gradlew rngProof                                    # determinism check, ~1 s (also runs in `build`)
+./gradlew rngProof -Prng.full                         # the exhaustive sweep, ~15 s
+./gradlew rngProof --args="plan 20080415 20"          # predict that seed's trains, offline
+```
+
+Startup also prints a **stream table** to stderr — every stream name with the seed it will
+run on — so a captured run carries a complete manifest of its randomness.
+
+> `build/install/opencybele/bin/opencybele -Dsim.random.masterSeed=…` **does not work and does
+> not complain**: the generated start script passes `$@` to the program, not to the JVM, so the
+> run draws a fresh seed while looking pinned. Use `OPENCYBELE_OPTS=-Dsim.random.masterSeed=…`.
+> `./gradlew run -D…` is fine.
+
+Same seed ⇒ same per-agent draw sequences, on any thread interleaving. It does **not** yet
+mean the same stdout: departure timestamps come from a real-time clock, event ordering is
+still unpinned ([#16](https://github.com/bedaHovorka/OpenCybele1/issues/16)), and above a
+measured arrival-density ceiling the same seed departs a different *subset* of the same
+generated trains — the pre-existing `START` race, not the RNG. What a fixed seed does and
+does not pin, and how to keep a scenario below that ceiling, is measured in
+[`docs/seeded-rng.md`](docs/seeded-rng.md).
+
 ### Assertions (`-ea`)
 
 `run` enables assertions (`-ea` in `applicationDefaultJvmArgs`). The 32 `assert` statements in `src/` are the codebase's only invariant checks, and they encode real preconditions — every path member having voted, a train arriving where it was routed, a path direction being resolvable. With assertions off, a violated invariant is silent corruption; with them on, it is a logged failure.
@@ -166,6 +201,7 @@ xhost -local:docker   # revoke access again once done
 
 - [`docs/scenario-config.md`](docs/scenario-config.md) — the `sim.*` parameter surface, the `LAMBDA` split, the canvas drift, and the short-scenario evidence
 - [`docs/assertion-triage.md`](docs/assertion-triage.md) — all assertion sites, and what Cybele does when one fires
+- [`docs/seeded-rng.md`](docs/seeded-rng.md) — the per-agent seeded RNG, the interleaving-independence proof, and what still blocks whole-run determinism
 
 `dokumentace.pdf` and `prezentace.pdf` (in Czech) are the original project documentation and presentation submitted for the course.
 

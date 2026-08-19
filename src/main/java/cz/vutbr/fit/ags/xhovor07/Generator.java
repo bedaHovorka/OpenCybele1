@@ -42,7 +42,14 @@ public class Generator implements Handler {
     private final long lambda;
  
     private int index = 0;
-    private static final Random random = new Random();
+    /**
+     * Stream for the origin/destination choice. It used to be a {@code static final Random}
+     * shared with every {@link RoadAgent} and published through {@code getRandom()}; see
+     * {@link SimRandom} for why that could not be made reproducible by seeding alone.
+     */
+    private final Random odRandom;
+    /** Stream for the exponential inter-arrival time. Separate on purpose — see {@link SimRandom}. */
+    private final Random interarrivalRandom;
     private RailwayMainAgent mainAgent;
     
     /**
@@ -53,6 +60,8 @@ public class Generator implements Handler {
 	final ScenarioConfig config = ScenarioConfig.get();
 	this.hhh = config.getTrainPairs();
 	this.lambda = config.getArrivalLambdaMs();
+	this.odRandom = SimRandom.forAgent(SimRandom.GENERATOR_OD_STREAM);
+	this.interarrivalRandom = SimRandom.forAgent(SimRandom.GENERATOR_INTERARRIVAL_STREAM);
 	Activity.setTimer(RailwayMainAgent.CLOCK_ID, config.getArrivalFirstFireMs(), this, "generateTrain");
     }
     
@@ -63,7 +72,8 @@ public class Generator implements Handler {
     public void generateTrain(CybeleEvent ev) {
 	final String train = "vl" + index;
 	final String channelTicket = Activity.openChannel(RailwayMainAgent.CHANNEL_TRAIN_STATE+train, "recieveTrainState", mainAgent);
-	final Serializable[] serializables = hhh[random.nextInt(hhh.length)];
+	// Adding or reordering a draw on this stream re-aligns every later value of it.
+	final Serializable[] serializables = hhh[odRandom.nextInt(hhh.length)];
 	Cybele.createAgent(train, Train.class.getName(), serializables);
 	openedChannels.put(train, channelTicket);
 	index++;
@@ -72,14 +82,7 @@ public class Generator implements Handler {
     }
     
     private long exp(double mean) {
-        return Math.round(-mean * Math.log(random.nextDouble()));
-    }
-
-    /**
-     * get random
-     * @return random object
-     */
-    public static Random getRandom() {
-        return random;
+        // Adding or reordering a draw on this stream re-aligns every later value of it.
+        return Math.round(-mean * Math.log(interarrivalRandom.nextDouble()));
     }
 }

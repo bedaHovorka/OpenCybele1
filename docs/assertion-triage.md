@@ -353,6 +353,13 @@ mismatch banner on stderr at startup and on the canvas. See
 **The count is therefore 32 assertion sites, not 33** — 24 exercised and holding, 8 never
 reached.
 
+> **Amendment (#15).** That is the count as of #18. #15 adds **one** site — `RoadAgent`'s
+> constructor asserts that its own agent name is a track declared in `sim.topology`, which is
+> what ties each road agent to the per-agent RNG stream table `Main` prints (see
+> [`seeded-rng.md`](seeded-rng.md)). **33 sites on the post-#15 tree, 25 exercised.** It is
+> exercised on every run — seven times, once per road agent — and did not fire in any run
+> captured for #15 (17 runs there, plus 12 more in its revision round).
+
 ### Re-deriving the count: the exclusion list is now TWO entries, not one
 
 The method above counts `assert` sites by grep, excluding one known Javadoc false positive.

@@ -72,6 +72,7 @@ Two build-side notes that belong with it:
 | `sim.gui.paces` | `Fast=8,Normal=1,Slow=0.3` | `Gui.createBar` toolbar buttons |
 | `sim.gui.mainLine` | `stA,stH,stG,stE,stD,stB` | `RailwayCanvas.mainRoads` |
 | `sim.gui.branches` | `stC:tr7,stF:tr6` | `RailwayCanvas.paint` branch coordinates |
+| `sim.random.masterSeed` | `random` | the single unseeded `new Random()` in `Generator`, which fed the generator's two draws **and** every `RoadAgent`'s travel jitter — now one seeded stream per agent, see [`docs/seeded-rng.md`](seeded-rng.md) |
 
 `sim.config` names the optional file. Ready-made scenarios live in [`scenarios/`](../scenarios):
 `default.properties` (every default written out, meant to be copied),
@@ -95,7 +96,7 @@ and a simulation that limps on. Discovered in `main`, the same bad value is an o
 uncaught exception with **exit status 1**:
 
 ```
-$ opencybele -Dsim.station.capacities=stA=6,stB=5,stC=2,stD=2,stE=5,stF=2,stG=3
+$ OPENCYBELE_OPTS=-Dsim.station.capacities=stA=6,stB=5,stC=2,stD=2,stE=5,stF=2,stG=3 opencybele
 Exception in thread "main" java.lang.IllegalArgumentException: sim.station.capacities: no entry for station 'stH' declared in sim.topology
 	at cz.vutbr.fit.ags.xhovor07.ScenarioConfig.checkKeySet(ScenarioConfig.java)
 	...
@@ -103,6 +104,16 @@ Exception in thread "main" java.lang.IllegalArgumentException: sim.station.capac
 $ echo $?
 1
 ```
+
+> **`OPENCYBELE_OPTS`, not a bare flag — this one is silent.** The example above deliberately
+> uses the environment variable. Gradle's generated start script routes everything in `$@` to
+> the **program's** arguments, so `opencybele -Dsim.foo=bar` does not set a system property: it
+> hands `Main` an argument it ignores. Nothing warns. With a validation key the run simply
+> proceeds on the default; with `-Dsim.random.masterSeed` it proceeds on a **freshly drawn
+> seed** while appearing to have accepted the pin, which is precisely how a golden gets
+> recorded under a seed nobody chose ([#24](https://github.com/bedaHovorka/OpenCybele1/issues/24)).
+> `./gradlew run -Dsim.…` is fine — the build file forwards those explicitly.
+
 
 Checked: numeric ranges; that capacities and delays name exactly the stations and tracks in
 `sim.topology` (a typo is an error, not a silently ignored entry); that the topology is a
@@ -399,27 +410,40 @@ it should be re-examined once #15 and #17 make runs deterministic and bounded.
 
 ## What this does not do
 
+- **A load ceiling above which a fixed seed no longer departs the same trains.** Measured on
+  `scenarios/short.properties`: identical departure-id sets over three runs at 30 s, differing
+  sets at 45 s, with the generator provably unperturbed (same trains generated, same origins).
+  The cause is the pre-existing `START` race ([#22](https://github.com/bedaHovorka/OpenCybele1/issues/22)
+  item 1 / `INVENTORY` DEF-02), which denser arrivals hit more often. A scenario intended for a
+  golden must be validated below it — three runs at a fixed seed, diff the departure-id sets.
+  See [`seeded-rng.md`](seeded-rng.md) § "The load ceiling".
 - **No stop condition.** Every run above is `timeout`-truncated;
   [#17](https://github.com/bedaHovorka/OpenCybele1/issues/17) owns that, and until it lands
   a "short scenario" is short only in the sense that it does more per second.
-- **No seeded RNG.** [#15](https://github.com/bedaHovorka/OpenCybele1/issues/15) owns it.
-  Consequently the parity evidence for "defaults are unchanged" below is distributional, not
-  byte-exact.
+- **Seeded RNG landed separately.** [#15](https://github.com/bedaHovorka/OpenCybele1/issues/15)
+  added `sim.random.masterSeed` to this same mechanism; see [`docs/seeded-rng.md`](seeded-rng.md).
+  It fixes the *draw sequences*, not the run: departure timestamps are still read from a
+  real-time clock, so the parity evidence for "defaults are unchanged" below stays
+  distributional rather than byte-exact.
 - ~~**No HashMap iteration-order fix**~~ — **landed since**, in
   [#19](https://github.com/bedaHovorka/OpenCybele1/issues/19); see
   [`iteration-order.md`](iteration-order.md). `sim.topology`'s declaration order is now what breaks
   ties in the graph's iteration order, so the "preserves the historical insertion order" property
   this file relies on became load-bearing rather than incidental. The orders themselves did not
-  move.
+  move. Note what #19 does *not* fix, measured while reviewing #15: `Cybele.createAgent` is
+  asynchronous, so the order in which agent **constructors** actually run stays nondeterministic
+  even though the loop that issues the create requests is now fixed.
 - **`cybelle/ICS.prop` is not touched** ([#16](https://github.com/bedaHovorka/OpenCybele1/issues/16)).
 - **The `RoadAgent` travel jitter** (`500 * nextGaussian()` in `RoadAgent.travelStart`) is *not*
-  externalised. It is an RNG draw, not a timer period, and it belongs with #15.
+  externalised as a `sim.*` magnitude. It is an RNG draw, not a timer period; #15 gave it a
+  seeded per-road stream but left the `500` and the distribution exactly as they were.
 
 ## Evidence that the defaults are unchanged
 
-**Exact comparison is impossible today.** The RNG is unseeded
-([#15](https://github.com/bedaHovorka/OpenCybele1/issues/15)), so two runs of the *same* binary
-differ — measured run-to-run spread on departure count is nearly 2× (13–25 over 150 s). Any
+**Exact comparison is impossible today.** When this was measured the RNG was still unseeded
+([#15](https://github.com/bedaHovorka/OpenCybele1/issues/15)); it is seeded now, but that alone
+does not make two runs equal — see [`docs/seeded-rng.md`](seeded-rng.md) — so two runs of the
+*same* binary still differ — measured run-to-run spread on departure count is nearly 2× (13–25 over 150 s). Any
 claim resting on a single run per side is therefore worthless, including the 21-vs-21 pair this
 document reported in its first revision: that was luck, not evidence. The claim below is
 distributional, over six runs per side, and is stated as such.
@@ -460,5 +484,11 @@ Stronger, non-statistical checks were run independently and all came back exact:
   failure precedes `Cybele.startUp()`.
 - The GUI was screenshotted on both trees and draws the identical layout.
 
-Once #15 lands, this section should be replaced by a byte-exact diff at a fixed seed. Until then
-it is sampled evidence, not proof — the same caveat `assertion-triage.md` carries.
+This section was expected to be replaceable by a byte-exact diff once #15 landed. It is not:
+#15 pins the draw sequences, but departure timestamps come from a real-time clock and the
+event-queue/thread-pool ordering is untouched ([#16](https://github.com/bedaHovorka/OpenCybele1/issues/16),
+[#19](https://github.com/bedaHovorka/OpenCybele1/issues/19)), so stdout still differs run to run
+at a fixed seed. [`docs/seeded-rng.md`](seeded-rng.md) measures exactly which parts of stdout a
+fixed seed *does* pin — the train-by-train origin sequence is one of them — and that is the
+projection this comparison should be redone against. Until #16/#19 land it remains sampled
+evidence, not proof — the same caveat `assertion-triage.md` carries.
