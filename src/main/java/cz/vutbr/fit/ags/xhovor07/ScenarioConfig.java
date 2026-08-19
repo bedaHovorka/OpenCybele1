@@ -143,6 +143,28 @@ public final class ScenarioConfig implements Serializable {
     public static final String KEY_STOP_STALL_MS = "sim.stop.stallMs";
 
     /**
+     * Whether to run the canonical parity trace probe ({@link TraceProbe}). {@code false}
+     * (the default) creates no probe agent, opens no extra channels and leaves stdout as
+     * the two {@code println}s it has always been, so {@code ./gradlew run} is unchanged.
+     * {@code true} adds one passive agent that subscribes to all fifteen application
+     * channels and appends one {@code agent|tick|event|from|to|performative|payload} line
+     * per message. See {@code docs/trace-format.md}.
+     */
+    public static final String KEY_TRACE_ENABLED = "sim.trace.enabled";
+    /**
+     * How many train-name slots ahead of the generator the probe keeps subscribed.
+     * <p>
+     * Four of the fifteen channels are named after a train that does not exist yet, and a
+     * train's very first message is sent from its own constructor — so the probe cannot
+     * subscribe on demand and pre-opens a sliding window of {@code "vl" + index} names
+     * instead. Inert when {@link #KEY_TRACE_ENABLED} is {@code false}. The default is
+     * comfortably wider than any generation burst these scenarios produce, and a window
+     * that was ever too narrow would not fail quietly — the probe reports the gap in the
+     * shape the parity harness scans for.
+     */
+    public static final String KEY_TRACE_TRAIN_LOOKAHEAD = "sim.trace.trainLookahead";
+
+    /**
      * Master seed every per-agent random stream is derived from
      * ({@link SimRandom#seedFor(long, String)}): a signed 64-bit integer, or the literal
      * {@value #MASTER_SEED_RANDOM}, which draws a fresh one for this run.
@@ -182,6 +204,10 @@ public final class ScenarioConfig implements Serializable {
     static final String DEF_STOP_MAX_CLOCK_MS = "0";
     static final String DEF_STOP_WALL_CLOCK_MS = "0";
     static final String DEF_STOP_STALL_MS = "0";
+    static final String DEF_TRACE_ENABLED = "false";           // was: no trace at all
+    static final String DEF_TRACE_TRAIN_LOOKAHEAD = "32";
+    /** Ceiling for {@link #KEY_TRACE_TRAIN_LOOKAHEAD}; each slot costs four channels. */
+    static final long MAX_TRACE_TRAIN_LOOKAHEAD = 10000;
 
     private static final String[][] KEYS_AND_DEFAULTS = {
         {KEY_ARRIVAL_LAMBDA, DEF_ARRIVAL_LAMBDA},
@@ -202,6 +228,8 @@ public final class ScenarioConfig implements Serializable {
         {KEY_STOP_MAX_CLOCK_MS, DEF_STOP_MAX_CLOCK_MS},
         {KEY_STOP_WALL_CLOCK_MS, DEF_STOP_WALL_CLOCK_MS},
         {KEY_STOP_STALL_MS, DEF_STOP_STALL_MS},
+        {KEY_TRACE_ENABLED, DEF_TRACE_ENABLED},
+        {KEY_TRACE_TRAIN_LOOKAHEAD, DEF_TRACE_TRAIN_LOOKAHEAD},
     };
 
     private static volatile ScenarioConfig instance;
@@ -266,6 +294,8 @@ public final class ScenarioConfig implements Serializable {
     private final long stopMaxClockMs;
     private final long stopWallClockMs;
     private final long stopStallMs;
+    private final boolean traceEnabled;
+    private final int traceTrainLookahead;
 
     private ScenarioConfig(Properties p) {
         arrivalLambdaMs = positiveLong(p, KEY_ARRIVAL_LAMBDA);
@@ -298,6 +328,12 @@ public final class ScenarioConfig implements Serializable {
         stopMaxClockMs = nonNegativeLong(p, KEY_STOP_MAX_CLOCK_MS);
         stopWallClockMs = nonNegativeLong(p, KEY_STOP_WALL_CLOCK_MS);
         stopStallMs = nonNegativeLong(p, KEY_STOP_STALL_MS);
+        traceEnabled = bool(p, KEY_TRACE_ENABLED);
+        // Bounded at both ends. The clamp this replaced accepted 100000000 and turned it
+        // into 400 million openChannel calls in an agent constructor — a hang, not the
+        // error the documentation promised. The window slides, so it never needs to be
+        // large: the ceiling is 300x the default and still opens 40 000 channels.
+        traceTrainLookahead = (int) boundedLong(p, KEY_TRACE_TRAIN_LOOKAHEAD, 1, MAX_TRACE_TRAIN_LOOKAHEAD);
 
         final String seed = require(p, KEY_RANDOM_MASTER_SEED);
         masterSeedDrawn = MASTER_SEED_RANDOM.equals(seed);
@@ -470,6 +506,15 @@ public final class ScenarioConfig implements Serializable {
     private static long positiveLong(Properties p, String key) {
         final long v = parseLong(p, key);
         if (v <= 0) throw new IllegalArgumentException(key + " must be > 0, was " + v);
+        return v;
+    }
+
+    private static long boundedLong(Properties p, String key, long min, long max) {
+        final long v = parseLong(p, key);
+        if (v < min || v > max) {
+            throw new IllegalArgumentException(key + " must be between " + min + " and " + max
+                    + ", was " + v);
+        }
         return v;
     }
 
@@ -875,6 +920,11 @@ public final class ScenarioConfig implements Serializable {
     public long getStopWallClockMs() { return stopWallClockMs; }
     /** @return generator stall timeout in ms, or {@code 0} for none */
     public long getStopStallMs() { return stopStallMs; }
+
+    /** @return whether the canonical parity trace probe runs; see {@link TraceProbe} */
+    public boolean isTraceEnabled() { return traceEnabled; }
+    /** @return how many train-name slots the probe subscribes ahead of the generator */
+    public int getTraceTrainLookahead() { return traceTrainLookahead; }
     /** @return {@code true} if any bound at all is configured */
     public boolean hasStopCondition() {
         return stopMaxTrains > 0 || stopMaxClockMs > 0 || stopWallClockMs > 0 || stopStallMs > 0;

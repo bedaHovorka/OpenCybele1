@@ -18,6 +18,7 @@ This is the reference environment the baseline is built and run in. Anything els
 | **Vendor jars** | `com.iai:cybele-api:1.0`, `com.iai:cybele-impl:1.0` in the local Maven repository — see [One-time setup](#one-time-setup-install-the-vendor-jars) |
 | **Scenario config** | `sim.*` system properties, defaults identical to the historical literals — see [Scenario configuration](#scenario-configuration-sim) and [`docs/scenario-config.md`](docs/scenario-config.md) |
 | **Randomness** | per-agent streams from one master seed, `-Dsim.random.masterSeed`, defaulting to a drawn (printed) seed — see [Reproducing a run](#reproducing-a-run-simrandommasterseed) and [`docs/seeded-rng.md`](docs/seeded-rng.md) |
+| **Parity trace** | off by default; `-Dsim.trace.enabled=true` adds one passive probe agent that prints `agent\|tick\|event\|from\|to\|performative\|payload` for all 15 channels — see [Parity trace](#parity-trace-simtraceenabled) and [`docs/trace-format.md`](docs/trace-format.md) |
 | **Tests** | no test suite; verification is manual through the Swing GUI, plus `./gradlew rngProof` for the RNG determinism check |
 
 ## Requirements
@@ -104,6 +105,52 @@ before:
 ```bash
 timeout 300 ./gradlew run --console=plain
 ```
+
+### Parity trace (`sim.trace.enabled`)
+
+The application itself prints two lines — `"<train> in <station> at <n>"` and
+`"<train> started"`. Everything else it does reaches the Swing canvas through
+`Observable`/`Observer` and never touches a stream, so none of it can be compared against a
+port. `-Dsim.trace.enabled=true` adds **one passive agent** that subscribes to all fifteen
+application channels and appends one canonical line per message to stdout:
+
+```
+agent|tick|event|from|to|performative|payload
+```
+
+```bash
+OPENCYBELE_OPTS="-Djava.awt.headless=true \
+  -Dsim.config=scenarios/short-bounded.properties \
+  -Dsim.trace.enabled=true" build/install/opencybele/bin/opencybele
+```
+
+```
+vl3|13064|START|Main|vl3|-|station=stA
+vl3|13072|ENTER|vl3|stA|-|train=vl3,position=null,target=stB
+vl3|13080|ENTER_REPLY|stA|vl3|-|object=stA,next=tr1
+```
+
+It is additive — it sends nothing, sets no timer and touches no application state — and it is
+**off by default**, so `./gradlew run` is unchanged. `tick` is the simulated clock, never wall
+time. `performative` is the literal `-` on this branch and stays that way: the baseline has no
+performatives at all, and the channel-to-`ACLMessage` mapping belongs to the JADE port.
+
+```bash
+./gradlew traceCheck     # run a short bounded simulation and verdict the trace it produced
+```
+
+verifies that all fifteen channels appear, that the round-trips balance, and — the part that
+matters — that the trace is **complete**: train ids contiguous, every announced train with its
+`generated` line, every station and track with its opening state.
+
+**A golden cannot be recorded from this trace verbatim.** Five numeric families derive from a
+wall-clock-driven simulated clock and change on every run; they are named in the doc, for
+[#21](https://github.com/bedaHovorka/OpenCybele1/issues/21) to project away.
+
+The format is a **contract**: it is re-emitted by the JADE and Jason ports and has to produce
+byte-identical lines for equivalent behaviour. Field semantics, the per-channel table, the
+`Station.Info` aliasing hazard and the probe-on/probe-off perturbation measurement:
+[`docs/trace-format.md`](docs/trace-format.md).
 
 ### Scenario configuration (`sim.*`)
 
@@ -242,6 +289,7 @@ xhost -local:docker   # revoke access again once done
 - [`docs/assertion-triage.md`](docs/assertion-triage.md) — all assertion sites, and what Cybele does when one fires
 - [`docs/seeded-rng.md`](docs/seeded-rng.md) — the per-agent seeded RNG, the interleaving-independence proof, and what still blocks whole-run determinism
 - [`docs/headless-and-stop.md`](docs/headless-and-stop.md) — headless mode, the bounded stop condition, the exit-code table, and the kernel clock-registration race that removing the GUI exposes
+- [`docs/trace-format.md`](docs/trace-format.md) — the canonical parity trace: the line format as a cross-framework contract, the fifteen channels, the aliased-payload hazard, and the probe-on/probe-off perturbation measurement
 
 `dokumentace.pdf` and `prezentace.pdf` (in Czech) are the original project documentation and presentation submitted for the course.
 
