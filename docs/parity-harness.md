@@ -364,8 +364,17 @@ fourth prefix for it rather than the application being changed to suit a filter 
 
 Added by [#13](https://github.com/bedaHovorka/OpenCybele1/issues/13). It is the first adapter that
 drives a real implementation, and it drives it **by path**: the application lives on
-`opencybele-baseline`, this branch has no Cybele dependency, and the adapter names exactly one
-application symbol — `"cz.vutbr.fit.ags.xhovor07.Main"` — as a string.
+`opencybele-baseline` and the adapter names exactly one application symbol —
+`"cz.vutbr.fit.ags.xhovor07.Main"` — as a string.
+
+**A correction to how that separation has been described.** "This branch carries no Cybele, no
+application source and no vendor jar" is false and has been repeated: `jade-develop` still holds
+the 19 application sources under `src/main/java/cz/vutbr/fit/ags/xhovor07/` and still declares
+`com.iai:cybele-api`/`cybele-impl`, so `./gradlew build` here needs those jars in `~/.m2`. What is
+true — and what is *enforced* — is narrower and is the half that matters: the **harness source
+set** has no link to any implementation. `characterizationIT` does not extend `main`'s
+configurations, nothing named `com.iai` resolves on `characterizationITRuntimeClasspath`, and
+`HarnessSelfCheckIT` fails the build on an application import. Claim that, not the wider version.
 
 ```bash
 cd ../wt/opencybele-ref && ./gradlew installDist
@@ -405,16 +414,30 @@ assembling the `java` line directly is better still, because every element is ex
 failure report, and because a launcher that forks instead of `exec`ing leaves the inherited stdout
 open after the child exits — which `ScenarioRunner` refuses as a truncated capture.
 
-**That the properties arrived is measured, not assumed.** `OpenCybeleSmokeIT` reads the values back
-out of the child's own resolved-configuration banner. The scenario helps: every value it passes
-differs from the application's default, and with no `sim.stop.*` an ignored command line produces a
-run with no bound at all, which the harness kills.
+**That the properties arrived is measured, not assumed — and the check is total.**
+`OpenCybeleSmokeIT` iterates `spec.launcher().properties()` and reads **every declared key** back
+out of the child's own resolved-configuration banner, matched whole-line and anchored.
+
+Both halves of that sentence were earned. An earlier revision checked six hard-coded keys out of
+ten, and dropping the unchecked `sim.station.voteWindowMs` alone moves the trace by exactly 2 lines
+per affected family — inside every tolerance, with the distinct-entity count and every train-level
+count unchanged, so it passes in both directions and the golden would freeze a configuration the
+scenario says it is not using. And `startsWith` accepted `sim.clock.pace = 80` as proof of `= 8`.
+Driving the loop from the spec also keeps the claim true the next time the scenario gains a knob.
+
+The all-or-nothing argument still holds as a second line of defence — with no `sim.stop.*` an
+ignored command line produces a run with no bound, which the harness kills — but it only ever
+covered a *wholesale* drop.
 
 `classifyExit` is deliberately **not** overridden — the default table in `LauncherAdapter` is the
 one measured on this very application — and `OpenCybeleLauncherIT` asserts all seven codes through
 the adapter rather than trusting that, including the two that postdate #12: `2`
 (`WINDOW_CLOSED_EARLY`, a run that did *not* finish) and `255`
-(`AGENT_CONSTRUCTION_THROWABLE`, a status the application never sets).
+(`AGENT_CONSTRUCTION_THROWABLE`, a status the application never sets). That test asserts the
+**mapping only**. That the application actually emits each status was measured in
+[`headless-and-stop.md`](https://github.com/bedaHovorka/OpenCybele1/blob/opencybele-baseline/docs/headless-and-stop.md)
+by observing `$?`, and is not re-verified here — a green IT is not end-to-end proof that exit 4
+ever happens.
 
 ### The configuration banner: declared, not indented
 
@@ -443,11 +466,43 @@ remove all eleven of them.
 ### `opencybele-smoke`, and what it can honestly claim
 
 `summary`, not `strict` or `causal` — because #21 has not landed. Three back-to-back runs at the
-pinned seed produce 623 identical-length normalized traces that still differ from one another on
-most lines, since five clock-derived numeric families are re-read every run. `causal` is no easier
-than `strict` here: it compares each entity's projection exactly and the unattributed bucket exactly
-and with no tolerance. When #21 lands this scenario tightens by editing one word, with **no
-re-recording** — recording writes the full normalized trace at every level.
+pinned seed produce 623 identical-length normalized traces that still differ from one another from
+**line 10** onwards (`stD|1096|STATION_INFO…` against `stD|1016|…`), since five clock-derived
+numeric families are re-read every run. (`trace-format.md`'s "differs at line 30" is that
+document's own run of `short-bounded`, not this scenario.) `causal` is no easier than `strict`
+here: it compares each entity's projection exactly and the unattributed bucket exactly and with no
+tolerance. When #21 lands this scenario tightens by editing one word, with **no re-recording** —
+recording writes the full normalized trace at every level, and `GoldenStore.record` does so
+unconditionally.
+
+**The level is not the rule set, and the rule set is what a replay is actually held to.** The first
+version of this scenario declared six summary rules covering `PLAN_TRAIN`, `TRAIN_STATE`, `ENTER`,
+`STATION_INFO` and the two `println`s — **154 of 623 lines**. Nothing touched `VOTE`,
+`VOTE_REQUEST`, `VOTE_RESULT`, `ENTER_REPLY`, `LEAVE`, `TRAVEL_*`, `PATH_FIND*` or `START`.
+Measured against the real application: deleting all 279 VOTE-family lines from the golden still
+passed, and so did a golden cut down to 133 lines. Comparison is symmetric, so **a port that never
+emitted a single `VOTE` line would have passed identically** — and the distributed election is the
+system's core algorithm and precisely what #34 is expected to restructure.
+
+There is now one rule per channel, plus the two `println`s and the kernel banner: **623 of 623
+golden lines are inside a rule, none double-counted.** Two groups behave differently and the
+tolerances say which: the election families and `PLAN_TRAIN`/`START` are identical across all 17
+measured runs (93/93/93, 9, 5) because they complete long before the bound, while the movement and
+state families lose exactly 2 lines under CPU saturation, every time, because the run is halted
+promptly once the bound fires. Tolerances are 2 and 3 accordingly — the earlier 6 was slack nobody
+had measured, and unmeasured slack is exactly what let a dropped property hide.
+
+It remains a **count** contract: a rule proves a family exists at the right cardinality, not that
+any line's payload is right. That is the honest ceiling of `summary`, and pinning content is #21
+plus a `causal` contract — a one-word edit here, no re-record.
+
+Two claims about this scenario were also overstated in the first revision and are now true rather
+than softened. It declares **all twenty** `sim.*` keys, including the ten that sit at a current
+application default — the topology, the station capacities and the road delays are exactly what a
+port must replicate, and leaving them implicit means a change to a baseline default silently
+invalidates this golden. Declaring them is behaviour-neutral: three runs with the ten added produce
+byte-identical event counts to the run the golden was recorded from, so **no re-recording was
+needed**.
 
 One thing the scenario had to design around, and it is a **baseline defect rather than a harness
 one**: `Cybele.terminate()` tears the comm service down while agent threads are still running, so a

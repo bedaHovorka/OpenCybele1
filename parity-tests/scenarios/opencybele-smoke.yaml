@@ -10,34 +10,44 @@
 id: opencybele-smoke
 description: >
   Bounded 25 s (simulated) headless run of the reference implementation with the canonical trace
-  probe on, at a pinned seed. Everything the run depends on is declared here; nothing is taken from
-  a default.
+  probe on, at a pinned seed. All twenty sim.* keys are declared here; the run takes nothing from
+  an application default and nothing from a file on another branch.
 
 # ---------------------------------------------------------------------------------------------
 # WHY summary AND NOT strict OR causal
 #
 # Measured, not assumed. Three runs of exactly this configuration, back to back at the pinned seed,
 # produce 623 normalized lines each and the same 5 departures -- and still differ from one another
-# on well over half of those lines, because FIVE numeric families in the trace derive from a clock
-# that advances with the wall clock and are re-read on every run: field 2 (`tick`) on every line,
-# the `expected=` of VOTE_REQUEST, the `planned=` of VOTE_RESULT, the `diff=` of VOTE, and the
-# number in the application's own "<train> in <station> at <n>" println. A sixth value,
-# STATION_INFO's `occupied`, is a race that no capture point removes. See docs/trace-format.md,
-# "Five families that change on every run" -- measured there as strict false at line 30 and causal
-# false with 67 failures over two back-to-back runs at one pinned seed.
+# from line 10 onwards (`stD|1096|STATION_INFO...` against `stD|1016|...`), because FIVE numeric
+# families in the trace derive from a clock that advances with the wall clock and are re-read on
+# every run: field 2 (`tick`) on every line, the `expected=` of VOTE_REQUEST, the `planned=` of
+# VOTE_RESULT, the `diff=` of VOTE, and the number in the application's own
+# "<train> in <station> at <n>" println. A sixth value, STATION_INFO's `occupied`, is a race that
+# no capture point removes. See docs/trace-format.md, "Five families that change on every run".
 #
 # Projecting those away is #21's job and it has not landed. Until it does:
 #
-#   * `strict` compares line for line -- impossible today.
+#   * `strict` compares line for line -- impossible today, first divergence at line 10.
 #   * `causal` compares each entity's ordered projection EXACTLY, and compares the unattributed
 #     bucket (every STATION_INFO, ROAD_STATE, PATH_FIND line) exactly and with no tolerance at all.
 #     Also impossible today, and for the same reason.
 #   * `summary` compares how many distinct trains the run produced and one count per rule below.
 #     Those are stable at this size, so this is the strongest level that actually holds.
 #
-# Declaring `strict` here and re-recording the golden whenever it flaked is exactly what Phase1.md
-# L7 forbids. The recorded artefact is the FULL normalized trace at every level, so when #21 lands
-# this scenario can be tightened by editing one word -- with no re-recording.
+# WHAT summary DOES AND DOES NOT BUY, SAID PLAINLY
+#
+# A contract level and its rule set are two different things, and it is the rule set that decides
+# what a replay can get away with. The first version of this file counted six families -- 154 of
+# the golden's 623 lines -- which meant a port could emit not one VOTE line and still pass, since
+# comparison is symmetric. The whole distributed election is the system's core algorithm and the
+# thing #34 is expected to restructure, so that was the worst available blind spot. Every one of
+# the fifteen channels is counted below, plus both printlns and the kernel banner: 623 of 623
+# golden lines are now inside some rule.
+#
+# It is still a COUNT contract. A rule proves the family exists at the right cardinality, not that
+# any individual line's payload is right. Pinning content needs #21's projection and a `causal`
+# contract; the golden already holds the full normalized trace, so that is a one-word edit here and
+# NO re-recording -- which is what Phase1.md L7 requires.
 # ---------------------------------------------------------------------------------------------
 contract: summary
 golden: opencybele-smoke.txt
@@ -45,23 +55,45 @@ golden: opencybele-smoke.txt
 launcher:
   # Deliberately NO `config:` key. Every knob this run depends on is written out here, so the
   # golden depends on the application binary and on nothing else -- not on the content of a
-  # scenarios/*.properties file that lives on another branch and could be edited there. (The
-  # adapter does support `config:`; OpenCybeleLauncherIT covers that path.)
+  # scenarios/*.properties file that lives on another branch and could be edited there, and not on
+  # an application default that could be changed there. (The adapter does support `config:`;
+  # OpenCybeleLauncherIT covers that path.)
   #
-  # This also makes the "did the properties actually arrive?" question answer itself. Every value
-  # below differs from the application's default, and the defaults are what an ignored -D would
-  # produce: no bound at all, so the run would never end and the harness would kill it. A silently
-  # ignored property cannot look like a pass here. OpenCybeleSmokeIT additionally asserts the
-  # values back out of the child's own resolved-configuration banner.
+  # ALL TWENTY sim.* KEYS ARE HERE, including the ten that happen to sit at their current default:
+  # the topology, the station capacities and the road delays are precisely what a port has to
+  # replicate, and leaving them implicit would mean a change to a baseline default silently
+  # invalidates this golden. Declaring them is behaviour-neutral -- three runs with the ten added
+  # produce byte-identical event counts to the run this golden was recorded from.
+  #
+  # OpenCybeleSmokeIT asserts EVERY key below back out of the child's own resolved-configuration
+  # banner, exact-matched and anchored. That is what makes "the properties arrived" a total claim
+  # rather than a sampled one: a single dropped -D is caught by name, not left to show up as a
+  # count drift inside a tolerance.
   properties:
-    sim.headless: "true"           # default false -- no display in the suite, and no Swing in a golden
-    sim.clock.pace: "8"            # default 1 -- wall-clock lever only; 8 simulated s per real s
-    sim.arrival.lambdaMs: "2000"   # default 8500 -- the densest rate measured to reproduce
-    sim.station.voteWindowMs: "2000"   # kept equal to lambda; see scenarios/short.properties
-    sim.arrival.firstFireMs: "200" # default 1000
-    sim.random.masterSeed: "20080415"  # default: a DRAWN number. A golden is recorded against a
-                                       # seed, never against a draw.
-    sim.trace.enabled: "true"      # default false -- the canonical trace is the contract (#20)
+    # --- arrivals -------------------------------------------------------------------------
+    sim.arrival.lambdaMs: "2000"          # default 8500 -- densest rate measured to reproduce
+    sim.arrival.firstFireMs: "200"        # default 1000
+    sim.arrival.pairs: "stA>stB,stA>stC,stB>stA,stB>stC,stC>stB,stC>stA"   # = current default
+    # --- topology, capacities, delays: what a port must replicate -------------------------
+    sim.topology: "stA-stH:tr1,stH-stG:tr2,stG-stE:tr3,stE-stD:tr4,stD-stB:tr5,stF-stE:tr6,stC-stF:tr7"
+    sim.station.capacities: "stA=6,stB=5,stC=2,stD=2,stE=5,stF=2,stG=3,stH=2"
+    sim.road.delaysSec: "tr1=1,tr2=1,tr3=5,tr4=2,tr5=3,tr6=4,tr7=3"
+    sim.station.voteWindowMs: "2000"      # kept equal to lambda; see scenarios/short.properties
+    # --- clock ----------------------------------------------------------------------------
+    sim.clock.startMs: "0"                # = current default
+    sim.clock.pace: "8"                   # default 1 -- wall-clock lever only, 8 sim s per real s
+    # --- GUI: inert under sim.headless=true, declared so nothing at all is implicit --------
+    sim.gui.paces: "Fast=8,Normal=1,Slow=0.3"
+    sim.gui.mainLine: "stA,stH,stG,stE,stD,stB"
+    sim.gui.branches: "stC:tr7,stF:tr6"
+    # --- randomness -----------------------------------------------------------------------
+    sim.random.masterSeed: "20080415"     # default: a DRAWN number. A golden is recorded against
+                                          # a seed, never against a draw.
+    # --- run shape ------------------------------------------------------------------------
+    sim.headless: "true"                  # default false -- no display, and no Swing in a golden
+    sim.trace.enabled: "true"             # default false -- the canonical trace is the contract (#20)
+    sim.trace.trainLookahead: "32"        # = current default; the probe's name window
+    sim.stop.maxTrains: "0"               # = current default (off); the clock bound is used instead
     # -----------------------------------------------------------------------------------------
     # THE BOUND, AND WHY IT IS 25000 AND NOT A ROUND 30000
     #
@@ -81,17 +113,18 @@ launcher:
     # arrival and the bound. At this seed the arrivals land at simulated 1328, 4136, 9872, 12984,
     # 15944, 17552, 18248, 18536, 21224, 27328, ... A bound of 30000 sits 0-40 simulated ms after
     # an arrival, i.e. ~5 ms of wall clock at pace 8: measured 1 failure in the first full-suite
-    # run and 3 in 8 runs under an 8-way CPU load. A bound of 25000 sits inside the 6.1 s arrival
-    # gap, ~480 ms of wall clock clear of the last train creation: measured 0 in 14 runs under the
-    # same 8-way load and 0 in 10 unloaded harness runs, with byte-identical counts throughout.
+    # run, 1 in 10 unloaded and 4 in 10 under an 8-way CPU load. A bound of 25000 sits inside the
+    # 6.1 s arrival gap, ~3.8 s of simulated time past the last arrival and ~2.3 s before the next,
+    # i.e. ~480 ms of wall clock clear of the last train creation: measured 0 in 14 runs under the
+    # same 8-way load and 0 in 10 unloaded harness runs, with identical counts throughout.
     #
     # So this number is load-bearing. Moving it is not a cosmetic edit -- re-derive the gap from
     # the PLAN_TRAIN ticks first.
     # -----------------------------------------------------------------------------------------
-    sim.stop.maxClockMs: "25000"   # default 0 (off). The bound. ~3.1 s of wall clock at pace 8.
-    sim.stop.wallClockMs: "60000"  # default 0 (off). Safety net; exit 3, never a pass.
-    sim.stop.stallMs: "10000"      # default 0 (off). Generation died; exit 4, never a pass.
-                                   # Sized above the 6.1 s simulated arrival gap (762 ms wall).
+    sim.stop.maxClockMs: "25000"          # default 0 (off). The bound. ~3.1 s wall at pace 8.
+    sim.stop.wallClockMs: "60000"         # default 0 (off). Safety net; exit 3, never a pass.
+    sim.stop.stallMs: "10000"             # default 0 (off). Generation died; exit 4, never a pass.
+                                          # Sized above the 6.1 s arrival gap (762 ms wall).
 
 run:
   # Well above the child's own 60 s safety net, because this is the backstop for the case where the
@@ -105,8 +138,7 @@ run:
 # Mandatory, and load-bearing here rather than ceremonial: the failure this catches is a run that
 # exits 0, prints a stop banner and contains not one line to grep for, because a throwable in
 # Generator.generateTrain stopped generation before its timer re-armed. Floors sit well under the
-# measured values (9 trains planned, 5 departed, 48 STATION_INFO, 40 ROAD_STATE) so that ordinary
-# drift is not a failure, while a dead or gutted run is.
+# measured values so that ordinary drift is not a failure, while a dead or gutted run is.
 #
 # Liveness matches RAW lines, so these patterns see the trace before any projection -- which is why
 # they carry the `tick` field that #21 will later project away.
@@ -115,7 +147,13 @@ liveness:
   - pattern: '^(vl\d+)\|\d+\|PLAN_TRAIN\|'
     distinctGroup: 1
     atLeast: 6
-  # The election, the movement protocol and the destructor all ran, per train.
+  # Every train that was planned got through a full election. This is the rule that a port which
+  # restructures the CountDownLatch protocol (#34) has to keep satisfying: 9 distinct trains reach
+  # VOTE_RESULT in every measured run, loaded or not.
+  - pattern: '^(vl\d+)\|\d+\|VOTE_RESULT\|'
+    distinctGroup: 1
+    atLeast: 6
+  # The movement protocol and the destructor ran, per train.
   - pattern: '^(vl\d+)\|\d+\|TRAIN_STATE\|'
     distinctGroup: 1
     atLeast: 6
@@ -147,27 +185,85 @@ entity:
     missing: 1
     extra: 1
 
+# ---------------------------------------------------------------------------------------------
+# ONE RULE PER CHANNEL, plus the two printlns and the kernel banner: 623 of 623 golden lines are
+# counted. Nothing in the trace is outside a rule, so a family that vanishes from a replay is a
+# failure by name rather than a silence.
+#
+# Every count was measured on 3 unloaded runs and 14 runs under an 8-way CPU load. Two groups
+# behave differently and the tolerances say so:
+#
+#   * The election families and PLAN_TRAIN/START are IDENTICAL in all 17 runs -- 93/93/93, 9, 5.
+#     They complete long before the bound, so the prompt halt cannot clip them. Tolerance 2 is
+#     margin, not observed drift.
+#   * The movement and state families lose exactly 2 lines under saturation, every time: the run
+#     is halted promptly once the bound fires and the last in-flight messages are simply never
+#     printed. Tolerance 3 is the observed 2 plus one.
+#
+# The first version of this file used 6 here, which was slack nobody had measured -- and slack is
+# what let a whole dropped property hide as a 2-line drift. Tolerances are measurements.
+# ---------------------------------------------------------------------------------------------
 summary:
-  # Every count below was measured three times unloaded and fourteen times under an 8-way CPU
-  # load; the tolerance is the drift those 17 runs showed, not a knob turned until the suite went
-  # green. Train-level counts did not move at all; the per-message counts drifted by 2 under
-  # saturation, because the run is halted promptly once the bound fires and the last few in-flight
-  # messages are simply not printed.
+  # --- the election: the system's core algorithm, and #34's target ------------------------
+  - label: vote-requests             # 93 in 17/17 runs
+    pattern: '\|VOTE_REQUEST\|'
+    tolerance: 2
+  - label: votes                     # 93 in 17/17 runs
+    pattern: '\|VOTE\|'
+    tolerance: 2
+  - label: vote-results              # 93 in 17/17 runs
+    pattern: '\|VOTE_RESULT\|'
+    tolerance: 2
+  # --- planning and departure -------------------------------------------------------------
   - label: trains-planned            # 9 in 17/17 runs
     pattern: '\|PLAN_TRAIN\|'
     tolerance: 1
-  - label: departures                # 5 in 17/17 runs
+  - label: starts                    # 5 in 17/17 runs
+    pattern: '\|START\|'
+    tolerance: 1
+  - label: departures                # 5 in 17/17 -- the application's own println
     pattern: '^vl\d+ started$'
     tolerance: 1
-  - label: departure-printlns        # 5 in 17/17 -- the pre-probe println, kept in the contract
+  - label: departure-printlns        # 5 in 17/17 -- the other println, kept in the contract
     pattern: '^vl\d+ in st[A-H] at \d+$'
     tolerance: 1
+  # --- the movement protocol --------------------------------------------------------------
+  - label: enter-events              # 38 unloaded, 36-37 saturated
+    pattern: '\|ENTER\|'
+    tolerance: 3
+  - label: enter-replies             # 38 unloaded, 36 saturated
+    pattern: '\|ENTER_REPLY\|'
+    tolerance: 3
+  - label: leave-events              # 35 unloaded, 33 saturated
+    pattern: '\|LEAVE\|'
+    tolerance: 3
+  - label: travel-starts             # 18 unloaded, 17 saturated
+    pattern: '\|TRAVEL_START\|'
+    tolerance: 2
+  - label: travel-ends               # 15 unloaded, 14-15 saturated
+    pattern: '\|TRAVEL_END\|'
+    tolerance: 2
+  # --- path finding -----------------------------------------------------------------------
+  - label: path-finds                # 15 unloaded, 14-15 saturated
+    pattern: '\|PATH_FIND\|'
+    tolerance: 2
+  - label: path-find-replies         # 15 unloaded, 14 saturated
+    pattern: '\|PATH_FIND_REPLY\|'
+    tolerance: 2
+  # --- static-object state ----------------------------------------------------------------
   - label: train-state-events        # 49 unloaded, 47 saturated
     pattern: '\|TRAIN_STATE\|'
-    tolerance: 6
-  - label: enter-events              # 38 unloaded, 36 saturated -- the movement protocol
-    pattern: '\|ENTER\|'
-    tolerance: 6
+    tolerance: 3
   - label: station-info-events       # 48 unloaded, 46 saturated
     pattern: '\|STATION_INFO\|'
-    tolerance: 6
+    tolerance: 3
+  - label: road-state-events         # 40 unloaded, 38 saturated
+    pattern: '\|ROAD_STATE\|'
+    tolerance: 3
+  # --- the kernel banner ------------------------------------------------------------------
+  # 9 lines of fixed text emitted before anything else, byte-identical every run
+  # (docs/trace-format.md). It survives the diagnostic filter and is in the golden, so it gets a
+  # rule like everything else -- at tolerance 0, because there is nothing for it to drift with.
+  - label: kernel-banner             # 9 in 17/17 runs
+    pattern: '^(Cybele version |\.\.\. Cybele started|\*\*\* Loading )'
+    tolerance: 0

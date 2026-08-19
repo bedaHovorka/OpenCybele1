@@ -12,6 +12,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -30,8 +32,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * }</pre>
  *
  * <p>Without {@code -Popencybele.dist} this test is <strong>skipped</strong>, not failed: the
- * harness lives on a branch that carries no implementation, and having to check one out to build
- * would defeat the split #11 chose. {@code OpenCybeleLauncherIT} still runs, and still asserts
+ * harness source set has no link to any implementation, and requiring a built one in order to run
+ * the suite at all would defeat the split #11 chose. {@code OpenCybeleLauncherIT} still runs, and still asserts
  * every property of the adapter that does not need a child.
  */
 class OpenCybeleSmokeIT {
@@ -55,7 +57,7 @@ class OpenCybeleSmokeIT {
         List<String> raw = report.captured().lines();
         List<String> trace = report.normalized();
 
-        assertPropertiesReachedTheChild(raw);
+        assertPropertiesReachedTheChild(spec, raw);
         assertConfigurationDidNotReachTheTrace(trace);
         assertTraceIsTheCanonicalOne(trace);
         assertNothingThrew(raw);
@@ -66,7 +68,7 @@ class OpenCybeleSmokeIT {
     }
 
     /**
-     * <strong>Proof that the {@code -D} flags actually arrived.</strong>
+     * <strong>Proof that the {@code -D} flags actually arrived — all of them.</strong>
      *
      * <p>This is the failure this issue was written around. {@code -D} flags handed
      * <em>positionally</em> to a Gradle start script are routed to the program's arguments and set
@@ -76,22 +78,36 @@ class OpenCybeleSmokeIT {
      * invokes {@code java} directly and the arrival of the properties is <em>measured</em> out of
      * the child's own resolved-configuration banner rather than assumed.
      *
-     * <p>The scenario's design makes the check total rather than sampled: every value it passes
-     * differs from the application's default, so a wholly ignored command line could not reach this
-     * assertion at all — with no {@code sim.stop.*} the run has no bound and the harness kills it.
+     * <p><strong>Driven from the scenario, not from a hand-written list.</strong> An earlier
+     * revision checked six hard-coded keys out of the ten the scenario declared, and a reviewer
+     * built the case that survives it: dropping {@code sim.station.voteWindowMs} alone moved the
+     * trace by exactly 2 lines in each affected family — inside every declared tolerance, with the
+     * distinct-entity count and all train-level counts unchanged — so the drop was invisible in
+     * both directions and a golden recorded that way would have frozen a configuration this file
+     * claims not to be using. Iterating {@link ScenarioSpec.Launcher#properties()} makes the claim
+     * total, and keeps it total the next time the scenario gains a knob.
+     *
+     * <p>The match is anchored for the same reason. {@code startsWith} accepted
+     * {@code sim.clock.pace = 80} as proof of {@code = 8} and {@code sim.stop.maxClockMs = 250000}
+     * as proof of {@code = 25000}; the banner writes {@code <key> = <value>} and appends
+     * {@code "    # default: …"} (or {@code "    # drawn …"}) only when the value differs from the
+     * default, so the whole line is matched with that suffix optional.
      */
-    private static void assertPropertiesReachedTheChild(List<String> raw) {
-        for (String expected : List.of(
-                "sim.random.masterSeed = 20080415",   // default: a DRAWN number
-                "sim.stop.maxClockMs = 25000",        // default: 0, i.e. no bound at all
-                "sim.headless = true",                // default: false
-                "sim.trace.enabled = true",           // default: false — no probe, no trace
-                "sim.clock.pace = 8",                 // default: 1
-                "sim.arrival.lambdaMs = 2000")) {     // default: 8500
-            assertTrue(raw.stream().anyMatch(line -> line.startsWith(expected)),
-                    "the child's resolved-configuration banner does not show '" + expected
-                            + "', so the property this scenario declares never reached the JVM."
-                            + " That is the silent-ignore failure #13 exists to rule out.");
+    private static void assertPropertiesReachedTheChild(ScenarioSpec spec, List<String> raw) {
+        assertFalse(spec.launcher().properties().isEmpty(),
+                "the scenario declares no properties, so this check would assert nothing");
+        for (Map.Entry<String, String> declared : spec.launcher().properties().entrySet()) {
+            // "<key> = <value>" exactly, optionally followed by the banner's 4-space annotation.
+            Pattern bannerLine = Pattern.compile("^"
+                    + Pattern.quote(declared.getKey() + " = " + declared.getValue())
+                    + "(?:    # .*)?$");
+            assertTrue(raw.stream().anyMatch(line -> bannerLine.matcher(line).matches()),
+                    "the child's resolved-configuration banner has no line '" + declared.getKey()
+                            + " = " + declared.getValue() + "', so that property never reached the"
+                            + " JVM — or reached it with another value. That is the silent-ignore"
+                            + " failure #13 exists to rule out, and a single dropped key is enough:"
+                            + " it moves the trace by about two lines, which every tolerance in"
+                            + " this scenario absorbs.");
         }
         assertFalse(raw.stream().anyMatch(line -> line.contains("drew ")),
                 "the seed was drawn rather than pinned: -Dsim.random.masterSeed did not arrive.");

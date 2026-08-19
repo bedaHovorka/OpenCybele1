@@ -70,12 +70,17 @@ val characterizationIT by tasks.registering(Test::class) {
     // `java` overrides the JVM the child runs on. Absent the first, OpenCybeleSmokeIT SKIPS rather
     // than fails: this branch carries no implementation and must stay buildable without one.
     //
-    // Made absolute here, because the value is a path relative to the invoking shell while the
-    // test JVM's working directory is the project directory.
-    for (name in listOf("opencybele.dist", "opencybele.home", "opencybele.java")) {
+    // dist/home are made absolute, because the value is a path relative to the invoking shell
+    // while the test JVM's working directory is the project directory. `java` is NOT: it may be a
+    // bare command name resolved on PATH, and absolutising `java` to <project>/java produced a
+    // launch failure with error=2.
+    for (name in listOf("opencybele.dist", "opencybele.home")) {
         (providers.gradleProperty(name).orNull ?: providers.systemProperty(name).orNull)
             ?.let { systemProperty(name, file(it).absolutePath) }
     }
+    (providers.gradleProperty("opencybele.java").orNull
+        ?: providers.systemProperty("opencybele.java").orNull)
+        ?.let { systemProperty("opencybele.java", it) }
 
     // A golden run is never up to date; there is no input Gradle can hash that captures "the
     // behaviour of a child process".

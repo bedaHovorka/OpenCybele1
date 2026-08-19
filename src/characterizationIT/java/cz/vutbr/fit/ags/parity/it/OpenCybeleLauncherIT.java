@@ -95,15 +95,19 @@ class OpenCybeleLauncherIT {
 
         int cp = cmd.indexOf("-cp");
         assertTrue(cp >= 0, "the classpath must be spelled out: " + cmd);
-        String classpath = cmd.get(cp + 1);
-        for (String jar : List.of("cybele-api-1.0.jar", "cybele-impl-1.0.jar", "opencybele.jar")) {
-            assertTrue(classpath.contains(jar), classpath + " is missing " + jar);
-        }
-        assertEquals(3, classpath.split(java.util.regex.Pattern.quote(java.io.File.pathSeparator)).length,
-                "nothing is inherited: the classpath is exactly the dist's jars, not the harness'"
-                        + " own java.class.path — " + classpath);
-        assertTrue(classpath.indexOf("cybele-api-1.0.jar") < classpath.indexOf("opencybele.jar"),
-                "jars are ordered so the command line is byte-stable run to run: " + classpath);
+        // Exact equality, not "contains the three jars". What this guards is that the launcher
+        // contributes NOTHING of its own -- no inherited java.class.path, no vendor jar resolved
+        // by the harness -- and that it orders what the dist holds, so the command line is
+        // byte-stable run to run. It is a fixture, so it cannot notice a real dist gaining a jar;
+        // that is deliberately not this test's job, since the classpath is whatever installDist
+        // produced and the harness has no opinion about it.
+        Path lib = dist.resolve("lib");
+        assertEquals(String.join(java.io.File.pathSeparator,
+                        lib.resolve("cybele-api-1.0.jar").toString(),
+                        lib.resolve("cybele-impl-1.0.jar").toString(),
+                        lib.resolve("opencybele.jar").toString()),
+                cmd.get(cp + 1),
+                "the classpath must be exactly the dist's jars, sorted by file name");
 
         int main = cmd.indexOf(OpenCybeleLauncher.MAIN_CLASS);
         assertTrue(main >= 0, "the entry point is missing: " + cmd);
@@ -131,6 +135,12 @@ class OpenCybeleLauncherIT {
                 "only *.prop is staged: --patch-module folds the WHOLE directory into java.base");
     }
 
+    /**
+     * <strong>What this asserts is the mapping, not the emission.</strong> That the application
+     * actually produces each of these statuses was measured in
+     * {@code docs/headless-and-stop.md} by observing {@code $?}, and is not re-verified here — a
+     * green run of this test is not end-to-end proof that exit 4 ever happens.
+     */
     @Test
     @DisplayName("all seven measured exit codes map to their dispositions, including 2 and 255")
     void exitTableCoversEveryMeasuredCode() {
