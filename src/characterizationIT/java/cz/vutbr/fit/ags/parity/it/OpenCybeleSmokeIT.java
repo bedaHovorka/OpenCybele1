@@ -1,0 +1,142 @@
+package cz.vutbr.fit.ags.parity.it;
+
+import cz.vutbr.fit.ags.parity.ParityLayout;
+import cz.vutbr.fit.ags.parity.golden.GoldenStore;
+import cz.vutbr.fit.ags.parity.opencybele.OpenCybeleLauncher;
+import cz.vutbr.fit.ags.parity.run.RunReport;
+import cz.vutbr.fit.ags.parity.run.ScenarioRunner;
+import cz.vutbr.fit.ags.parity.spec.ScenarioSpec;
+import cz.vutbr.fit.ags.parity.spec.ScenarioSpecParser;
+
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
+/**
+ * The end-to-end smoke scenario #12 could not have: a real scenario, run through
+ * {@link OpenCybeleLauncher} against the real application, recorded and compared as a golden
+ * (<a href="https://github.com/bedaHovorka/OpenCybele1/issues/13">#13</a>, last acceptance
+ * criterion).
+ *
+ * <pre>{@code
+ * cd ../wt/opencybele-ref && ./gradlew installDist
+ * ./gradlew characterizationIT -Popencybele.dist=/abs/path/wt/opencybele-ref/build/install/opencybele \
+ *     -Dgolden.record=true      # record; drop the flag to compare
+ * }</pre>
+ *
+ * <p>Without {@code -Popencybele.dist} this test is <strong>skipped</strong>, not failed: the
+ * harness lives on a branch that carries no implementation, and having to check one out to build
+ * would defeat the split #11 chose. {@code OpenCybeleLauncherIT} still runs, and still asserts
+ * every property of the adapter that does not need a child.
+ */
+class OpenCybeleSmokeIT {
+
+    private static final String SCENARIO = "opencybele-smoke";
+
+    @Test
+    @DisplayName("the real application runs end to end through OpenCybeleLauncher and matches its golden")
+    void openCybeleSmokeScenarioMatchesGolden() {
+        assumeTrue(OpenCybeleLauncher.isAvailable(), OpenCybeleLauncher.unavailableMessage());
+
+        ParityLayout layout = ParityLayout.fromSystemProperties();
+        ScenarioSpec spec = ScenarioSpecParser.parse(layout.scenariosDir().resolve(SCENARIO + ".yaml"));
+
+        // ScenarioRunner already does the load-bearing work: bounded waitFor (a timeout is
+        // HARNESS_TIMEOUT and can never pass), exit classification, the error scan on the RAW
+        // stream, liveness, then normalize and record-or-compare. What is asserted below is what
+        // this adapter adds on top and what would otherwise fail silently.
+        RunReport report = ScenarioRunner.usingDefaultLayout().run(spec, new OpenCybeleLauncher());
+
+        List<String> raw = report.captured().lines();
+        List<String> trace = report.normalized();
+
+        assertPropertiesReachedTheChild(raw);
+        assertConfigurationDidNotReachTheTrace(trace);
+        assertTraceIsTheCanonicalOne(trace);
+        assertNothingThrew(raw);
+
+        if (GoldenStore.recording()) {
+            System.out.println("parity: recorded " + trace.size() + " line(s) to " + report.goldenFile());
+        }
+    }
+
+    /**
+     * <strong>Proof that the {@code -D} flags actually arrived.</strong>
+     *
+     * <p>This is the failure this issue was written around. {@code -D} flags handed
+     * <em>positionally</em> to a Gradle start script are routed to the program's arguments and set
+     * no system property at all — measured: a positional {@code -Dsim.random.masterSeed=20080415}
+     * drew a different seed while the same value in {@code OPENCYBELE_OPTS} pinned it. A golden
+     * recorded under a silently ignored seed is the worst outcome available here, so the adapter
+     * invokes {@code java} directly and the arrival of the properties is <em>measured</em> out of
+     * the child's own resolved-configuration banner rather than assumed.
+     *
+     * <p>The scenario's design makes the check total rather than sampled: every value it passes
+     * differs from the application's default, so a wholly ignored command line could not reach this
+     * assertion at all — with no {@code sim.stop.*} the run has no bound and the harness kills it.
+     */
+    private static void assertPropertiesReachedTheChild(List<String> raw) {
+        for (String expected : List.of(
+                "sim.random.masterSeed = 20080415",   // default: a DRAWN number
+                "sim.stop.maxClockMs = 25000",        // default: 0, i.e. no bound at all
+                "sim.headless = true",                // default: false
+                "sim.trace.enabled = true",           // default: false — no probe, no trace
+                "sim.clock.pace = 8",                 // default: 1
+                "sim.arrival.lambdaMs = 2000")) {     // default: 8500
+            assertTrue(raw.stream().anyMatch(line -> line.startsWith(expected)),
+                    "the child's resolved-configuration banner does not show '" + expected
+                            + "', so the property this scenario declares never reached the JVM."
+                            + " That is the silent-ignore failure #13 exists to rule out.");
+        }
+        assertFalse(raw.stream().anyMatch(line -> line.contains("drew ")),
+                "the seed was drawn rather than pinned: -Dsim.random.masterSeed did not arrive.");
+    }
+
+    /**
+     * <strong>Proof that the banner defect is fixed.</strong> All ~20 {@code sim.* = value} lines
+     * are stderr diagnostics that {@code redirectErrorStream(true)} folds into the trace and that
+     * none of #12's default prefixes matched. {@link OpenCybeleLauncher#CONFIG_BANNER_PREFIX}
+     * declares them; this asserts the declaration works against the real output, so the hole cannot
+     * reopen the next time someone adds an unprefixed stderr line.
+     */
+    private static void assertConfigurationDidNotReachTheTrace(List<String> trace) {
+        List<String> leaked = trace.stream().filter(line -> line.startsWith("sim.")).toList();
+        assertTrue(leaked.isEmpty(),
+                "configuration lines reached the normalized trace and would be recorded as"
+                        + " behaviour: " + leaked);
+        assertTrue(trace.stream().noneMatch(line -> line.contains("masterSeed")),
+                "the seed line must never be in a golden — unpinned it differs on every run");
+        assertTrue(trace.stream().noneMatch(line -> line.contains("Generator.interarrival")),
+                "#15's randomness manifest must not reach the golden either");
+        assertTrue(trace.stream().noneMatch(line -> line.startsWith("--- ")
+                        || line.startsWith("!!! ") || line.startsWith("  ")),
+                "no declared diagnostic shape may survive: " + trace);
+    }
+
+    /** The recorded artefact must be the canonical trace of #20, not just the two old printlns. */
+    private static void assertTraceIsTheCanonicalOne(List<String> trace) {
+        assertFalse(trace.isEmpty(), "the normalized trace must not be empty");
+        assertTrue(trace.stream().anyMatch(line -> line.matches("^vl\\d+\\|\\d+\\|PLAN_TRAIN\\|.*")),
+                "no canonical PLAN_TRAIN line: is sim.trace.enabled reaching the child?");
+        assertTrue(trace.stream().anyMatch(line -> line.matches("^st[A-H]\\|\\d+\\|STATION_INFO\\|.*")));
+        assertTrue(trace.stream().anyMatch(line -> line.matches("^vl\\d+ started$")),
+                "the application's own departure println is part of the contract and is missing");
+    }
+
+    /**
+     * Belt and braces over {@code ErrorScanner}, which has already run and would have failed the
+     * scenario. Named here because #13's acceptance list names it: a throwable in a Cybele handler
+     * is printed and the exit status is left alone, so a green exit proves nothing.
+     */
+    private static void assertNothingThrew(List<String> raw) {
+        List<String> hits = raw.stream()
+                .filter(line -> line.contains("AssertionError") || line.contains("Exception in thread \""))
+                .toList();
+        assertTrue(hits.isEmpty(), "the captured stream contains throwables: " + hits);
+    }
+}

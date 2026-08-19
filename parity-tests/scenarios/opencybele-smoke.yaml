@@ -1,0 +1,173 @@
+# The first scenario that runs a REAL implementation.
+#
+# smoke-stub.yaml proves the SPI with no application present; this one proves the same pipeline
+# against the OpenCybele baseline through OpenCybeleLauncher (#13) -- build a command line, start a
+# child JVM by path, capture the merged stream, scan it for throwables, classify the exit status,
+# assert liveness, normalize and compare a golden. Scenario coverage proper is #23.
+#
+# Format: docs/parity-harness.md.
+
+id: opencybele-smoke
+description: >
+  Bounded 25 s (simulated) headless run of the reference implementation with the canonical trace
+  probe on, at a pinned seed. Everything the run depends on is declared here; nothing is taken from
+  a default.
+
+# ---------------------------------------------------------------------------------------------
+# WHY summary AND NOT strict OR causal
+#
+# Measured, not assumed. Three runs of exactly this configuration, back to back at the pinned seed,
+# produce 623 normalized lines each and the same 5 departures -- and still differ from one another
+# on well over half of those lines, because FIVE numeric families in the trace derive from a clock
+# that advances with the wall clock and are re-read on every run: field 2 (`tick`) on every line,
+# the `expected=` of VOTE_REQUEST, the `planned=` of VOTE_RESULT, the `diff=` of VOTE, and the
+# number in the application's own "<train> in <station> at <n>" println. A sixth value,
+# STATION_INFO's `occupied`, is a race that no capture point removes. See docs/trace-format.md,
+# "Five families that change on every run" -- measured there as strict false at line 30 and causal
+# false with 67 failures over two back-to-back runs at one pinned seed.
+#
+# Projecting those away is #21's job and it has not landed. Until it does:
+#
+#   * `strict` compares line for line -- impossible today.
+#   * `causal` compares each entity's ordered projection EXACTLY, and compares the unattributed
+#     bucket (every STATION_INFO, ROAD_STATE, PATH_FIND line) exactly and with no tolerance at all.
+#     Also impossible today, and for the same reason.
+#   * `summary` compares how many distinct trains the run produced and one count per rule below.
+#     Those are stable at this size, so this is the strongest level that actually holds.
+#
+# Declaring `strict` here and re-recording the golden whenever it flaked is exactly what Phase1.md
+# L7 forbids. The recorded artefact is the FULL normalized trace at every level, so when #21 lands
+# this scenario can be tightened by editing one word -- with no re-recording.
+# ---------------------------------------------------------------------------------------------
+contract: summary
+golden: opencybele-smoke.txt
+
+launcher:
+  # Deliberately NO `config:` key. Every knob this run depends on is written out here, so the
+  # golden depends on the application binary and on nothing else -- not on the content of a
+  # scenarios/*.properties file that lives on another branch and could be edited there. (The
+  # adapter does support `config:`; OpenCybeleLauncherIT covers that path.)
+  #
+  # This also makes the "did the properties actually arrive?" question answer itself. Every value
+  # below differs from the application's default, and the defaults are what an ignored -D would
+  # produce: no bound at all, so the run would never end and the harness would kill it. A silently
+  # ignored property cannot look like a pass here. OpenCybeleSmokeIT additionally asserts the
+  # values back out of the child's own resolved-configuration banner.
+  properties:
+    sim.headless: "true"           # default false -- no display in the suite, and no Swing in a golden
+    sim.clock.pace: "8"            # default 1 -- wall-clock lever only; 8 simulated s per real s
+    sim.arrival.lambdaMs: "2000"   # default 8500 -- the densest rate measured to reproduce
+    sim.station.voteWindowMs: "2000"   # kept equal to lambda; see scenarios/short.properties
+    sim.arrival.firstFireMs: "200" # default 1000
+    sim.random.masterSeed: "20080415"  # default: a DRAWN number. A golden is recorded against a
+                                       # seed, never against a draw.
+    sim.trace.enabled: "true"      # default false -- the canonical trace is the contract (#20)
+    # -----------------------------------------------------------------------------------------
+    # THE BOUND, AND WHY IT IS 25000 AND NOT A ROUND 30000
+    #
+    # `Cybele.terminate()` tears the comm service down while agent threads are still running, so a
+    # train agent whose constructor is in flight at the stop instant reaches
+    # `Activity.openChannel` after `commReceiver` has been nulled and the kernel prints
+    #
+    #     *** Activity.init  ->
+    #     ... Caused by: java.lang.NullPointerException: Cannot invoke
+    #         "cybele.comm.CommReceiver.requestChannel(...)" because "commReceiver" is null
+    #         at cz.vutbr.fit.ags.xhovor07.Train.<init>(Train.java:54)
+    #
+    # AFTER the stop banner. That is a baseline shutdown defect, not a harness one, and the error
+    # scan is right to fail on it -- so this scenario does not exempt it. It avoids it instead.
+    #
+    # A train agent is created at PLAN time, so the exposure is the wall-clock gap between the last
+    # arrival and the bound. At this seed the arrivals land at simulated 1328, 4136, 9872, 12984,
+    # 15944, 17552, 18248, 18536, 21224, 27328, ... A bound of 30000 sits 0-40 simulated ms after
+    # an arrival, i.e. ~5 ms of wall clock at pace 8: measured 1 failure in the first full-suite
+    # run and 3 in 8 runs under an 8-way CPU load. A bound of 25000 sits inside the 6.1 s arrival
+    # gap, ~480 ms of wall clock clear of the last train creation: measured 0 in 14 runs under the
+    # same 8-way load and 0 in 10 unloaded harness runs, with byte-identical counts throughout.
+    #
+    # So this number is load-bearing. Moving it is not a cosmetic edit -- re-derive the gap from
+    # the PLAN_TRAIN ticks first.
+    # -----------------------------------------------------------------------------------------
+    sim.stop.maxClockMs: "25000"   # default 0 (off). The bound. ~3.1 s of wall clock at pace 8.
+    sim.stop.wallClockMs: "60000"  # default 0 (off). Safety net; exit 3, never a pass.
+    sim.stop.stallMs: "10000"      # default 0 (off). Generation died; exit 4, never a pass.
+                                   # Sized above the 6.1 s simulated arrival gap (762 ms wall).
+
+run:
+  # Well above the child's own 60 s safety net, because this is the backstop for the case where the
+  # child's net did NOT fire: ~1 run in 45 hangs outright with a clean process and nothing in the
+  # stream (DEF-22), which sim.stop.stallMs structurally cannot catch -- it measures the gap
+  # between generated trains, and a hang after the last one leaves no gap to grow. Killing the
+  # child is reported as HARNESS_TIMEOUT and can never pass.
+  harnessTimeoutMs: 120000
+  expect: bound-reached
+
+# Mandatory, and load-bearing here rather than ceremonial: the failure this catches is a run that
+# exits 0, prints a stop banner and contains not one line to grep for, because a throwable in
+# Generator.generateTrain stopped generation before its timer re-armed. Floors sit well under the
+# measured values (9 trains planned, 5 departed, 48 STATION_INFO, 40 ROAD_STATE) so that ordinary
+# drift is not a failure, while a dead or gutted run is.
+#
+# Liveness matches RAW lines, so these patterns see the trace before any projection -- which is why
+# they carry the `tick` field that #21 will later project away.
+liveness:
+  # The generator ran.
+  - pattern: '^(vl\d+)\|\d+\|PLAN_TRAIN\|'
+    distinctGroup: 1
+    atLeast: 6
+  # The election, the movement protocol and the destructor all ran, per train.
+  - pattern: '^(vl\d+)\|\d+\|TRAIN_STATE\|'
+    distinctGroup: 1
+    atLeast: 6
+  # Trains actually departed -- the application's own two printlns, which predate the probe.
+  - pattern: '^vl\d+ started$'
+    atLeast: 3
+  - pattern: '^(vl\d+) in st[A-H] at \d+$'
+    distinctGroup: 1
+    atLeast: 3
+  # The static objects reported state too, so a port that emits only train lines fails here.
+  - pattern: '^st[A-H]\|\d+\|STATION_INFO\|'
+    atLeast: 25
+  - pattern: '^tr\d+\|\d+\|ROAD_STATE\|'
+    atLeast: 20
+
+# Field 1 of a canonical line is the SUBJECT of the message, and for eleven of the fifteen channels
+# that is a train -- so this reads the entity id with no payload scanning. Station and track lines
+# carry no train and land in the unattributed bucket, which `summary` does not compare.
+#
+# Entity patterns match NORMALIZED lines (liveness ones match raw), which is why this pattern is
+# written against the canonical shape rather than copied from a liveness rule above.
+entity:
+  pattern: '^(vl\d+)\|'
+  group: 1
+  # Measured: 9 distinct trains in every one of 3 unloaded and 14 CPU-saturated runs. One either
+  # way absorbs the watchdog's 10 ms poll landing on the far side of an arrival -- the bound stops
+  # the run "at or just past" 25000 simulated ms, not exactly on it.
+  tolerance:
+    missing: 1
+    extra: 1
+
+summary:
+  # Every count below was measured three times unloaded and fourteen times under an 8-way CPU
+  # load; the tolerance is the drift those 17 runs showed, not a knob turned until the suite went
+  # green. Train-level counts did not move at all; the per-message counts drifted by 2 under
+  # saturation, because the run is halted promptly once the bound fires and the last few in-flight
+  # messages are simply not printed.
+  - label: trains-planned            # 9 in 17/17 runs
+    pattern: '\|PLAN_TRAIN\|'
+    tolerance: 1
+  - label: departures                # 5 in 17/17 runs
+    pattern: '^vl\d+ started$'
+    tolerance: 1
+  - label: departure-printlns        # 5 in 17/17 -- the pre-probe println, kept in the contract
+    pattern: '^vl\d+ in st[A-H] at \d+$'
+    tolerance: 1
+  - label: train-state-events        # 49 unloaded, 47 saturated
+    pattern: '\|TRAIN_STATE\|'
+    tolerance: 6
+  - label: enter-events              # 38 unloaded, 36 saturated -- the movement protocol
+    pattern: '\|ENTER\|'
+    tolerance: 6
+  - label: station-info-events       # 48 unloaded, 46 saturated
+    pattern: '\|STATION_INFO\|'
+    tolerance: 6
