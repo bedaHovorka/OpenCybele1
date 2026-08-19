@@ -12,6 +12,8 @@
 > `seeded-rng.md` (#15), `headless-and-stop.md` (#17), `kernel-config.md` (#16),
 > `trace-format.md` (#20), `assertion-triage.md` (#14), `iteration-order.md` (#19),
 > `scenario-config.md` (#18).
+>
+> **Supersedes `docs/INVENTORY.md` in two places.** **DEF-08 is de-claimed** — it is not a defect, and "fixing" it leaks station occupancy on every arrival (§4.2). **DEF-18**'s capacity threshold is >= 1, not >= 2, and is now enforced at startup (§4.4). Everything else in `INVENTORY.md` stands.
 
 ---
 
@@ -30,7 +32,11 @@ JVM session, runs mostly agree; across sessions the outcome shifts to a *differe
 Measured: 114 consecutive headless runs at one seed gave **one** departure-id sequence, and a later
 session gave a second sequence in **7 of 9** runs — same binary, same files
 (`kernel-config.md:99-118`). The same shape was reproduced independently as three runs uniformly on
-one branch and three later runs uniformly on the other (`trace-format.md:577-584`).
+one branch and three later runs uniformly on the other (`trace-format.md:577-584`), and again on a
+third axis: **two sessions of three runs each gave 4 distinct id-sets over 6 runs**, with
+within-session pairwise differences of **0–1 ids** against across-session differences of **10–13**,
+and a marker id departing in every run of one session and no run of the other (coordinator,
+during this triage session — raw data and protocol in §7.4(i)).
 
 > **Consequence, and it governs this whole document: consecutive runs cannot validate a scenario.**
 > Three green runs in a row are the *expected* output of a stable mode, not evidence of
@@ -90,7 +96,7 @@ found on either branch.
 | **DEF-12** | `RailwayObject.java:27-31`, called from `PathFinding.java:35` | `getName()` reads the **thread-context** `Agent.getAgentId()`, so it returns the *caller's* agent name, not the receiver's. | **Inferred** (#9), from the call graph: correct today only because ACT-04 (`PathFinding`) is an activity of the *same* agent as the station it reads. | Record as a **load-bearing invariant**: any cross-agent `getName()` call silently returns the wrong name. Nothing to pin in a trace — it is correct today. | N/A today. A port that reifies `getName()` as a field is *more* correct and still trace-identical. |
 | **DEF-14** | `RoadAgent.java:100` | `traveledTrain` is a single slot overwritten by every `travelStart`; `travelEnd` (`:113-116`) notifies whatever is in it. | **Measured** (#14): safe today because the road is single-occupancy — the guard `assert state != State.FREE` (`RoadAgent.java:151`) was evaluated **160×** and held, as was `assert traveledTrain != null` (`:114`), **160×**. | Record as an invariant: **one train per road segment**. Pinned indirectly by the `ROAD_STATE` stream. | A port that permits two trains on one road is a port bug regardless of what the golden says. |
 | **DEF-16** | `RoadAgent.java:102` (TMR-04): `delayInSeconds() + (long)(500*nextGaussian())` | Travel delay goes **negative** for 1 s roads. Cybele fires a negative-delay timer **immediately** ⇒ an *instantaneous traversal*. Not a lost train, not an error. | **Measured** (#9): `delay=-1500` → callback in **1–5 ms**; control `delay=2000` → **2001–2010 ms**. Rate **measured** (#15): 0.02263 over the seeded streams vs analytic 0.0228. **Re-measured [this issue]**, 2×10⁶ draws: **2.2645 %** for `tr1`/`tr2`. | Pinned by the seed — `sim.random.masterSeed` reproduces the same negative draws at the same positions in each road's stream (#15). Also L1-testable (#28) on the extracted delay expression. | An instantaneous traversal in the golden is **correct**. A port that clamps to 0 produces a diff and **that is the port bug**. |
-| **DEF-08** | `Train.java:123-126` | **DE-CLAIMED — see §4.2.** `INVENTORY` records a "second `LEAVE` for the final station". It is not one: `entered` leaves the **old** position, `destroy` leaves the **current** one. | **Measured [this issue]**, one 66-train traced run: **199 `LEAVE` records, zero `(train, object)` pairs with more than one.** | Nothing to pin as a defect. Pin the **shape**: the `destroy()` `LEAVE` is what *balances* the destination station's `occupied++`, and a port that drops it leaks occupancy forever. | A completed train **must** emit a final `LEAVE` to its destination immediately before `TRAIN_STATE state=KILL`. Its absence is a port bug. |
+| **DEF-08** | `Train.java:123-126` | **DE-CLAIMED — `INVENTORY` DEF-08 is SUPERSEDED, see §4.2.** `INVENTORY` records a "second `LEAVE` for the final station". It is not one: `entered` leaves the **old** position, `destroy` leaves the **current** one. | **Measured [this issue]**, one 66-train traced run: **199 `LEAVE` records, zero `(train, object)` pairs with more than one.** | Nothing to pin as a defect. Pin the **shape**: the `destroy()` `LEAVE` is what *balances* the destination station's `occupied++`, and a port that drops it leaks occupancy forever. | A completed train **must** emit a final `LEAVE` to its destination immediately before `TRAIN_STATE state=KILL`. Its absence is a port bug. |
 | **DEF-19** | `RoadAgent.java:190` | Class-name typo `OueueItem`. | Static, trivial. | Nothing. Load-bearing only for grep-based refactoring. | N/A. |
 | **DEF-20** | `RailwayMainAgent.java:155,166,178`, bound by string literal at `:119`, `:128`, `Generator.java:59` | Handler names misspelled (`recieve…`) and bound reflectively **by string**. Renaming the method without the literal fails **silently at runtime**. | Static (#9). | Record as an invariant. Nothing observable today. | N/A. A port that renames them correctly is trace-identical. |
 
@@ -110,7 +116,7 @@ found on either branch.
 
 | id | Site | What it does | Evidence | Why it cannot be pinned | What #39 must do |
 |---|---|---|---|---|---|
-| **DEF-02** | `Planning.java:126` — the author's own `//BUG ne vzdy se doruci` | `Activity.sendAll(START+train, …)` may reach the channel **before** the `Train` agent has executed `Activity.openChannel(START+…)` at `Train.java:54`. Per **SEM-06** such a send is **silently dropped**, and the train never starts. **Issue item 1.** | **Measured** (#15), `short.properties` at 45 s, three runs at one seed: 80 departures each, **departure-id sets differing by 12, 10 and 2 ids**, with the generator stream identical (same highest id `vl663`, origins agreeing for all 74 shared ids). **Measured** (coordinator, `kernel-config.md:174-176`), three headless runs at ~69 departures: pairwise id-set differences of **0, 1 and 1**, the single difference being **`vl550` missing from one run entirely**. | **A dropped train is ABSENT, not reordered.** No normalisation recovers a line the run never printed. And it is **not a density cliff** — the model is a *stochastic drop with no threshold*: "Density raises the rate; it does not switch anything on." (`kernel-config.md:179-181`). Scenario choice suppresses the rate; **no arrival rate removes the hazard**. | **Do not file.** Re-run the baseline recording. Compare **departure-id sets**, across **separate sessions**. A train present in the port and absent in the golden (or the reverse) is a baseline artefact until a cross-session re-record says otherwise. |
+| **DEF-02** | `Planning.java:126` — the author's own `//BUG ne vzdy se doruci` | `Activity.sendAll(START+train, …)` may reach the channel **before** the `Train` agent has executed `Activity.openChannel(START+…)` at `Train.java:54`. Per **SEM-06** such a send is **silently dropped**, and the train never starts. **Issue item 1.** | **Measured** (#15), `short.properties` at 45 s, three runs at one seed: 80 departures each, **departure-id sets differing by 12, 10 and 2 ids**, with the generator stream identical (same highest id `vl663`, origins agreeing for all 74 shared ids). **Measured** (coordinator, `kernel-config.md:174-176`), three headless runs at ~69 departures: pairwise id-set differences of **0, 1 and 1**, the single difference being **`vl550` missing from one run entirely**. **Measured** (coordinator, during this triage session — §7.4(i)), two sessions of three runs each over a common simulated window: within-session pairwise id-set differences **0, 0, 1**; across-session **10 and 13**; **4 distinct id-sets over 6 runs**, the mode constant within a session and flipping between them. | **A dropped train is ABSENT, not reordered.** No normalisation recovers a line the run never printed. And it is **not a density cliff** — the model is a *stochastic drop with no threshold*: "Density raises the rate; it does not switch anything on." (`kernel-config.md:179-181`). Scenario choice suppresses the rate; **no arrival rate removes the hazard**. | **Do not file.** Re-run the baseline recording. Compare **departure-id sets**, across **separate sessions**. A train present in the port and absent in the golden (or the reverse) is a baseline artefact until a cross-session re-record says otherwise. |
 | **DEF-22** | `Planning.java:88` `latch.await()` — no timeout | The latch is sized `path.size()` at `:74` and counted down **only** from `VoteCollecting.java:54`. Lose one `countDown()` and ACT-01 hangs **forever**; no further train is planned for the rest of the run while `Generator` keeps creating `Train` agents that never start. **Issue item 2. The most severe latent failure in the codebase.** | **Measured** (#16): **2 hangs in 90 runs (~2 %, roughly 1 in 45)**, *at the stock configuration* — precision explicitly disclaimed ("2 in 90 is an estimate from a sample that was not designed to measure it"). **Silent**: clean exit `0`, and **zero** `AssertionError` / `Exception in thread "` across **146** measurement runs. Two proven triggers: a `VOTE_REQUEST` dropped by SEM-06, and DEF-09's late-vote NPE. | It is invisible to every cheap detector. **`sim.stop.stallMs` structurally cannot catch it**: `lastTrainNanos` is stamped from `RunControl.trainGenerated` (`RunControl.java:443`), whose sole caller is `Generator.java:84` — and `Generator` is fire-and-forget, so it keeps running while `Planning` is wedged. The two activities do **not** head-of-line-block each other: `Agent.createActivity` passes `ConcurManagement.CONCURRENT`, and `IAIConcurManagement.getRunnable` **list-iterates** and returns the first *runnable* node, skipping a blocked one (**proved in bytecode**, #16 — explicitly *not* an appeal to SEM-04, which covers only seriality within one activity). | **Do not file.** But this row's real addressee is **#24**: see the recording gate in §6. If a diff shows the golden's departure stream truncating mid-run with exit 0, the *recording* was wedged. Re-record. |
 | **DEF-01** | `Station.java:105` + `PathFinding.java:47` | Untimed `wait()` with **no predicate loop**, woken by `notify()` (not `notifyAll`) from a different activity. On a spurious or mis-targeted wakeup, `pathDirs.get(target)` returns `null`; that `null` travels as `nextPosition`, and `Train.entered` (`Train.java:87-93`) reads a `null` `nextPosition` as *arrived* and calls `Agent.die()` **mid-route**. | **Never observed.** `assert direction != null` (`RailwayMainAgent.java:147`) evaluated **21×**, held; `Util.java:85`'s matching precondition likewise 21×, held (#14). Spurious wakeup is a JLS-sanctioned hazard: the code *permits* it, nothing makes it *happen*. | Occurrence is unbounded in time and unreproducible on demand. | **Do not file.** A train that vanishes without reaching its `to`, or a `null` `next=` on an `ENTER_REPLY`, is out-of-contract. Re-run the baseline. **Note the `-ea` interaction** (§5): with assertions **on**, `assert position.equals(to)` (`Train.java:91`) fires *before* `Agent.die()`, so the symptom changes from *train vanishes* to *train wedged, loudly*. |
 | **DEF-23** | `Station.java:105` | The **no-wakeup** branch of the same line (DEF-01 covers the spurious-wakeup branch). A `PATH_FIND` dropped on the way out, or a `PATH_FIND_REPLY` lost on the way back, stalls **that station permanently** — every `enter`, `leave`, `voteRequest` and `voteResult` on it starves behind the blocked handler (SEM-04), which can then hang the next election on DEF-22. | **Never observed.** 21 `PATH_FIND` / 21 `PATH_FIND_REPLY` pairs in the traced runs; the guarding assertions held. | Same as DEF-22, one level down; same silence. | **Do not file.** A station that stops emitting `STATION_INFO` mid-run is a wedged baseline. Re-record. |
@@ -152,7 +158,11 @@ for a train already in the queue — a different defect, not this one, and not o
 This matters because #34 and #31 would otherwise "fix" a comparator that is correct, and any change
 to it *is* a behaviour change under the scope guard.
 
-### 4.2 DEF-08 is de-claimed — measured
+### 4.2 DEF-08 is DE-CLAIMED — `docs/INVENTORY.md` DEF-08 is SUPERSEDED by this section
+
+> **Read this before acting on `docs/INVENTORY.md` DEF-08.** That entry describes a defect that does
+> not exist, and "fixing" it breaks the simulation. #39 and the port authors will read one document
+> or the other; this section is the one that is right.
 
 `INVENTORY` DEF-08 asserts that `destroy()`'s `leaveObject(position)` sends a **second** `LEAVE` for
 the final station, so `Station.leave` "decrements `occupied` twice or wrongly admits a queued train".
@@ -435,16 +445,81 @@ Recorded because the shape is a **false positive generator**: #39 will see out-o
 every golden and must not read them as evidence of anything. Departure order is by *planned
 departure*, never by id.
 
-### 7.4 Corrections to claims that were handed to this issue
+### 7.4 Provenance of the figures handed to this issue
 
-Three figures circulating in the issue thread do not survive checking against the sources. Recorded
-so they are not propagated:
+Three figures reached this issue without a citation. Chasing them found that **two were real but
+had never been written into a committed doc** — they are the coordinator's own measurements from
+this triage session. They are recorded here in full, with attribution, because an uncited number is
+exactly the failure mode this document exists to prevent. The third was a genuine conflation.
 
-| Claim as received | What the sources actually say |
-|---|---|
-| "the load-ceiling claim was inflated **~10×** by measuring on display `:0`" | The retraction is real and important, but **no ~10× figure exists**. The literal numbers are: `:0` gave **12 distinct normalised traces over 26 runs** against **2 distinct id-sequences over 123 runs** headless (`kernel-config.md:170-172`) — a 6× reduction in distinct-outcome count over 4.7× the runs; and separately, `:0` id-set differences of **5–10 ids** collapsing to **zero** on an isolated display (`:63-70`). What was retracted is the **interpretation** — that a *density cliff* exists — not the observations. `scenarios/short-bounded.properties`'s header still describes the ceiling as real and should be updated. |
-| "**4 distinct id-sets over 6 runs**" | Not found in any source doc. The real cross-session figures are **two** sequences in 9 runs (`kernel-config.md:102`) and **7 of 9** reproducing the variant; plus "**six different orders in six runs**" — which is *agent constructor order* (`seeded-rng.md:79-87, :357`), a different quantity. The two-scale conclusion stands; this particular number does not. |
-| "3 headless runs of ~69 departures had one run missing **`vl550`**" | **Confirmed** (`kernel-config.md:174-176`), coordinator's measurement: pairwise id-set differences of 0, 1 and 1, the single difference `vl550` missing entirely, generator stream identical (same maximum id `vl663`). Note `trace-format.md:577-584` reports a *different* pair, `vl19`/`vl50`, at the `maxClockMs` boundary — two distinct observations, not one garbled one. |
+#### (i) Session-level mode-switching — 4 distinct id-sets over 6 runs
+
+**Measured by the coordinator during #22's triage session; headless; not present in any prior
+committed doc.** `short.properties`, seed `20080415`, bounded `sim.stop.maxClockMs = 350000`, two
+groups of three runs, compared over a **common simulated window `t <= 300000`** so the ragged tail at
+the bound is not counted:
+
+```
+session 1:  n = 69, 69, 68      pairwise id-set diffs:  1v2 = 0,   1v3 = 1
+session 2:  n = 68, 70, 70      pairwise id-set diffs:  2v3 = 0,   1v2 = 10
+across sessions (run 1 vs run 1):                             13 differing ids
+md5 of the sorted id-sets, all six runs:  4 distinct values, two appearing twice
+```
+
+The structure is visible in marker ids: **every run in session 1 departs `vl112` and `vl319`; every
+run in session 2 departs `vl107` and `vl315`.** So the finding is not "runs differ" — the **mode is
+constant within a session and flips between sessions**. Within-session pairwise differences are 0–1
+ids; across-session differences are 10–13.
+
+This is the same phenomenon `kernel-config.md:99-118` records as one sequence in 114 consecutive runs
+against a second sequence in 7 of 9 later runs, observed on a different axis and at a different run
+length. **It is the direct evidence for §1's rule that consecutive runs cannot validate a scenario**,
+and it is why DEF-02 is class (c) rather than (b): a scenario validated three times inside one
+session has demonstrated only that the mode did not flip while you were watching.
+
+*Standing: reported to this issue as raw data and recorded verbatim. **Not independently re-run by
+this document** — the six-run, two-session protocol is the one thing that cannot be verified cheaply,
+by construction.*
+
+#### (ii) Display `:0` contamination — record the two raw figures, not the ratio
+
+**Measured by the coordinator during #22's triage session; not present in any prior committed doc.**
+Same scenario family, two run conditions:
+
+| Condition | Run length | Pairwise departure-id differences | Out of |
+|---|---|---|---|
+| Display `:0` | `short.properties`, 45 s | **12, 10, 2** | 80 departures |
+| Headless | as (i) above | **0, 1, 1** | ~69 departures |
+
+The "~10×" that reached this issue is the ratio of the worst `:0` figure to the worst headless one
+(12 vs 1). It is a ratio between two of the coordinator's own measurements **at different run
+lengths**, not a documented constant, and it is recorded here as the **two raw figures with no
+ratio** — which is what it supports.
+
+The contamination itself is real and was **independently reproduced by #16** (`kernel-config.md:63-70`:
+`:0` id-set differences of 5–10 collapsing to **zero** on a private display; `:170-172`: 12 distinct
+normalised traces over 26 runs on `:0` against 2 distinct id-sequences over 123 runs headless).
+**What was retracted is the *density-cliff interpretation*, not the observation.**
+
+*Operational rule, unchanged and now doubly sourced: **never record or validate a golden on display
+`:0`.** `scenarios/short-bounded.properties`'s header still describes the load ceiling as a real
+density threshold and should be updated to match the retraction.*
+
+#### (iii) "Six different orders in six runs" — a genuine conflation
+
+This figure is `seeded-rng.md:79-87` and `:357`, and it measures **agent constructor order**, not
+departure sequences. The brief that reached this issue attached it to run-to-run departure
+variation. The reading in §3.2's *agent init order* row is the correct one; the figure does not bear
+on DEF-02.
+
+#### (iv) `vl550` — confirmed, and distinct from the boundary observation
+
+**Confirmed** (`kernel-config.md:174-176`): three headless runs at ~69 departures, pairwise id-set
+differences of 0, 1 and 1, the single difference being `vl550` **missing from one run entirely**,
+with the generator stream identical (same maximum id `vl663`). Note that `trace-format.md:577-584`
+reports a *different* pair — `vl19`/`vl50`, at the `maxClockMs` boundary. **Two distinct
+observations, not one garbled one:** `vl550` is an interior drop (DEF-02 proper, class (c));
+`vl19`/`vl50` is the ragged tail (class (b), excluded by scenario choice).
 
 ---
 
@@ -487,6 +562,17 @@ compare departure-id sets. If the diff is a **timestamp**, a **`STATION_INFO.occ
 port. Everything else — an `ENTER_REPLY`/`LEAVE` pair in the wrong order, a missing final `LEAVE`
 before `KILL`, a clamped travel delay, a road tie broken by direction frequency, a `capacity` value —
 **is a port bug, and this document is the reason you can say so.**
+
+> **One `-ea` consequence #39 must know before reading a stack trace.** Because goldens are recorded
+> with assertions **on** (§5), DEF-01's classic symptom is **masked**: `assert position.equals(to)`
+> (`Train.java:91`) fires *before* `Agent.die()`, so a mid-route death appears as a **wedged train
+> plus an `AssertionError` on stderr**, not as a train silently vanishing. That stack trace is a
+> **class-(c) baseline artefact, not a port bug** — discard the recording and re-run in a fresh
+> session. The trade is deliberate and favourable: the wedge is detectable and the vanishing was not.
+> The same applies to an `AssertionError` at `Planning.java:96`, `Planning.java:124`,
+> `VoteCollecting.java:53`, `Train.java:73`, `Train.java:95` or `RailwayMainAgent.java:147` — all six
+> sit downstream of DEF-02, DEF-09 or DEF-22, all class (c). **No `AssertionError` is ever a port
+> bug on its own**; it aborts the recording and comes back here for classification.
 
 ---
 
