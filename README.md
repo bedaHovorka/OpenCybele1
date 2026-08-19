@@ -85,12 +85,18 @@ OPENCYBELE_OPTS=-Dsim.config=scenarios/short-bounded.properties \
 | `sim.stop.wallClockMs` | `0` (off) | **failure** — wall-clock safety net |
 | `sim.stop.stallMs` | `0` (off) | **failure** — no train generated for this long |
 
-Exit codes: `0` a declared bound (or the window closed), `1` configuration/startup error,
+Exit codes: `0` a declared bound was reached (or the window of an *unbounded* run was closed),
+`1` configuration/startup error, `2` the window was closed while a bound was armed and unreached,
 `3` the wall-clock safety net fired, `4` train generation stalled, `5` the simulation clock does
-not answer its command channel. **A timeout never exits 0** — a run that did not reach its bound
-must not look like a pass. Details, the exit-code mechanics (`Cybele.terminate()` exits 0 and
-never returns, so the status is forced from a shutdown hook) and the clock-registration race that
-headless mode exposes: [`docs/headless-and-stop.md`](docs/headless-and-stop.md).
+not answer its command channel. Plus `255`, which is not this mechanism's: a throwable escaping
+`RailwayMainAgent`'s constructor exits the JVM with it, loudly, before any banner. **A run that
+did not finish never exits 0** — it must not look like a pass.
+
+`sim.stop.maxTrains` is exact; `sim.stop.maxClockMs` stops at or just past its bound; **neither is
+a trace-length bound** — trains already planned but not yet departed simply never print. Details,
+the exit-code mechanics (`Cybele.terminate()` exits 0 and never returns, so the status is forced
+from a shutdown hook) and the clock-registration race that headless mode exposes:
+[`docs/headless-and-stop.md`](docs/headless-and-stop.md).
 
 Without any `sim.stop.*` key the process still runs until it is killed, so wrapping it works as
 before:

@@ -32,7 +32,15 @@ import cybele.kernel.Cybele;
  *     {@code InvocationTargetException}, prints it to stderr and carries on with an
  *     unchanged exit status ({@code docs/assertion-triage.md}, Result 3). So a failure
  *     detected inside an agent has to <em>exit the process itself</em>; throwing is not
- *     an option, and neither is returning an error to a caller that does not exist.</li>
+ *     an option, and neither is returning an error to a caller that does not exist.
+ *     <br>
+ *     <b>Agent <em>construction</em> is a different path, and it is not silent.</b>
+ *     Measured by injecting a throw at {@link RailwayMainAgent}'s {@code createClock}
+ *     line: the JVM exits <b>255</b> in about 0.26 s, with the stack trace on stderr, no
+ *     stop banner and this class' exit code never set (3/3 here, 4 configurations
+ *     independently). That is loud rather than silent, but it is a status outside the
+ *     table below, so a harness reading exit codes has to know about it. See
+ *     {@code docs/headless-and-stop.md}.</li>
  * <li><b>{@link Cybele#terminate()} never returns — it calls {@code System.exit(0)}.</b>
  *     Measured: a probe that printed a line after {@code terminate()} never printed it,
  *     and the process exited 0. An exit code therefore cannot be set <em>after</em>
@@ -52,6 +60,19 @@ public final class RunControl {
 
     /** A declared bound was reached and the run stopped cleanly. */
     public static final int EXIT_OK = 0;
+    /**
+     * The GUI window was closed while a {@code sim.stop.*} bound was armed and had not
+     * been reached.
+     * <p>
+     * Closing the window is the intended way to end an <em>unbounded</em> interactive run,
+     * and that still exits {@link #EXIT_OK}. But a run that declared a bound and was ended
+     * by a desktop, a session manager or a stray click did <b>not</b> reach that bound, and
+     * exiting 0 for it breaks the same rule {@link #EXIT_WALL_CLOCK_TIMEOUT} exists to
+     * enforce: a run that stopped early must not look like a pass. This is not
+     * hypothetical — three runs in the criterion-5 series were closed by the desktop at
+     * 2.3 s, and every one of them exited 0 before this code existed.
+     */
+    public static final int EXIT_WINDOW_CLOSED_EARLY = 2;
     /**
      * {@code sim.stop.wallClockMs} elapsed. A safety net firing is a <b>failure</b>: the
      * run did not reach the bound it declared, and a timeout that exited 0 would let a
@@ -79,13 +100,36 @@ public final class RunControl {
     private static final long PAUSE_POLL_MS = 5;
     /** How long one probe clock is given to prove the command path, ms. Measured: 5-10 ms. */
     private static final long PROBE_BUDGET_MS = 250;
-    /** How many probe clocks the barrier may burn before giving up. */
-    private static final int PROBE_ATTEMPTS = 40;
+    /**
+     * How long the barrier may keep trying, in total, before declaring the timer service
+     * dead. A <em>deadline</em> rather than an attempt count on purpose: an attempt count
+     * has to be set to the worst case somebody once saw on one machine, which is the same
+     * mistake as sleeping a constant. Measured cost on this machine is 14.7-274.2 ms and
+     * one to three probe clocks unloaded, up to four under load — so 30 s is roughly two
+     * orders of magnitude of headroom, and exit {@link #EXIT_CLOCK_CONTROL_DEAD} is the
+     * one code that must never cry wolf: #24 reads it as "every golden after this is
+     * worthless".
+     */
+    private static final long PROBE_DEADLINE_MS = 30000;
+    /** Secondary cap, so a pathological zero-cost failure cannot spin. Never the binding one. */
+    private static final int PROBE_ATTEMPTS = 2000;
     /** Pause between probe attempts that could not even create a clock, ms. */
     private static final long PROBE_RETRY_MS = 2;
     /** How long the real clock is given to answer its pause round-trip, ms. */
     private static final long CLOCK_CHECK_BUDGET_MS = 2000;
-    /** How long the clock must be observed to stay running after the round trip, ms. */
+    /**
+     * How long the clock must be observed to stay running after the round trip, ms.
+     * <p>
+     * This is the one constant here that is a <b>duration, not a condition</b>, and it is
+     * worth saying so rather than filing it under "wait for the thing itself": it watches
+     * for an event that was measured never to happen (a straggler pause landing after the
+     * resume). It is insurance against a slower machine reordering what was measured on
+     * this one, and it is also the largest cost this class adds to every run — including
+     * the default GUI run, where it shifts every printed timestamp by about
+     * {@code sim.clock.pace * 100} ms. The 250 ms and 2000 ms budgets are different in
+     * kind: they are self-correcting, since a budget that expires too early burns another
+     * probe id rather than passing a dead clock.
+     */
     private static final long SETTLE_MS = 100;
     /** How long {@link Cybele#terminate()} is given to end the JVM before we halt it. */
     private static final long TERMINATE_GRACE_MS = 5000;
@@ -157,7 +201,10 @@ public final class RunControl {
      * <li>≈1 ms — {@code createClock} itself throws
      *     {@code NullPointerException … TimerAgent.register … "this.ag" is null} (6/6 runs);
      *     the service object exists but its agent does not. In an agent constructor that
-     *     throwable is swallowed, so the run continues with no clock at all.</li>
+     *     throwable does <b>not</b> leave a running simulation behind: measured, the JVM
+     *     exits 255 with the stack trace on stderr and no stop banner. Loud, but with a
+     *     status no table names, and {@link #verifyClockControl} never runs — it is the
+     *     next statement.</li>
      * <li>≈3 ms — no throw, but the announcement is lost: {@code pauseClock} returns
      *     {@code true}, {@code isPaused()} stays {@code false} and the clock keeps
      *     advancing, for the life of the JVM.</li>
@@ -168,6 +215,15 @@ public final class RunControl {
      * {@code createClock} threw was still dead when re-created 16 ms later — so each
      * attempt below uses a fresh id.
      * <p>
+     * <b>Probe clocks are unreclaimable, not merely throwaway.</b> The Cybele API has no
+     * {@code destroyClock}, so every attempt leaves a {@code ContinuousClock}, a
+     * TimerAgent registration and a non-daemon thread parked on {@code wait} behind for
+     * the life of the JVM — and a <em>failed</em> attempt leaves its clock <b>running</b>,
+     * with late pause commands still in flight. This is inert: every clock API is keyed by
+     * id with no default-clock fallback, so a probe cannot leak into {@code getTime} or
+     * into the simulation's command path. It is not free either, which is a second reason
+     * the budget below is a deadline rather than a large attempt count.
+     * <p>
      * Sleeping a fixed few milliseconds would work today and rot the first time this runs
      * on a slower or busier machine. This waits for the thing itself instead: it creates a
      * throwaway clock and asks it to pause. {@code isPaused()} is the verdict because it
@@ -177,29 +233,52 @@ public final class RunControl {
      */
     public static void awaitTimerService() {
         final long t0 = System.nanoTime();
-        for (int attempt = 1; attempt <= PROBE_ATTEMPTS; attempt++) {
+        final long deadline = t0 + PROBE_DEADLINE_MS * 1000000L;
+        Throwable lastThrow = null;
+        int attempt = 0;
+        while (System.nanoTime() < deadline && attempt < PROBE_ATTEMPTS) {
+            attempt++;
             final String id = PROBE_CLOCK_PREFIX + attempt;
             probeClocksBurnt = attempt;
             try {
                 Cybele.createClock(id, Cybele.HOST, 0, 1);
             } catch (Throwable t) {
-                // TimerAgent not constructed yet. Its own message is the diagnosis; keep
-                // it, but do not let it look like a crash.
+                // Normally the TimerAgent simply is not constructed yet, and the throw IS
+                // the "not ready" signal. Nothing is matched on the type or the message:
+                // any throw is retried, which survives a kernel build that fails
+                // differently. But the last one is kept, because a throw that is NOT the
+                // known startup NPE would otherwise be spent here and never reported, and
+                // the failure below would name the wrong cause with no evidence.
+                lastThrow = t;
                 sleep(PROBE_RETRY_MS);
                 continue;
             }
             if (pauseLands(id, PROBE_BUDGET_MS)) {
                 timerServiceReadyNanos = System.nanoTime();
+                // The bounds' budgets start ticking here, not at startUp: whatever the
+                // barrier cost must not be charged to sim.stop.stallMs.
+                lastTrainNanos = timerServiceReadyNanos;
                 System.err.println("--- kernel timer service ready after "
                         + millis(timerServiceReadyNanos - t0) + " ms and " + attempt
                         + " probe clock(s) ---");
-                return;   // the probe clock stays paused; it is a throwaway and inert
+                return;   // the probe clock stays paused; see awaitTimerService's note
             }
         }
-        fail(EXIT_CLOCK_CONTROL_DEAD, "the kernel timer service never accepted a pause"
-                + " command on any of " + PROBE_ATTEMPTS + " probe clocks in "
-                + millis(System.nanoTime() - t0) + " ms. Nothing on this clock could be"
-                + " paced, paused or scheduled, so the run would be meaningless.");
+        final StringBuilder why = new StringBuilder();
+        why.append("the kernel timer service never accepted a pause command, over ")
+           .append(attempt).append(" probe clocks and ")
+           .append(millis(System.nanoTime() - t0))
+           .append(" ms. Nothing on any clock could be paced, paused or scheduled, so the")
+           .append(" run would be meaningless.");
+        if (lastThrow != null) {
+            why.append(" Last throwable from createClock was: ").append(lastThrow);
+        }
+        if (lastThrow != null) {
+            System.err.println("!!! last throwable from createClock during the barrier:");
+            lastThrow.printStackTrace();
+            System.err.flush();
+        }
+        fail(EXIT_CLOCK_CONTROL_DEAD, why.toString());
     }
 
     /**
@@ -219,6 +298,24 @@ public final class RunControl {
      * that point the clock carries no timers and no agent has been created, so pausing it
      * is inert, and the {@code resumeClock} that the code already performs is the other
      * half of the round trip. Nothing extra is sent to the clock the simulation runs on.
+     *
+     * <p>
+     * <b>Scope.</b> This catches the <em>silent</em> failure — the announcement dropped,
+     * the clock uncommandable, everything else apparently normal. It structurally cannot
+     * catch the other one: it is the statement immediately after {@code createClock} in
+     * the same constructor, so if {@code createClock} itself throws, this never runs. That
+     * mode is covered instead by the JVM exiting 255 (see the class Javadoc), which is
+     * loud enough not to need a check — the point of this one is that its failure mode
+     * has no symptom at all.
+     * <p>
+     * <b>It is not free of traffic on the real clock.</b> "Nothing extra is sent" would be
+     * wrong: at a 5 ms poll and a 107-135 ms round trip this issues roughly 20-27
+     * {@code pauseClock} commands and a {@code resumeClock}, then watches the clock for
+     * {@link #SETTLE_MS}. What is true is that it is <em>inert</em> — no timer exists on
+     * the clock yet, no other agent exists, and criterion 5 measured no change to the
+     * message sequence. What it does move is the clock's absolute reading: the settle
+     * window runs with the clock going, so every timestamp the run later prints is offset
+     * by roughly {@code pace * SETTLE_MS} against the pre-#17 baseline.
      *
      * @param id the clock id to verify
      * @param startMs the clock's configured start time, for the bound in {@link Watchdog}
@@ -256,6 +353,9 @@ public final class RunControl {
         clockId = id;
         clockStartMs = startMs;
         clockReady = true;
+        // Second re-stamp (the barrier did the first): the clock check costs 107-135 ms,
+        // and sim.stop.stallMs is a budget for the GENERATOR, not for startup.
+        lastTrainNanos = System.nanoTime();
         System.err.println("--- clock '" + id + "' answered a pause/resume round trip in "
                 + millis(System.nanoTime() - t0) + " ms; " + gap + " ---");
     }
@@ -388,6 +488,18 @@ public final class RunControl {
     }
 
     // ---------------------------------------------------------------- shutdown
+
+    /**
+     * The GUI window was closed. Decides between {@link #EXIT_OK} and
+     * {@link #EXIT_WINDOW_CLOSED_EARLY} — see the latter — and stops the run.
+     */
+    public static void windowClosed() {
+        final ScenarioConfig cfg = config;
+        final boolean bounded = cfg != null && cfg.hasStopCondition();
+        stop(bounded ? EXIT_WINDOW_CLOSED_EARLY : EXIT_OK,
+                bounded ? "GUI window closed before the declared sim.stop.* bound was reached"
+                        : "GUI window closed (no sim.stop.* bound was armed)");
+    }
 
     /**
      * End the run. Idempotent; the first caller decides the exit code.

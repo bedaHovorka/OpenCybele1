@@ -428,8 +428,14 @@ it should be re-examined once #15 and #17 make runs deterministic and bounded.
   `timeout`-truncated, because it predates the bound and the numbers are left as they were
   recorded. New scenarios should declare `sim.stop.maxClockMs` (or `maxTrains`) and a
   `sim.stop.wallClockMs` safety net instead; `scenarios/short-bounded.properties` is the worked
-  example. The five keys are in the table above, and all five default to off, so nothing in this
-  document's measurements changed.
+  example. The five keys are in the table above and all five default to off — but note that #17
+  is **not** entirely opt-in: its kernel-readiness barrier and clock-control check run
+  unconditionally, and they cost 120–400 ms of startup with the clock running, which shifts every
+  absolute `<train> in <station> at <t>` value by about `sim.clock.pace × 100` ms against the
+  pre-#17 baseline. The message *sequence* is unchanged (measured); the timestamps are not. This
+  document's own measurements predate that shift and are timing-distributional anyway, so none of
+  its conclusions move — but a byte-level comparison across the #17 boundary needs #21's
+  normalizer. See [`headless-and-stop.md`](headless-and-stop.md).
 - **Seeded RNG landed separately.** [#15](https://github.com/bedaHovorka/OpenCybele1/issues/15)
   added `sim.random.masterSeed` to this same mechanism; see [`docs/seeded-rng.md`](seeded-rng.md).
   It fixes the *draw sequences*, not the run: departure timestamps are still read from a

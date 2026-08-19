@@ -99,10 +99,17 @@ different sides of the same 3.4 ms boundary.
 The real application **was** immune, by accident: `new Gui(this); gui.setVisible(true)` three
 lines above `RailwayMainAgent.java:111` put its gap at 159–384 ms (n = 40). Issue
 [#17](https://github.com/bedaHovorka/OpenCybele1/issues/17)'s `sim.headless=true` removes exactly
-that, and headless the gap measured **1.5–7 ms**, with the clock's command channel dead in 8/8
-runs of one build and 1/10 of another. It is now cleared deliberately, by a barrier in `Main`
-that waits for the timer service to demonstrate it works, and checked afterwards on the
-simulation's own clock. See [`../headless-and-stop.md`](../headless-and-stop.md).
+that, and headless the gap measured **1.5–7 ms** across development builds, with the clock's
+command channel dead in 8/8 runs of one build and 1/10 of another. On the *shipped* build with
+the barrier deleted the gap is 2.9–30.9 ms and no failure was seen in 6 and 8 runs — enough class
+loading now sits in front of `createClock` to hide it on this machine, which is the argument for
+the barrier rather than against it: the gap moves by milliseconds for reasons as trivial as one
+added `String`. The race still reproduces reliably at injected gaps of 3.0–5.0 ms. It is now
+cleared deliberately, by a barrier in `Main` that waits for the timer service to demonstrate it
+works, and checked afterwards on the simulation's own clock — a check that detected a poisoned
+clock 14/14 under fault injection with 0 false passes in 40 randomised runs inside the danger zone
+and 0 false fails in 22 runs under heavy load. See
+[`../headless-and-stop.md`](../headless-and-stop.md).
 
 **There is a second, distinct loss that is not this race, and it changes how an `ExpB*` result
 should be read.** A command issued **immediately** after `createClock`, with no intervening

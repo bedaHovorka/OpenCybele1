@@ -55,7 +55,9 @@ public class Main {
 	System.err.println("----------------------");
 
 	final List<String> warnings = config.getGuiLayoutWarnings();
-	if (!warnings.isEmpty()) {
+	// Headless has no canvas, so "the canvas cannot draw this network" is noise on a
+	// stream the harness captures as part of the trace (docs/TESTING.md).
+	if (!warnings.isEmpty() && !config.isHeadless()) {
 	    // Not fatal: the canvas is outside the behavioural contract. But it must
 	    // not silently draw a network that is not the one being simulated.
 	    System.err.println("!!! GUI TOPOLOGY MISMATCH - the canvas cannot draw the configured network !!!");
