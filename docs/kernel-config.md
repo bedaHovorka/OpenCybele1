@@ -15,10 +15,23 @@ them does to a run, and the four decisions that came out of that.
 | 3 | `ICS.prop` `ICSBrowser` | **external IAI host removed**, one entry left (`127.0.0.1`) | it was already the losing key; removing it closes a latent startup hang |
 | 4 | `cybele.srv.comm.app.param.iai = Local;NoSerialization` | **must stay set** | without it startup aborts, verified |
 
-No behaviour change is introduced by any of them. That claim is measured, not asserted — the
-evidence is in the numbered sections below, one per acceptance criterion — and it was re-taken
-after [#17](https://github.com/bedaHovorka/OpenCybele1/issues/17) landed headless mode and the
-startup barrier: see [Re-verified under #17](#re-verified-under-17).
+No behaviour change is introduced by any of them, and the standing of that claim differs by
+lever, which is worth being precise about rather than averaging into "measured":
+
+* **Lever 1 is *proved*, in bytecode.** `IAIEventManagement.start` has an explicit else-branch for
+  a null `appParam` that assigns `defaultStrategy`/`defaultComparatorId` into all four of
+  `sysSortStrategy`, `sysComparator`, `agentQueueSortStrategy` and `agentQueueComparator`, and
+  those defaults are whatever the first `addStrategy`/`addComparator` call set — the first `_sort`
+  and `_comp` ids in the sys param, `no_sort` and `no_comp`. The committed line assigns those same
+  four values. The runs are corroboration, not the argument.
+* **Levers 2, 3 and 4 are *measured* or *observed*** — the pool comparison, the single-key
+  `ICS.prop` start, and the abort with the comm line removed.
+
+The re-verification after [#17](https://github.com/bedaHovorka/OpenCybele1/issues/17) landed
+headless mode and the startup barrier is in [Re-verified under #17](#re-verified-under-17). Note
+that its `p = 1.000` results are **not evidence of equivalence** — n = 12 per arm is underpowered
+for that, and no reading of a non-significant p-value would be. They are consistency checks; the
+no-op standing of lever 1 rests on the bytecode above.
 
 References to `INVENTORY.md` (`SEM-…`, `DEF-…`, `GUI-…`, `CFG-…`) are to the inventory on the
 `jade-develop` branch, which this baseline branch does not carry: `git show
@@ -71,17 +84,47 @@ DISPLAY=:1 OPENCYBELE_OPTS="-Dsim.config=scenarios/short.properties \
 `OPENCYBELE_OPTS=` is required — `-D` flags passed positionally to the start script are silently
 ignored. And a throwable inside a Cybele handler is swallowed to stderr without changing the exit
 status (`README.md`, "Assertions"), so every run below was judged by scanning **stdout and
-stderr** for `AssertionError` / `Exception in thread "`, never by `$?`. Across all 146 runs
-recorded for this issue — 101 pre-#17 and 45 after the rebase — that count was 0.
+stderr** for `AssertionError` / `Exception in thread "`, never by `$?`. Across all 146
+measurement runs recorded for this issue — 101 pre-#17 and 45 after the rebase — that count was 0.
+(Four further runs were deliberate misconfigurations, used to establish the exit-255 partial-edit
+hazard in §1 and the exit-1 abort in §4; they are not part of any statistic here.)
 
-### The operating point is below the ceiling — measured
+### The operating point — what the departure sequence does, and what it does not
 
-**Pooled over all 90 complete runs, in nine different kernel configurations — including the
-configuration this branch actually commits — there is exactly one departure-id sequence**: the
-same 51 trains, departing in the same order, every time.
+Pooled over all 90 complete runs of the main sweep, in nine kernel configurations including the
+one this branch commits, there is exactly **one** departure-id sequence: the same 51 trains,
+departing in the same order, every time. The same held for the 24 headless runs of the #17
+re-verification: one sequence, 24/24.
 
-That is the property a golden needs, and it is what makes the rest of this document meaningful:
-whatever the queue and the pool do, they are not changing *which* trains run or *in what order*.
+> **Correction, and it is mine.** An earlier revision of this document read that as "the departure
+> sequence is invariant at this operating point". **It is not, and the claim was over-reached from
+> a large but single-session sample.** Re-running the identical binary against the identical files
+> in a later session gave **two** sequences in 9 runs: 7 produced a variant departing
+> `vl107, vl315, vl326, vl410` where the canonical departs `vl112, vl319, vl333`, and 2 reproduced
+> the canonical exactly. The variant appears equally under the **unmodified pre-#16** `cybele.prop`,
+> so it is neither caused by nor related to anything this branch changes.
+>
+> `vl107` against `vl112` is the *same* divergence [`seeded-rng.md`](seeded-rng.md#the-load-ceiling)
+> names at 45 s and [`headless-and-stop.md`](headless-and-stop.md) names at 115 s. So this is the
+> documented `INVENTORY` DEF-02 drop — `START` published to a channel the `Train` may not have
+> opened yet — and not a new phenomenon.
+
+The honest statement is therefore:
+
+* **Within a session the outcome is strongly autocorrelated.** 114 consecutive runs resolved the
+  race identically; a later session resolved it the other way 7 times in 9. Whatever fixes it is
+  a machine-state property that persists for hours, not something that re-rolls per run.
+* **Across sessions it is not reproducible.** A golden recorded at this operating point and
+  replayed a day later can differ by three or four train ids with nothing at all having changed.
+* **The comparisons in this document survive it, by construction.** Every sweep was round-robin,
+  interleaving the arms run for run within one session, so a session-level bias is *shared* by the
+  arms being compared and cannot manufacture a difference between them. This is the single reason
+  the queue and pool conclusions still stand, and it is why the ordering is stated rather than
+  assumed. What does **not** survive is any claim that this scenario is fit to record a golden
+  against without repetition.
+
+That last point is the one for #24, and it agrees with the recording procedure already proposed
+there: repeat each recording and compare departure-id sets. One run is not a golden here.
 
 Two failure modes were excluded from the variance statistics and counted separately:
 
@@ -97,6 +140,54 @@ goldens from this scenario: roughly one recording in forty-five will silently st
 successful, and exit 0. #17's `sim.stop.stallMs` does **not** convert these into an exit 4 —
 [see below](#the-def-22-hang-does-not-surface-as-exit-4--a-coverage-gap-for-24) for why, and for
 the positive control showing the detector is nonetheless armed and working.
+
+### Supersedes the load-ceiling claim in `headless-and-stop.md`
+
+[`headless-and-stop.md`](headless-and-stop.md) still carried two statements that this measurement
+contradicts, and both are now annotated there with a pointer back here:
+
+* §`short-bounded.properties` — *"at that density this machine is above the load ceiling, and three
+  runs of that file bounded at 115 s of simulated time produced two distinct traces"*;
+* §Evidence — *"the baseline alone produced 12 distinct normalised traces over 26 runs"*.
+
+Both were over-stated, but so was the counter-claim in the first revision of this section, and the
+correction above is what settles it: **`short.properties` is not reproducible across sessions
+either.** What is wrong in `headless-and-stop.md` is the *interpretation*, not the observation.
+Two runs of that file genuinely can differ; what does not follow is that a **density ceiling** is
+the reason, or that `lambda = 500` sits above one.
+
+Three further effects inflate a *whole-trace* difference count without any ceiling being involved,
+and each is a finding from this issue:
+
+1. **`started`-line tie flips**, ~19 % per tie site over ~5 sites per run. A run with five sites
+   flips at least one about half the time, so *whole-trace* comparison across a handful of runs
+   almost always reports differences even when the simulation is bit-identical.
+2. **Tail truncation.** `timeout` cuts at an arbitrary wall instant, so the last one or two lines
+   are a coin toss. Comparing whole traces charges that to the simulation.
+3. **`:0` window closes.** On a shared display a disturbed frame ends the run silently with an
+   unchanged exit status, and the short run then reads as a clean one.
+
+None of the three touches the departure-id sequence, which is why comparing **per train id** and
+**headless** gives far fewer differences than comparing normalised traces on `:0`: 12 distinct
+traces over 26 runs there, against 2 distinct id-sequences over 123 runs here.
+
+A re-measurement by the coordinator, at ~69 departures, gave pairwise id-set differences of 0, 1
+and 1 over three headless runs, the single difference being `vl550` missing from one run entirely
+with the generator stream identical (same maximum id `vl663`). Combined with the session effect
+above, the resulting picture is:
+
+> **A stochastic DEF-02 drop with no cliff, whose outcome is stable for long stretches.** Density
+> raises the rate; it does not switch anything on. Two runs minutes apart will usually agree; two
+> runs hours apart may not.
+
+Consequence for #17 and #24. `scenarios/short-bounded.properties` was detuned from `lambda = 500`
+to `lambda = 2000` on the strength of a ceiling that does not exist as described — but the caution
+was **not** misplaced, and this correction is not a licence to raise it back. A lower rate is a
+genuinely lower drop probability, and the hazard the file must guard against is "a train can be
+dropped at any density", which no arrival rate eliminates. The lever that actually closes it is
+the one #24 already proposes: record more than once and compare departure-id sets. If anyone does
+revisit the rate, the test is repeated runs **in separate sessions**, not three runs back to back
+— that is precisely the sampling error corrected above.
 
 ---
 
@@ -123,9 +214,12 @@ reached the bound, none produced an `AssertionError` or an `Exception in thread 
 | pre-#16 config | 12 | **1** | 10/48 = 20.8 % | 5/12 |
 | committed config | 12 | **1** | 9/48 = 18.8 % | 6/12 |
 
-Pooled across both arms there is still exactly **one** departure-id sequence, and the two arms are
-indistinguishable on tie flips: Fisher two-sided **p = 1.000** site-level and **p = 1.000**
-run-level. Both conclusions hold.
+Pooled across both arms there is exactly **one** departure-id sequence for these 24 runs, and the
+two arms are indistinguishable on tie flips: Fisher two-sided **p = 1.000** site-level and
+**p = 1.000** run-level. Both conclusions hold. (That single sequence is a within-session
+statement; see [the correction above](#the-operating-point--what-the-departure-sequence-does-and-what-it-does-not).
+It does not weaken the comparison, because the arms were interleaved run for run and any session
+bias is shared.)
 
 **#17 shifts the simulated timeline by ~960 ms and changes nothing else.** Comparing a pre-#17 GUI
 run with a post-#17 headless run at the same seed: the same trains depart in the same order,
@@ -135,6 +229,14 @@ reported a 118.98 ms pause/resume round trip, and 118.98 ms × pace 8 ≈ 952 si
 consequence for the fixed 220 000 ms comparison window used above is that its last two departures,
 `vl40` and `vl41`, now fall past the cut: 51 departures become 49, and because `vl40`/`vl41` were
 one of the five tie pairs, five tie instants become four. Nothing about the simulation changed.
+
+**The timestamp spread is run-to-run, not only across the #17 boundary.** The ~960 ms figure is
+the *systematic* part; on top of it each run jitters. Pre-#17, across 23 `base` runs, every tie
+instant moved over a 48 simulated-ms window (e.g. `vl12`/`vl13` at 77 336–77 384). Under #17 the
+barrier adds its own variable cost and the window widens: review measured the same tie at
+78 232–78 320, an 88 simulated-ms spread over six runs at an identical seed and configuration. So
+a golden must project departure timestamps away rather than compare them, and must do so *within*
+a build as well as across the #17 boundary.
 
 `weston` is no longer needed. `-Dsim.headless=true` (which requires `-Djava.awt.headless=true`, or
 startup exits `1`) removes the frame entirely, and with it the whole class of interference that
@@ -146,13 +248,29 @@ discarded and still applies to any GUI run.
 `sim.stop.stallMs` did not fire on any of the hangs, because **by construction it cannot see
 them.** The chain, checked in the source rather than inferred:
 
-* `lastTrainNanos` — the only clock the stall detector reads — is written in two startup places
-  and in `RunControl.trainGenerated(long)` (`RunControl.java:443`).
+* `lastTrainNanos` — the only clock the stall detector reads — is written in three startup places
+  (`RunControl.java:168`, `:260`, `:358`) and in `RunControl.trainGenerated(long)` (`:443`).
 * `trainGenerated` has exactly **one** caller in the tree: `Generator.java:84`.
 * `Generator.generateTrain` publishes `PLAN_TRAIN` with a fire-and-forget `Activity.sendAll` and
-  then re-arms its own timer unconditionally. It never waits on `Planning`.
-* DEF-22 blocks `Planning`'s activity on an unbounded `latch.await()`, and per SEM-04 that starves
-  only *that* activity's channels.
+  then re-arms its own timer. It never waits on `Planning`. (It re-arms *conditionally*, only if
+  `trainGenerated` returns `true`, i.e. unless `sim.stop.maxTrains` has been reached — immaterial
+  at `maxTrains = 0`, which is the recipe here, but a run that sets `maxTrains` ends by design at
+  that point and the stall clock stops being stamped for a legitimate reason.)
+* DEF-22 blocks `Planning`'s activity on an unbounded `latch.await()` — and `Planning` and
+  `Generator` are **two activities of the same agent** (`RailwayMainAgent.java:122-123`), so the
+  question is whether one can head-of-line-block the other. **`INVENTORY` SEM-04 does not answer
+  this**: it establishes seriality *within* one activity, and #9 explicitly left the same-agent,
+  two-activity case undetermined. Citing it here would be a false generalisation. The answer comes
+  from two bytecode facts instead:
+  * `Agent.createActivity(String, String, Object[])` — the overload `RailwayMainAgent` uses —
+    delegates to the six-argument form with `iconst_4, iconst_0, iconst_0`, so the concurrency
+    relation is `ConcurManagement.CONCURRENT` (`= 0`), not `SERIALIZED` (`= 1`).
+  * `IAIConcurManagement.getRunnable` takes a `listIterator()` over the queued nodes and loops,
+    returning the **first node whose `IAIActNode.isRunnable()` is true** and skipping the rest. It
+    does not peek only at the head.
+
+  So a blocked `Planning` node is passed over rather than blocking the queue, and `Generator`'s
+  node is still dispatched. That, not SEM-04, is why generation survives a DEF-22 wedge.
 
 So a DEF-22 wedge leaves train **generation** running at full rate. `lastTrainNanos` keeps being
 re-stamped, `stallMs` never fires, the run reaches `maxClockMs` and **exits `0` with a silently
@@ -205,11 +323,22 @@ $ docs/probes/run.sh ExpA2            $ docs/probes/run.sh ExpA2 --control
   MSG 4                                 MSG 4
 ```
 
-The mechanism, re-checked in the bytecode: `IAIEventManagement.start` guards its whole app-param
-block with `if (appParam == null) skip`, so with the lines commented out `sysSortStrategy`,
-`sysComparator` and their agent-queue counterparts keep the values `addStrategy`/`addComparator`
-gave them — the **first** id in `cybele.srv.evmgmt.sys.param.iai`, i.e. `no_sort` and `no_comp`.
-`NoSortStrategy.sort(List, Comparator)` disassembles to a single `return`.
+The mechanism, re-checked in the bytecode — and stated precisely, because the imprecise version
+hides a live hazard. `IAIEventManagement.start(sysParam, appParam)` branches on `appParam == null`.
+With the selector lines commented out it takes the **else-branch, which explicitly assigns**
+`defaultStrategy` and `defaultComparatorId` into all four of `sysSortStrategy`, `sysComparator`,
+`agentQueueSortStrategy` and `agentQueueComparator`. They are *assigned*, not "left at" or "kept
+as" anything, and those defaults are whatever the first `addStrategy`/`addComparator` call set —
+the first `_sort` and `_comp` ids in `cybele.srv.evmgmt.sys.param.iai`, i.e. `no_sort` and
+`no_comp`. `NoSortStrategy.sort(List, Comparator)` disassembles to a single `return`.
+
+The distinction matters because the **other** branch assigns only the clauses actually named, and
+leaves anything unnamed `null` — there is no per-field fallback. So a half-finished edit of a live
+selector line does not quietly revert to the default; it aborts startup with
+`CybeleRuntimeException: No default sorting strategy and comparator specified in the system
+properties` and **exit 255**. Verified three ways here: dropping the `system_queue` clause, a
+`_sort` with no `_comp`, and a `_comp` with no `_sort`. Now that `cybele.prop:65` is live, both
+queues and both ids must always be named; the file says so at the line.
 
 The positive control is the load-bearing half: it proves the probe *can* see a re-ordering, which
 is what makes the negative result evidence rather than absence of evidence. The control line is
@@ -244,9 +373,12 @@ Two sorted configurations were measured against the stock one, at the operating 
 `java.util.Properties.load`, which is last-one-wins. The same technique is what `run.sh --control`
 uses.)
 
-**Result 1 — nothing moves the simulation.** All three configurations produce the identical
-51-train departure sequence, and identical to every thread-pool configuration as well.
-Symmetric difference of departure-id sets versus `base`: **0**, in every cell.
+**Result 1 — nothing moves the simulation.** All three configurations produce the same 51-train
+departure sequence, and the same as every thread-pool configuration as well. Symmetric difference
+of departure-id sets versus `base`: **0**, in every cell. These arms were interleaved run for run
+inside one session, so this is a *between-config* result and is unaffected by the session-level
+drift [corrected above](#the-operating-point--what-the-departure-sequence-does-and-what-it-does-not)
+— that drift moves every arm together or not at all.
 
 **Result 2 — the only thing that moves is the `<train> started` line at a departure-instant tie.**
 This run has exactly five instants where two trains are planned for the same simulated
@@ -268,21 +400,50 @@ different worker threads and print in whichever order the scheduler picks. This 
 | `qsort_both` | 24 | 10/120 = **8.3 %** | 14/24 |
 | `qsort_sysonly` | 6 | 5/30 = 16.7 % | 2/6 |
 
-Sorting *both* queues roughly halves the flip rate. Two tests, and the difference between them
-matters:
+Sorting *both* queues roughly halves the flip rate — **in one half of the sample, and not in the
+other.** The raw per-run flip counts, in run order, so any of this can be redone:
 
-* **Site-level** — 22/115 minority observations against 10/120, Fisher two-sided **p = 0.022**.
-  This is the tempting number and it is **not** the one to quote. It treats the five tie sites
-  within a run as five independent trials; they are not. They are five samples of the same
-  process, in the same JVM, under the same thread pool, minutes apart in simulated time but a
-  single scheduling regime in wall time, so the effective sample size is closer to the number of
-  runs than to the number of sites and p = 0.022 is optimistic by an unknown factor.
-* **Run-level**, one independent unit per run — 7/23 runs with no flip against 14/24, Fisher
-  two-sided **p = 0.080**. This is the honest test, and it does not clear the conventional
-  threshold.
+```
+base        r1..r24 (r6 hung, excluded):  1 1 2 4 2 . 1 0 1 0 1 1 0 1 1 0 0 0 1 1 0 1 2 1
+qsort_both  r1..r24:                      0 0 0 0 1 0 0 0 1 0 0 1 1 1 0 1 1 0 1 1 1 0 0 0
+```
 
-Both are recorded here on purpose: the site-level figure is easy to re-derive from the table above
-and someone will, so the reason it is discounted needs to be visible next to it.
+**Run ordering.** The two arms were interleaved **run for run**, never in blocks: every rep ran
+one `base` then one `qsort_both` back to back, ~30 s apart. So a monotone drift in machine state
+cannot produce a between-arm difference — it is shared by construction. That was true of the
+whole original sweep, which was rep-major round-robin over all seven configs.
+
+**But the sample is not homogeneous, and that turns out to matter more than the arm.** It was
+taken in two phases with different inter-run spacing: `r1–r8` cycled through all seven configs
+(~3.5 min between successive `base` runs), `r9–r24` cycled through only these two (~1 min). Split
+on that boundary:
+
+| phase | `base` mean flips | `qsort_both` mean flips | permutation p |
+|---|---|---|---|
+| `r1–r8` (7-config cycle) | 1.57 (n = 7) | 0.12 (n = 8) | **0.006** |
+| `r9–r24` (2-config cycle) | 0.69 (n = 16) | 0.56 (n = 16) | **0.748** |
+| pooled | 0.96 (n = 23) | 0.42 (n = 24) | 0.018 |
+
+**The entire effect lives in the smaller, earlier phase, and disappears in the larger, tighter
+one.** A pooled p of 0.018 over two regimes that disagree this sharply is not one effect measured
+twice; it is Simpson's-paradox-shaped and should not be quoted on its own.
+
+For completeness, the pooled tests on the counts — which use the run as the independent unit, as
+they should, and lose less information than dichotomising into "any flip":
+
+* permutation on the difference of means, 200 000 resamples: **p = 0.018**
+* Mann-Whitney U (tie-corrected normal approximation): U = 373.0, z = −2.284, **p = 0.022**
+* the earlier dichotomised version — 7/23 clean against 14/24, Fisher **p = 0.080** — is the same
+  data with the counts thrown away, which is why it is weaker; it is kept here only because an
+  earlier revision quoted it
+* the site-level figure, 22/115 against 10/120, Fisher **p = 0.022**, treats the five tie sites in
+  a run as five independent trials. They are not: they are five samples of one JVM under one
+  scheduling regime, so its effective n is nearer the number of runs than the number of sites
+
+**Multiplicity.** `base` is the reference arm for eight comparisons in this document — two queue
+arms, five pool arms and the explicit-default arm. One nominal p ≈ 0.02 out of eight is close to
+what pure noise produces; a Bonferroni threshold here would be 0.006. Combined with the phase
+split above, the responsible reading is that **the halving may not exist at all.**
 
 **The rejection does not rest on either p-value.** Suppose the effect is entirely real and the
 halving reproduces exactly. It would still be the wrong thing to adopt, because **10 of 24 sorted
@@ -325,8 +486,14 @@ It was measured like any other config change before adoption.
 | `explicit_default` | 12 | identical | 9/60 = 15.0 % | 4/12 |
 | `qsort_both` (rejected) | 24 | identical | 10/120 = 8.3 % | 14/24 |
 
-`base` vs `explicit_default`: Fisher two-sided **p = 0.54** site-level, **p = 1.00** run-level, and
-12/12 runs completed with no hang. Indistinguishable, as the bytecode says it must be. Adopted.
+**The adoption rests on the bytecode, not on this table.** The else-branch above assigns those
+four fields the same four values this line assigns, so the change is a *provable* no-op; #9's
+`ExpA2` run against a staged pre-#16 `cybele.prop` with both selectors commented out gives
+**byte-identical output**, which is the direct confirmation. The runs below are a sanity check
+that nothing else moved, and are reported as such: `base` vs `explicit_default` gives Fisher
+two-sided **p = 0.54** site-level and **p = 1.00** run-level, with 12/12 runs complete and no
+hang. A non-significant p is never evidence of equivalence and n = 12 could not establish it if it
+were; what makes this safe is the branch, not the p-value. Adopted.
 
 The change is annotated in `cybele.prop` itself, including the reason not to enable the sorted
 agent queue, so the next person does not have to find this document to know why the line is where
@@ -379,8 +546,19 @@ breaks the program.**
   thread those waits depend on — `PathFinding` and `VoteCollecting` exist precisely to borrow one.
   Note the direction: shrinking the pool made the run *less* predictable, not more.
 
+**The floor is not the number 3.** Reading "pool >= 3" as a constant would be a mistake. What the
+pool has to cover is the set of activities that can be *simultaneously blocked while borrowing a
+thread*: `PathFinding`'s `wait()` for a `PATH_FIND_REPLY` (`Station.java:105`), `VoteCollecting`
+feeding `Planning`'s `latch.await()` (`Planning.java:88`), and the blocked caller each of them
+exists to unblock. Those activities exist *because* the kernel dispatches an activity's own events
+serially (`INVENTORY` SEM-04) — they borrow a second thread so a blocking handler does not deadlock
+itself. Three workers is what today's set happens to need. **Any future change that adds a
+blocking activity, or that lets two of the existing ones block at once on a longer path, moves the
+floor up**, and it will show up as this same starvation signature rather than as an error. A port
+that removes the blocking waits — which is what a JADE behaviour model would do — moves it down.
+
 Decision: **leave `5 10 4000 3 5` unchanged.** The stock value already sits comfortably above the
-viability floor, and nothing below it is better on any measured axis.
+viability floor as it stands today, and nothing below it is better on any measured axis.
 
 ---
 
@@ -480,19 +658,31 @@ necessary but **not** sufficient: a DEF-22 wedge also exits `0`, so check the la
 
 ## What this does not answer
 
+* **What fixes the departure-race outcome for hours at a time.** 114 consecutive runs resolved
+  the DEF-02 drop identically and a later session resolved it the other way 7 times in 9, with
+  nothing changed. Something in the machine or JVM state persists across runs and biases the race;
+  what, is not established here. Until it is, treat same-session agreement as weak evidence of
+  reproducibility — this document over-claimed on exactly that point once already.
 * **Whether a sorted agent queue would matter at a different operating point.** Everything here is
   one scenario, one seed, 30 s. The corollary above (all messages tie at priority 4) is
   structural and should hold anywhere, but the flip-rate numbers are not.
-* **Why sorting both queues halves the tie-flip rate. This is UNEXPLAINED — treat it as an open
-  question, not as a mechanism.** Every message ties at priority 4 and merge sort is stable, so the
-  dequeue *order* should be bit-for-bit unchanged, and the measurement says it is: the departure
-  sequence is identical. Something about the sorted path nonetheless changes how often two `Train`
-  handlers on two worker threads print in the recorded order. One *hypothesis*, which this work did
-  **not** test and which nothing here supports beyond plausibility, is that the extra pass over the
-  queue lengthens the dequeue critical section and narrows the race window. It is written down as a
-  hypothesis so that the next person starts from a question rather than from a citation — an
-  unverified mechanism repeated twice becomes a fact this project then has to un-learn. Anyone who
-  wants the answer should instrument the dequeue path, not cite this bullet.
+* **Whether sorting both queues halves the tie-flip rate at all. UNEXPLAINED, and quite possibly
+  not a real effect.** Every message ties at priority 4 and merge sort is stable, so the dequeue
+  *order* should be bit-for-bit unchanged — and the measurement agrees: the departure sequence is
+  identical. The flip-rate difference is therefore unexplained on the mechanism side *and*
+  unstable on the evidence side: it is p = 0.006 in the 15 runs of the first sweep phase and
+  p = 0.748 in the 32 runs of the second (§"Measurement" above), which is the signature of a
+  sampling or regime artifact rather than of a queue property. Two candidate explanations, in
+  order of cost to rule out:
+  1. **it is noise** — the cheap one, and the phase split plus the eight-comparison multiplicity
+     both point at it;
+  2. **the extra pass over the queue lengthens the dequeue critical section and narrows the race
+     window** — plausible, untested, and requiring dequeue instrumentation.
+
+  Rule out (1) before paying for (2). This is written as a question rather than a mechanism on
+  purpose: an unverified explanation repeated twice becomes a fact the project then has to
+  un-learn. It also does not bear on the committed configuration either way — the halving belongs
+  to `qsort_both`, which is rejected.
 * **The DEF-22 hang rate with any precision.** 2 in 90 is an estimate from a sample that was not
   designed to measure it.
 * **Whether a DEF-22 wedge really exits `0` under #17, observationally.** The code path is

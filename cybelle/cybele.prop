@@ -65,12 +65,23 @@ cybele.srv.evmgmt.comp.iai.no_comp = com.iai.cybele.evmgmt.NoComparator
 # Event-queue sort/compare strategy, per queue. Pinned explicitly by issue #16.
 #
 # This line names exactly the pair the kernel was ALREADY using with both selectors
-# commented out: IAIEventManagement.start skips its whole app-param block when the
-# property is absent, so sysSortStrategy/sysComparator and their agent-queue
-# counterparts keep the FIRST id of cybele.srv.evmgmt.sys.param.iai above -- no_sort
-# and no_comp. NoSortStrategy.sort(List, Comparator) is a bare `return`. So: strict
-# FIFO, priorities ignored. Measured indistinguishable from the commented-out state
-# over 12 vs 23 runs (identical departure sequence; docs/kernel-config.md).
+# commented out. Note the mechanism: with the property absent, IAIEventManagement.start
+# takes an else-branch that explicitly ASSIGNS defaultStrategy/defaultComparatorId into
+# all four of sysSortStrategy, sysComparator, agentQueueSortStrategy and
+# agentQueueComparator -- they are not "left alone". Those defaults are whatever the
+# first addStrategy/addComparator call set, i.e. the first _sort and _comp ids in
+# cybele.srv.evmgmt.sys.param.iai above: no_sort and no_comp. This line assigns the same
+# four values, so uncommenting it is a provable no-op, not merely a measured one.
+# NoSortStrategy.sort(List, Comparator) is a bare `return`. Net effect: strict FIFO,
+# priorities ignored. See docs/kernel-config.md.
+#
+# NOW THAT THIS LINE IS LIVE, ALWAYS NAME BOTH QUEUES AND BOTH IDS. In the
+# appParam != null branch only the clauses actually present are assigned; anything you
+# leave out stays null and does NOT fall back to the default. Startup then aborts with
+# `CybeleRuntimeException: No default sorting strategy and comparator specified in the
+# system properties` and exit 255. Verified in three forms: dropping the system_queue
+# clause, giving a _sort with no _comp, and giving a _comp with no _sort. Edit this line
+# as a whole; do not delete half of it.
 #
 # Do NOT enable a sorted AGENT queue without surfacing it as a behaviour change: under
 # staticpriority_comp a queued TIMER overtakes queued MESSAGEs -- `docs/probes/run.sh
