@@ -12,6 +12,7 @@ package cz.vutbr.fit.ags.xhovor07;
 import java.io.Serializable;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -141,9 +142,22 @@ public class TraceProbe implements Handler {
     /** Cap on failure reports, so a systematic fault cannot bury the trace it broke. */
     private static final int MAX_FAILURE_REPORTS = 20;
 
+    /** How the first {@code TRAIN_STATE} of every train ends; see {@link #checkFirstState}. */
+    static final String GENERATED_SUFFIX = " generated";
+
+    /**
+     * How many later trains may be announced before a train with no {@code TRAIN_STATE} is
+     * called a gap. See {@link #checkGenerated}.
+     */
+    static final int GENERATED_GRACE = 8;
+
     private final int lookahead;
     /** Train-name slots already subscribed. Only ever touched on the probe's own activity. */
     private final Set<String> subscribedTrains = new HashSet<String>();
+    /** Trains for which at least one {@code TRAIN_STATE} has been observed. */
+    private final Set<String> firstStateSeen = new HashSet<String>();
+    /** Indices announced on {@code PLAN_TRAIN} with no {@code TRAIN_STATE} yet. */
+    private final TreeSet<Integer> awaitingGenerated = new TreeSet<Integer>();
     /** Highest {@code vl<n>} index whose channels are open. -1 before the first slot. */
     private int windowTop = -1;
 
@@ -244,6 +258,8 @@ public class TraceProbe implements Handler {
             final String from = str(m, 1);
             final String to = str(m, 2);
             noteTrain(train);
+            final int index = trainIndex(train);
+            if (index >= 0) checkGenerated(index);
             emit(train, "PLAN_TRAIN", RailwayMainAgent.MAIN_AGENT_NAME,
                     RailwayMainAgent.MAIN_AGENT_NAME,
                     "train=" + train + ",from=" + from + ",to=" + to);
@@ -429,6 +445,7 @@ public class TraceProbe implements Handler {
             final String state = str(ev.getMessage(), 0);
             final String train = owner(ev);
             noteTrain(train);
+            checkFirstState(train, state);
             emit(train, "TRAIN_STATE", train, RailwayMainAgent.MAIN_AGENT_NAME, "state=" + state);
         } catch (Throwable t) { failed("TRAIN_STATE", ev, t); }
     }
@@ -520,24 +537,84 @@ public class TraceProbe implements Handler {
     // ---------------------------------------------------------------- train slots
 
     /**
-     * Learn about a train and keep the look-ahead window ahead of the generator. Called
-     * from the two handlers that fire at generation time — {@code PLAN_TRAIN} and the
-     * train's first {@code TRAIN.STATE} — and only ever on the probe's own activity, which
-     * Cybele dispatches serially (INVENTORY {@code SEM-04}), so no locking is needed.
+     * Keep the look-ahead window ahead of the generator. Called from the two handlers that
+     * fire at generation time — {@code PLAN_TRAIN} and the train's first
+     * {@code TRAIN.STATE} — and only ever on the probe's own activity, which Cybele
+     * dispatches serially (INVENTORY {@code SEM-04}), so no locking is needed anywhere in
+     * this section.
+     * <p>
+     * There is deliberately <b>no</b> "is this index past the window top" check here. The
+     * first version of this class had one, and it could not fire: this method extends the
+     * window to {@code index + lookahead}, redefining the top relative to the index just
+     * seen, so for monotonically increasing names {@code index > windowTop} is false by
+     * construction. It read as a guard and asserted nothing. The real check — is the trace
+     * for this train complete from its first message — is {@link #checkGenerated} and
+     * {@link #checkFirstState}, which detect the failure this class can actually suffer.
      */
     private void noteTrain(String train) {
         final int index = trainIndex(train);
         if (index < 0) return;                 // not a generated train name; nothing to do
-        if (index > windowTop) {
-            // Unreachable while the window is wider than one generation burst, and a real
-            // hole in the trace if it ever happens: this train's earlier messages went to a
-            // channel nobody had opened. Say so in the shape the harness scans for.
-            report("the trace probe subscribed too late for " + train + ": look-ahead window"
-                    + " ended at vl" + windowTop + ". Raise "
-                    + ScenarioConfig.KEY_TRACE_TRAIN_LOOKAHEAD + " (now " + lookahead + ").",
-                    new IllegalStateException("probe look-ahead window exhausted at " + train));
-        }
         extendWindowTo(index + lookahead);
+    }
+
+    /**
+     * The gap check that works: <b>the first {@code TRAIN_STATE} of a train must be its
+     * {@code generated} line.</b>
+     * <p>
+     * {@link Train}'s constructor sends that line before the train can do anything else, so
+     * if the first one this probe sees is {@code entered to …} or {@code KILL}, the
+     * subscription for {@code TRAIN.STATE.<train>} was opened too late and the opening of
+     * that train's story is missing. That is a hole in the trace and the run must not be
+     * recordable, however healthy its exit status.
+     * <p>
+     * Reproduced by blocking stdout so the probe's own activity falls behind the generator:
+     * three trains lost their first {@code TRAIN_STATE} mid-run and the old window check
+     * reported nothing. This one reports all three.
+     *
+     * @return {@code true} if this was the first {@code TRAIN_STATE} seen for the train
+     */
+    private boolean checkFirstState(String train, String state) {
+        if (!firstStateSeen.add(train)) return false;
+        awaitingGenerated.remove(Integer.valueOf(trainIndex(train)));
+        if (!state.endsWith(GENERATED_SUFFIX) && !Train.KILLED.equals(state)) {
+            reportGap("the first " + "TRAIN_STATE" + " observed for " + train + " is '" + state
+                    + "', not its 'generated' line. That train's opening messages were sent"
+                    + " before the probe subscribed, so the trace is INCOMPLETE for it."
+                    + " Raise " + ScenarioConfig.KEY_TRACE_TRAIN_LOOKAHEAD + " (now "
+                    + lookahead + ").");
+        } else if (Train.KILLED.equals(state)) {
+            reportGap("the first TRAIN_STATE observed for " + train + " is the KILL sentinel:"
+                    + " every earlier message of that train is missing from the trace.");
+        }
+        return true;
+    }
+
+    /**
+     * The second half of the same check, for the train whose {@code TRAIN_STATE} channel was
+     * missed <em>entirely</em> rather than just late — {@link #checkFirstState} never runs
+     * for that train, so nothing above would notice.
+     * <p>
+     * {@code PLAN_TRAIN} is a bare, global channel opened in this probe's constructor and can
+     * therefore never be missed, so every generated train is announced on it exactly once.
+     * A train announced there and still without a {@code TRAIN_STATE} once
+     * {@value #GENERATED_GRACE} later trains have been announced is a train whose per-train
+     * channels this probe does not have. The grace exists because the two messages race: the
+     * generator sends {@code PLAN_TRAIN} after {@code Cybele.createAgent}, and the train's
+     * own constructor runs on another thread. Eight trains is ~16 s of simulated time at the
+     * default arrival rate and four orders of magnitude more than the observed skew.
+     */
+    private void checkGenerated(int announcedIndex) {
+        if (!firstStateSeen.contains("vl" + announcedIndex)) {
+            awaitingGenerated.add(Integer.valueOf(announcedIndex));
+        }
+        while (!awaitingGenerated.isEmpty()
+                && awaitingGenerated.first().intValue() <= announcedIndex - GENERATED_GRACE) {
+            final Integer stale = awaitingGenerated.pollFirst();
+            reportGap("vl" + stale + " was announced on PLAN_TRAIN but never sent a"
+                    + " TRAIN_STATE the probe saw, " + GENERATED_GRACE + " trains later."
+                    + " Its START/ENTER_REPLY/TRAVEL_END/TRAIN.STATE channels were opened too"
+                    + " late, so the trace is INCOMPLETE for it.");
+        }
     }
 
     /** Open {@code START/ENTER_REPLY/TRAVEL_END/TRAIN.STATE} for every slot up to {@code top}. */
@@ -593,6 +670,15 @@ public class TraceProbe implements Handler {
     // ---------------------------------------------------------------- failure
 
     /**
+     * A gap in the trace that is nobody's throwable: the probe subscribed too late for a
+     * train. Surfaced exactly like a handler fault, because the consequence is identical —
+     * the trace is incomplete and the run must not be recordable.
+     */
+    private static void reportGap(String reason) {
+        report("TRACE GAP: " + reason, new IllegalStateException("trace gap: " + reason));
+    }
+
+    /**
      * A handler caught something. Report it and carry on: the remaining channels are still
      * worth recording, and the run is already marked as unrecordable by the report itself.
      */
@@ -625,7 +711,12 @@ public class TraceProbe implements Handler {
         final int n = FAILURES.incrementAndGet();
         if (n > MAX_FAILURE_REPORTS) return;
         synchronized (System.err) {
-            System.out.flush();
+            // Deliberately NOT preceded by System.out.flush(). Ordering against stdout would
+            // be nice; a report that cannot be written is not. Measured: with stdout blocked
+            // (a full pipe — how a probe gets far enough behind to lose a train in the first
+            // place) the flush blocks inside this method and the report never reaches stderr,
+            // leaving only the header. stderr is unbuffered and the harness scans raw lines
+            // for signatures wherever they land, so the ordering was worth nothing anyway.
             System.err.println("!!! PROBE FAILURE (" + n + "): " + reason);
             System.err.print("Exception in thread \"" + Thread.currentThread().getName() + "\" ");
             t.printStackTrace(System.err);

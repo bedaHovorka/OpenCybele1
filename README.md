@@ -135,6 +135,18 @@ It is additive — it sends nothing, sets no timer and touches no application st
 time. `performative` is the literal `-` on this branch and stays that way: the baseline has no
 performatives at all, and the channel-to-`ACLMessage` mapping belongs to the JADE port.
 
+```bash
+./gradlew traceCheck     # run a short bounded simulation and verdict the trace it produced
+```
+
+verifies that all fifteen channels appear, that the round-trips balance, and — the part that
+matters — that the trace is **complete**: train ids contiguous, every announced train with its
+`generated` line, every station and track with its opening state.
+
+**A golden cannot be recorded from this trace verbatim.** Five numeric families derive from a
+wall-clock-driven simulated clock and change on every run; they are named in the doc, for
+[#21](https://github.com/bedaHovorka/OpenCybele1/issues/21) to project away.
+
 The format is a **contract**: it is re-emitted by the JADE and Jason ports and has to produce
 byte-identical lines for equivalent behaviour. Field semantics, the per-channel table, the
 `Station.Info` aliasing hazard and the probe-on/probe-off perturbation measurement:

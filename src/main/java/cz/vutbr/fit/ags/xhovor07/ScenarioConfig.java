@@ -206,6 +206,8 @@ public final class ScenarioConfig implements Serializable {
     static final String DEF_STOP_STALL_MS = "0";
     static final String DEF_TRACE_ENABLED = "false";           // was: no trace at all
     static final String DEF_TRACE_TRAIN_LOOKAHEAD = "32";
+    /** Ceiling for {@link #KEY_TRACE_TRAIN_LOOKAHEAD}; each slot costs four channels. */
+    static final long MAX_TRACE_TRAIN_LOOKAHEAD = 10000;
 
     private static final String[][] KEYS_AND_DEFAULTS = {
         {KEY_ARRIVAL_LAMBDA, DEF_ARRIVAL_LAMBDA},
@@ -327,8 +329,11 @@ public final class ScenarioConfig implements Serializable {
         stopWallClockMs = nonNegativeLong(p, KEY_STOP_WALL_CLOCK_MS);
         stopStallMs = nonNegativeLong(p, KEY_STOP_STALL_MS);
         traceEnabled = bool(p, KEY_TRACE_ENABLED);
-        traceTrainLookahead = (int) Math.min(positiveLong(p, KEY_TRACE_TRAIN_LOOKAHEAD),
-                                             Integer.MAX_VALUE);
+        // Bounded at both ends. The clamp this replaced accepted 100000000 and turned it
+        // into 400 million openChannel calls in an agent constructor — a hang, not the
+        // error the documentation promised. The window slides, so it never needs to be
+        // large: the ceiling is 300x the default and still opens 40 000 channels.
+        traceTrainLookahead = (int) boundedLong(p, KEY_TRACE_TRAIN_LOOKAHEAD, 1, MAX_TRACE_TRAIN_LOOKAHEAD);
 
         final String seed = require(p, KEY_RANDOM_MASTER_SEED);
         masterSeedDrawn = MASTER_SEED_RANDOM.equals(seed);
@@ -501,6 +506,15 @@ public final class ScenarioConfig implements Serializable {
     private static long positiveLong(Properties p, String key) {
         final long v = parseLong(p, key);
         if (v <= 0) throw new IllegalArgumentException(key + " must be > 0, was " + v);
+        return v;
+    }
+
+    private static long boundedLong(Properties p, String key, long min, long max) {
+        final long v = parseLong(p, key);
+        if (v < min || v > max) {
+            throw new IllegalArgumentException(key + " must be between " + min + " and " + max
+                    + ", was " + v);
+        }
         return v;
     }
 

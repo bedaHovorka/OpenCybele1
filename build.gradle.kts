@@ -78,6 +78,43 @@ tasks.named("check") {
     dependsOn(rngProof)
 }
 
+// #20's acceptance criterion -- "all fifteen channels appear in the trace, and it is
+// COMPLETE" -- checked mechanically instead of by hand. Two steps: run the simulation
+// headless and bounded with the probe on, then verdict what it produced.
+//
+// Deliberately NOT wired into `check`, unlike rngProof. This one boots the Cybele kernel,
+// takes ~20 s of wall clock, and inherits the kernel's own residual hang (INVENTORY
+// DEF-22, roughly 1 run in 45) -- putting that in every `./gradlew build` would trade a
+// reliable build for a flaky one. It is one command when you want it.
+val traceFile = layout.buildDirectory.file("trace/trace.txt")
+
+val traceRun by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Runs a short bounded headless simulation with the parity trace probe on (#20)."
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("cz.vutbr.fit.ags.xhovor07.Main")
+    jvmArgs("-ea", "--patch-module", "java.base=cybelle", "-Djava.awt.headless=true")
+    systemProperty("sim.config", "scenarios/short-bounded.properties")
+    systemProperty("sim.trace.enabled", "true")
+    doFirst {
+        traceFile.get().asFile.parentFile.mkdirs()
+        // stdout is the trace; stderr stays on the console so the resolved-configuration
+        // banner, the randomness manifest and any PROBE FAILURE report remain visible.
+        standardOutput = traceFile.get().asFile.outputStream()
+    }
+    outputs.file(traceFile)
+    outputs.upToDateWhen { false }   // a fresh run every time is the point
+}
+
+val traceCheck by tasks.registering(JavaExec::class) {
+    group = "verification"
+    description = "Verdicts the canonical parity trace: all 15 channels, round-trips, completeness (#20)."
+    dependsOn(traceRun)
+    classpath = tools.runtimeClasspath
+    mainClass.set("TraceCheck")
+    argumentProviders.add(CommandLineArgumentProvider { listOf(traceFile.get().asFile.absolutePath) })
+}
+
 tasks.named<JavaExec>("run") {
     // Forward -Dsim.* from the Gradle command line into the forked application JVM.
     // Without this, `./gradlew run -Dsim.arrival.lambdaMs=800` would set the property
