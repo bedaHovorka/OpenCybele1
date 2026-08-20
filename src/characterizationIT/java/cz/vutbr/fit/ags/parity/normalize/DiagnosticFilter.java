@@ -34,6 +34,11 @@ public final class DiagnosticFilter implements TraceNormalizer {
         return List.copyOf(kept);
     }
 
+    @Override
+    public String toString() {
+        return "DiagnosticFilter" + prefixes;
+    }
+
     private boolean isDiagnostic(String line) {
         for (String prefix : prefixes) {
             if (line.startsWith(prefix)) {

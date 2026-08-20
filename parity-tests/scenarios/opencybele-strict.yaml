@@ -1,0 +1,130 @@
+# The scenario that proves #21's projection is SUFFICIENT, not merely helpful.
+#
+# opencybele-smoke.yaml is #13's adapter smoke test and stays where it is. This one exists for one
+# purpose: to run a real implementation end to end at the STRICT contract -- the normalized trace
+# compared to the golden line for line, no tolerance of any kind -- and to be the target the
+# zero-flake gate (ParityGate) repeats. Scenario COVERAGE is still #23; this is one scenario, and
+# it deliberately duplicates opencybele-smoke's configuration in everything but one number.
+#
+# #23 should fold the two. The only reason they are separate today is that folding them means
+# re-recording opencybele-smoke's golden, and Phase1.md L7 makes that an expensive move to make on
+# someone else's issue. The evidence for folding is in docs/trace-normalizer.md.
+#
+# Format: docs/parity-harness.md. Trace format: docs/trace-format.md (on opencybele-baseline).
+
+id: opencybele-strict
+description: >
+  Bounded 24 s (simulated) headless run of the reference implementation with the canonical trace
+  probe on, at a pinned seed, with the stop bound placed inside a measured quiet window. Compared
+  line for line.
+
+# ---------------------------------------------------------------------------------------------
+# WHY strict IS REACHABLE HERE AND NOT AT 25000 -- THE ONE NUMBER THAT DIFFERS
+#
+# Measured, 52 captured runs of this application, all headless, all at seed 20080415, all through
+# the same normalizer (docs/trace-normalizer.md):
+#
+#   * The normalizer removes ALL of the ordering variance. Across all 52 traces there is not one
+#     pair that has the same content in a different order. Before it, no two runs agreed at all:
+#     13 captures produced 13 distinct traces.
+#   * What is left is CONTENT -- which lines exist -- and at sim.stop.maxClockMs = 25000 it is not
+#     stable. 12 of 38 runs at that bound end with a TRUNCATED final burst.
+#
+# The cause is exact and it is not a normalizer problem. At this seed the trace's last event burst
+# begins at simulated 25072, i.e. 72 ms AFTER the 25000 bound: the run is already inside its
+# shutdown window when those 16 lines are emitted, so whether they reach stdout is a race with
+# Cybele.terminate(). Measured tail lengths at 25000: 623 lines (26 runs), 611 (1), 609 (3),
+# 607 (8). No normalisation invents a line a run never printed, and none may delete one either.
+#
+# 24000 is not a rounder number -- it is inside the largest gap in the EVENT timeline. Bursts at
+# this seed run ... 22824-22832, 23120-23120, then nothing until 25072. A bound of 24000 sits
+# 880 simulated ms after the last burst ends and 1072 ms before the next begins (110 ms and 134 ms
+# of wall clock at pace 8), so the shutdown window contains no emission at all.
+#
+# It is also further from the OTHER hazard opencybele-smoke sized its bound against, the
+# Cybele.terminate() NPE from a Train constructor in flight: arrivals at this seed land at
+# ... 18536, 21224, 27328, so 24000 is 2776 simulated ms clear of the last one. Measured: 14 runs
+# at this bound, 14 exit 0, 9 trains generated in all 14, no AssertionError and no
+# "Exception in thread" in any of them, and 14 of 14 normalized traces BYTE-IDENTICAL.
+#
+# So the claim this file makes is: at this bound, with this normalizer, the run is reproducible,
+# and `strict` is an honest contract rather than an aspiration.
+# ---------------------------------------------------------------------------------------------
+contract: strict
+golden: opencybele-strict.txt
+
+launcher:
+  # No `config:` key, for the same reason opencybele-smoke has none: every knob is written out
+  # here, so the golden depends on the application binary and on nothing that lives on another
+  # branch. All twenty sim.* keys are declared, including the ten sitting at their default.
+  properties:
+    # --- arrivals -------------------------------------------------------------------------
+    sim.arrival.lambdaMs: "2000"
+    sim.arrival.firstFireMs: "200"
+    sim.arrival.pairs: "stA>stB,stA>stC,stB>stA,stB>stC,stC>stB,stC>stA"
+    # --- topology, capacities, delays: what a port must replicate -------------------------
+    sim.topology: "stA-stH:tr1,stH-stG:tr2,stG-stE:tr3,stE-stD:tr4,stD-stB:tr5,stF-stE:tr6,stC-stF:tr7"
+    sim.station.capacities: "stA=6,stB=5,stC=2,stD=2,stE=5,stF=2,stG=3,stH=2"
+    sim.road.delaysSec: "tr1=1,tr2=1,tr3=5,tr4=2,tr5=3,tr6=4,tr7=3"
+    sim.station.voteWindowMs: "2000"
+    # --- clock ----------------------------------------------------------------------------
+    sim.clock.startMs: "0"
+    sim.clock.pace: "8"
+    # --- GUI: inert under sim.headless=true, declared so nothing at all is implicit --------
+    sim.gui.paces: "Fast=8,Normal=1,Slow=0.3"
+    sim.gui.mainLine: "stA,stH,stG,stE,stD,stB"
+    sim.gui.branches: "stC:tr7,stF:tr6"
+    # --- randomness -----------------------------------------------------------------------
+    sim.random.masterSeed: "20080415"
+    # --- run shape ------------------------------------------------------------------------
+    sim.headless: "true"
+    sim.trace.enabled: "true"
+    sim.trace.trainLookahead: "32"
+    sim.stop.maxTrains: "0"
+    # THE BOUND. See the block above -- this number is the entire difference from
+    # opencybele-smoke and it is load-bearing in both directions.
+    sim.stop.maxClockMs: "24000"
+    sim.stop.wallClockMs: "60000"
+    sim.stop.stallMs: "10000"
+
+run:
+  # Well above the child's own 60 s net, because this is the backstop for the case where that net
+  # did NOT fire: ~1 run in 45 hangs outright with a clean process and nothing in the stream
+  # (DEF-22), which sim.stop.stallMs structurally cannot catch. A kill is HARNESS_TIMEOUT and can
+  # never pass -- which is what keeps a wedged run out of the zero-flake gate's numerator.
+  harnessTimeoutMs: 120000
+  expect: bound-reached
+
+# Liveness matches RAW lines, so these patterns see the trace before any projection -- which is why
+# they still carry the numeric `tick` field that the normalizer later replaces with <T>. Floors sit
+# under the measured values (9 trains, 9 elections) so ordinary drift is not a failure while a dead
+# or gutted run is. Under a `strict` contract these are not redundant: they fire before the
+# comparison, so a run that produced nothing fails as "did too little" rather than as a trace diff.
+liveness:
+  - pattern: '^(vl\d+)\|\d+\|PLAN_TRAIN\|'
+    distinctGroup: 1
+    atLeast: 6
+  - pattern: '^(vl\d+)\|\d+\|VOTE_RESULT\|'
+    distinctGroup: 1
+    atLeast: 6
+  - pattern: '^(vl\d+)\|\d+\|TRAIN_STATE\|'
+    distinctGroup: 1
+    atLeast: 6
+  - pattern: '^vl\d+ started$'
+    atLeast: 3
+  - pattern: '^(vl\d+) in st[A-H] at \d+$'
+    distinctGroup: 1
+    atLeast: 3
+  - pattern: '^st[A-H]\|\d+\|STATION_INFO\|'
+    atLeast: 25
+  - pattern: '^tr\d+\|\d+\|ROAD_STATE\|'
+    atLeast: 20
+
+# Not required at `strict` -- the comparison is positional -- but declared anyway, because
+# ParityGate compares departure-id SETS across occasions (docs/defect-triage.md §8.2) and reads
+# them through this rule. Entity patterns match NORMALIZED lines. NO `tolerance:` block: the parser
+# rejects one under `strict`, and rightly -- a tolerance there would read as a licence the contract
+# does not grant, even at zero.
+entity:
+  pattern: '^(vl\d+)\|'
+  group: 1

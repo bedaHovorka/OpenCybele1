@@ -22,4 +22,18 @@ import java.util.List;
 public interface TraceNormalizer {
 
     List<String> normalize(List<String> rawLines);
+
+    /**
+     * This normalizer followed by {@code next}.
+     *
+     * <p>The two halves of the seam compose rather than replace one another: an adapter declares
+     * <em>its target's</em> diagnostic shapes ({@link cz.vutbr.fit.ags.parity.normalize.DiagnosticFilter}),
+     * and the implementation-neutral projection
+     * ({@link cz.vutbr.fit.ags.parity.normalize.CanonicalTraceNormalizer}) runs after it on what is
+     * left. Keeping them separate is what lets a new target declare a new banner prefix without
+     * touching a single normalizer rule.
+     */
+    default TraceNormalizer andThen(TraceNormalizer next) {
+        return new cz.vutbr.fit.ags.parity.normalize.ChainedNormalizer(this, next);
+    }
 }

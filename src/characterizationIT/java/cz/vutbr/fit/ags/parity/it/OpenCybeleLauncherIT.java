@@ -1,5 +1,6 @@
 package cz.vutbr.fit.ags.parity.it;
 
+import cz.vutbr.fit.ags.parity.normalize.DiagnosticFilter;
 import cz.vutbr.fit.ags.parity.opencybele.OpenCybeleLauncher;
 import cz.vutbr.fit.ags.parity.spec.ScenarioSpec;
 import cz.vutbr.fit.ags.parity.spec.ScenarioSpecParser;
@@ -174,7 +175,8 @@ class OpenCybeleLauncherIT {
         // DRAWN number and makes the golden unmatchable. Declared in the adapter (rather than
         // indented in the application) because #12 chose that a new diagnostic shape is declared by
         // the adapter that knows about it.
-        TraceNormalizer normalizer = new OpenCybeleLauncher(null, null).normalizer();
+        OpenCybeleLauncher adapter = new OpenCybeleLauncher(null, null);
+        TraceNormalizer normalizer = adapter.normalizer();
         List<String> normalized = normalizer.normalize(CAPTURED_HEAD);
 
         assertTrue(normalized.stream().noneMatch(l -> l.startsWith("sim.")),
@@ -189,7 +191,10 @@ class OpenCybeleLauncherIT {
                 "the randomness manifest must not reach the golden either: " + normalized);
         assertTrue(normalized.stream().noneMatch(l -> l.startsWith("--- ")));
 
-        // And the filter must still be a filter, not a shredder.
+        // And the FILTER must still be a filter, not a shredder. Asserted against the filter
+        // stage alone, deliberately: since #21 the adapter's normalizer is the filter chained with
+        // CanonicalTraceNormalizer, and running that projection here would make this assertion
+        // about the projection instead of about the prefixes it is written to defend.
         assertEquals(List.of(
                         "Cybele version 1.2 starting ...",
                         "*** Loading exception service (expecting impl. of GSI ver. 1.0) ... ",
@@ -198,8 +203,13 @@ class OpenCybeleLauncherIT {
                         "vl3 started",
                         "vl3 in stA at 12928",
                         "stA|13024|STATION_INFO|stA|Main|-|occupied=1,capacity=6"),
-                normalized,
+                new DiagnosticFilter(adapter.diagnosticPrefixes()).normalize(CAPTURED_HEAD),
                 "trace lines and the deterministic kernel banner must survive untouched");
+
+        // The full normalizer keeps every one of those lines too — it projects values, it never
+        // drops a trace line. Same count, same subjects, same events.
+        assertEquals(7, normalized.size(),
+                "the projection must not remove a line: " + normalized);
     }
 
     @Test

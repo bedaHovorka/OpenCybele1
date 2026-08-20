@@ -160,6 +160,19 @@ public final class TraceComparator {
         for (SummaryRule rule : spec.summary()) {
             int goldenCount = rule.count(golden);
             int actualCount = rule.count(actual);
+            // A rule that matches NOTHING in the golden compares 0 against 0 for ever: it passes
+            // whatever the run did, and it looks exactly like a rule that is working. That is the
+            // "lock that cannot fail" shape this project has rejected four times, and it is easy to
+            // create by accident because summary patterns match NORMALIZED lines -- #21's
+            // projection turned `at \d+` into `at <T>` and silently disarmed one of these.
+            if (goldenCount == 0) {
+                failures.add("summary contract: rule '" + rule.label() + "' (/" + rule.pattern()
+                        + "/) matches NOTHING in the golden, so it compares 0 against 0 and can"
+                        + " never fail. Note that liveness patterns match RAW lines while summary"
+                        + " and entity patterns match NORMALIZED ones; a pattern copied from one to"
+                        + " the other stops matching the moment a field is projected away.");
+                continue;
+            }
             if (Math.abs(goldenCount - actualCount) > rule.tolerance()) {
                 failures.add("summary contract: '" + rule.label() + "' counted " + actualCount
                         + ", golden has " + goldenCount + ", tolerance " + rule.tolerance());

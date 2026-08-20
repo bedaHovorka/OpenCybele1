@@ -170,7 +170,7 @@ public final class ScenarioRunner {
         List<String> normalized = normalizer.normalize(captured.lines());
         if (normalized.isEmpty()) {
             throw new ScenarioFailedException(report(spec, adapter, captured,
-                    "the normalized trace is EMPTY. " + normalizer.getClass().getName()
+                    "the normalized trace is EMPTY. " + normalizer
                             + " projected away every one of the " + captured.lines().size()
                             + " captured line(s). An empty golden matches an empty run and nothing"
                             + " else can ever fail against it — the 'lock that cannot fail' shape"
@@ -183,7 +183,24 @@ public final class ScenarioRunner {
             Path written = goldenStore.record(spec.goldenFile(), normalized);
             return new RunReport(captured, normalized, true, written);
         }
-        List<String> golden = goldenStore.read(spec.goldenFile());
+        // The golden is normalized too, with the SAME normalizer, before it is compared.
+        //
+        // That is what keeps #21 landable without re-recording, which Phase1.md L7 forbids for
+        // anything but a harness defect. A golden recorded under the placeholder normalizer holds
+        // raw ticks, an unsorted startup block and interleaved printlns; running it through the
+        // real normalizer projects it into exactly the form a fresh run reaches, so the file on
+        // disk never has to change. CanonicalTraceNormalizer is idempotent (TraceNormalizerIT
+        // asserts it), so a golden recorded AFTER #21 is unaffected by the second pass.
+        List<String> golden = normalizer.normalize(goldenStore.read(spec.goldenFile()));
+        if (golden.isEmpty()) {
+            throw new ScenarioFailedException(report(spec, adapter, captured,
+                    "the golden normalized to NOTHING. " + normalizer
+                            + " projected away every line of " + goldenStore.fileFor(spec.goldenFile())
+                            + ", so the comparison would be empty-against-empty — a lock that cannot"
+                            + " fail. The golden and the normalizer have diverged; fix the"
+                            + " normalizer, do not re-record.",
+                    List.of()));
+        }
         ComparisonResult comparison = TraceComparator.compare(spec, golden, normalized);
         if (!comparison.matched()) {
             throw new ScenarioFailedException(report(spec, adapter, captured,

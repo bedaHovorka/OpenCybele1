@@ -134,14 +134,25 @@ class OpenCybeleSmokeIT {
                 "no declared diagnostic shape may survive: " + trace);
     }
 
-    /** The recorded artefact must be the canonical trace of #20, not just the two old printlns. */
+    /**
+     * The recorded artefact must be the canonical trace of #20, not just the two old printlns —
+     * and it must arrive <em>projected</em>, which is what changed with #21.
+     *
+     * <p>The tick assertions are written against {@code <T>} rather than {@code \d+} deliberately.
+     * A normalizer that silently stopped projecting would leave these patterns matching a raw
+     * numeric tick and nothing here would notice; asserting the projected shape makes "the
+     * projection ran" a checked claim rather than an assumption.
+     */
     private static void assertTraceIsTheCanonicalOne(List<String> trace) {
         assertFalse(trace.isEmpty(), "the normalized trace must not be empty");
-        assertTrue(trace.stream().anyMatch(line -> line.matches("^vl\\d+\\|\\d+\\|PLAN_TRAIN\\|.*")),
-                "no canonical PLAN_TRAIN line: is sim.trace.enabled reaching the child?");
-        assertTrue(trace.stream().anyMatch(line -> line.matches("^st[A-H]\\|\\d+\\|STATION_INFO\\|.*")));
+        assertTrue(trace.stream().anyMatch(line -> line.matches("^vl\\d+\\|<T>\\|PLAN_TRAIN\\|.*")),
+                "no canonical PLAN_TRAIN line with a projected tick: either sim.trace.enabled did"
+                        + " not reach the child, or the tick projection stopped running");
+        assertTrue(trace.stream().anyMatch(line -> line.matches("^st[A-H]\\|<T>\\|STATION_INFO\\|.*")));
         assertTrue(trace.stream().anyMatch(line -> line.matches("^vl\\d+ started$")),
                 "the application's own departure println is part of the contract and is missing");
+        assertTrue(trace.stream().noneMatch(line -> line.matches("^[^|]*\\|-?\\d+\\|.*")),
+                "a raw numeric tick survived into the normalized trace");
     }
 
     /**
