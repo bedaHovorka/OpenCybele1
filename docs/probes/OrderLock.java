@@ -3,9 +3,9 @@ import java.util.Collection;
 import java.util.List;
 
 import cz.vutbr.fit.ags.xhovor07.ScenarioConfig;
-import cz.vutbr.fit.ags.xhovor07.util.Doubleton;
-import cz.vutbr.fit.ags.xhovor07.util.UnorientedGraph;
-import cz.vutbr.fit.ags.xhovor07.util.Util;
+import cz.vutbr.fit.ags.railway.domain.util.Doubleton;
+import cz.vutbr.fit.ags.railway.domain.util.UnorientedGraph;
+import cz.vutbr.fit.ags.railway.domain.util.Util;
 
 /**
  * OrderLock - self-verdicting lock for the four iteration orders of issue #19

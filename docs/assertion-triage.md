@@ -72,7 +72,7 @@ into the assert's own boolean expression:
 - it works with the `assert cond : msg;` form, since the rewrite touches only `cond`.
 
 The transform found exactly 33 sites, correctly skipping the Javadoc false positive at
-[`util/Util.java:49`](../src/main/java/cz/vutbr/fit/ags/xhovor07/util/Util.java#L49) — matching
+[`util/Util.java:49`](../src/domain/java/cz/vutbr/fit/ags/railway/domain/util/Util.java#L49) — matching
 the count in #14. A daemon thread dumped counters every 30 s. All of this was
 reverted; only the numbers below survive.
 
@@ -156,6 +156,18 @@ These 8 are **not** evidence of correctness — they are simply uncovered. Two a
 supposed to be uncovered; the other six mark a coverage gap that scenario
 extension (1-PRE.3) may or may not choose to close. None of them blocks the
 baseline.
+
+> **Post-#28 note.** The measurement above is left exactly as recorded — it is the
+> `-ea` evidence #22's decision rests on, and re-taking it is not this issue's business.
+> Two of its rows have since lost their site: #28 **deleted** `util/AbstractUnorientedGraph`
+> (dead code — nothing extended it, and it recovered a caller's method name from
+> `new Throwable().getStackTrace()[1]`), so `AbstractUnorientedGraph.java:41` and `:60` no
+> longer exist and the never-reached list is **6 sites**, not 8. The transform's total drops
+> from 33 to 31 for the same reason; #14's and #22's numbers refer to the tree as it was at
+> `f4c233c`, which is the tree the goldens were recorded from. The remaining `util/*` rows
+> moved with the package to `src/domain/java/cz/vutbr/fit/ags/railway/domain/util/`; the
+> `Util.toClass(Object[])` row at `Util.java:42` is now unreached because it has **no**
+> caller at all, rather than one unused one.
 
 ## Result 3 — what actually happens when an assertion fires
 

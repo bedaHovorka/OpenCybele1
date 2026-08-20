@@ -115,6 +115,38 @@ moved to §3.4 in revision; #28 should scope to **this** table, not to a count o
 | **DEF-16** | `RoadAgent.java:102` (TMR-04): `delayInSeconds() + (long)(500*nextGaussian())` | Travel delay goes **negative** for 1 s roads. Cybele fires a negative-delay timer **immediately** ⇒ an *instantaneous traversal*. Not a lost train, not an error. | **Measured** (#9): `delay=-1500` → callback in **1–5 ms**; control `delay=2000` → **2001–2010 ms**. Rate **measured** (#15): 0.02263 over the seeded streams vs analytic 0.0228. **Re-measured [this issue]**, 2×10⁶ draws: **2.2645 %** for `tr1`/`tr2`. | Pinned by the seed — `sim.random.masterSeed` reproduces the same negative draws at the same positions in each road's stream (#15). **Caveat #15 states explicitly and this row must carry:** a stream is pinned by its own **draw count**, not by simulated time, so *which* traversal consumes `tr1`'s fifth draw still depends on the run's history — **a train lost to DEF-02 shifts the alignment even though the sequence is unchanged.** The set of instantaneous traversals is therefore only as stable as the departure set. Also L1-testable (#28) on the extracted delay expression. | An instantaneous traversal in the golden is **correct**. ~~A port that clamps to 0 produces a diff and **that is the port bug**.~~ **FALSIFIED — see `parity-tests/scenarios/COVERAGE.md` §10.9.** `RoadAgent.travelStart` was patched to `Math.max(0, delayInSeconds() + (long)(500*nextGaussian()))`, the clamp confirmed in bytecode, the dist rebuilt, and **all five goldens stayed byte-identical**. Cybele fires a `0` timer exactly as immediately as a `−703` one (SEM-06), so a clamping port differs only in a value no observer can read. **#39 must NOT triage a clamp from a diff here — there will not be one.** DEF-16 is unmappable by any golden and needs an L1 test on the extracted delay expression (#28). |
 | **DEF-08** | `Train.java:123-126` | **DE-CLAIMED — `INVENTORY` DEF-08 is SUPERSEDED, see §4.2.** `INVENTORY` records a "second `LEAVE` for the final station". It is not one: `entered` leaves the **old** position, `destroy` leaves the **current** one. | **Measured [this issue]**, one 66-train traced run: **199 `LEAVE` records, zero `(train, object)` pairs with more than one.** | Nothing to pin as a defect. Pin the **shape**: the `destroy()` `LEAVE` is what *balances* the destination station's `occupied++`, and a port that drops it leaks occupancy forever. | A completed train **must** emit a final `LEAVE` to its destination immediately before `TRAIN_STATE state=KILL`. Its absence is a port bug. |
 
+### 3.1.1 Where class (a) lives after #28, and what locks each pin
+
+#28 moved the rules out of the agents into the framework-free `domain` source set
+(`src/domain/java`, package root `cz.vutbr.fit.ags.railway.domain`) **without changing
+behaviour** — verified by the five L3 scenarios passing at `strict` against the unchanged
+goldens. Every deterministic quirk above that had "L1 unit test (#28)" in its *How it is
+pinned* column now has one. The table below is the map a port author needs; the site column
+in §3.1 still names the 2008 line, which is what `opencybele-baseline` carries.
+
+| Pin | Extracted to | Locked by |
+|---|---|---|
+| **DEF-03** road comparator narrowing | `RoadQueueItem.compareTo` | `RoadQueueOrderingTest.the_long_to_int_narrowing_inverts_past_the_int_range` — asserts the **positive** inversion at `+2³¹`, the negative one only at `−(2³¹+1)`, and the zeroing at `±2³²` |
+| **DEF-03** departure comparator narrowing | `TrainPlan.compareTo` | `TrainPlanTest.the_long_to_int_narrowing_inverts_past_the_int_range` — and that at `±2³²` the id tie-break silently decides a departure seven weeks apart |
+| **DEF-04** dead direction tie-break | `RoadQueue.frequency` | `RoadQueueOrderingTest.frequency_is_dead_code_and_always_returns_zero`, `…a_tie_is_not_broken_by_direction`, `…the_item_keeps_identity_equality` (the last one guards the *cause*: no `equals` override) |
+| **DEF-06** unguarded unboxing NPE | `RoadSchedule.plannedTime` returns `Long`; `RoadQueueItem.diff` unboxes it | `RoadQueueOrderingTest.an_unplanned_train_throws_from_inside_the_comparison` |
+| **DEF-16** unclamped negative travel delay | `TravelDelay.travelMs` | `TravelDelayTest.a_short_track_can_produce_a_negative_delay`, `…the_cast_truncates_toward_zero` |
+| **§4.1** `compareTo(null)` returns `−1` | `RoadQueueItem.compareTo`, first line | `RoadQueueOrderingTest.compareTo_null_returns_minus_one_instead_of_throwing` |
+| **first-path-not-shortest DFS** | `util.Util.path` (moved, not rewritten) | `PathfindingTest.the_dfs_returns_the_first_path_not_the_shortest` |
+
+Two further notes for the ports:
+
+* **The clock read at `RoadAgent.java:210` is gone, and that is not a behaviour change.**
+  §4.1 proves `t` cancels; `RoadQueue` takes the time as a parameter of `offer`/`poll` and
+  holds it for that one heap operation, which is exactly the interval the agent held the
+  clock paused for. `RoadQueueOrderingTest.the_surfaced_time_cancels_out_of_the_comparison`
+  asserts the cancellation is *exact*, at `Long.MIN_VALUE`/`MAX_VALUE` too — the identity
+  holds in two's-complement arithmetic, so it does not depend on staying in range.
+* **`util/AbstractUnorientedGraph` was deleted, not ported.** Nothing extended it, and it
+  recovered a caller's method name from `new Throwable().getStackTrace()[1]`. Its two
+  assertion sites are the reason `assertion-triage.md`'s never-reached list is now 6 rather
+  than 8; see the post-#28 note there.
+
 ### 3.2 Class (b) — nondeterministic, projected or excluded
 
 | id | Site | What varies | Evidence | How it is projected / excluded | If it shows in a diff (#39) |

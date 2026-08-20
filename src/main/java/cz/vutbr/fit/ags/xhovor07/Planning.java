@@ -23,9 +23,12 @@ import cybele.kernel.Agent;
 import cybele.kernel.Cybele;
 import cybele.kernel.CybeleEvent;
 import cybele.kernel.Handler;
-import cz.vutbr.fit.ags.xhovor07.util.HashMapGraph;
-import cz.vutbr.fit.ags.xhovor07.util.UnorientedGraph;
-import cz.vutbr.fit.ags.xhovor07.util.Util;
+import cz.vutbr.fit.ags.railway.domain.DispatchTimeline;
+import cz.vutbr.fit.ags.railway.domain.TrainPlan;
+import cz.vutbr.fit.ags.railway.domain.VoteEnvelope;
+import cz.vutbr.fit.ags.railway.domain.util.HashMapGraph;
+import cz.vutbr.fit.ags.railway.domain.util.UnorientedGraph;
+import cz.vutbr.fit.ags.railway.domain.util.Util;
 
 /**
  * This is one activity of main agent.
@@ -76,13 +79,12 @@ public class Planning implements Handler {
 	trainCountDowns.put(train, latch);
 	//inicializovat hlasovani - odhad casu
 	final long requestTime = Cybele.getTime(RailwayMainAgent.CLOCK_ID);
-	long disp = requestTime;
-	for (Object o : path) {//vsem na ceste
-	    Activity.sendAll(StaticRailwayObject.VOTE_REQUEST+o.toString(), new Serializable[]{train, disp});
-	    final Long delay = mainAgent.getRoadDelays().get(o);
-	    if (delay != null) {
-		disp += 1000*delay.doubleValue();
-	    }
+	// The accumulation itself is DispatchTimeline (#28); this loop is now only the
+	// broadcast. Same values, same order, one per path member.
+	final List<Long> expected = DispatchTimeline.accumulate(path, mainAgent.getRoadDelays(), requestTime);
+	for (int i = 0; i < path.size(); i++) {//vsem na ceste
+	    Activity.sendAll(StaticRailwayObject.VOTE_REQUEST+path.get(i).toString(),
+		    new Serializable[]{train, expected.get(i)});
 	}
 	
 	latch.await();
@@ -94,15 +96,13 @@ public class Planning implements Handler {
 	    // obalkova metoda
 	synchronized (this) {
 	    assert v.size() == path.size();
-	    final long timeDiff = Collections.max(v);
+	    final long timeDiff = VoteEnvelope.max(v);
 	
-	    long plannedTime = requestTime+timeDiff;
-	    for (Object o : path) {//vsem na ceste
-		Activity.sendAll(StaticRailwayObject.VOTE_RESULT+o.toString(), new Serializable[]{train, plannedTime});
-		final Long delay = mainAgent.getRoadDelays().get(o);
-		if (delay != null) {
-		    plannedTime += 1000*delay.doubleValue();
-		}
+	    final List<Long> planned = DispatchTimeline.accumulate(path, mainAgent.getRoadDelays(),
+		    requestTime+timeDiff);
+	    for (int i = 0; i < path.size(); i++) {//vsem na ceste
+		Activity.sendAll(StaticRailwayObject.VOTE_RESULT+path.get(i).toString(),
+			new Serializable[]{train, planned.get(i)});
 	    }
 	
 	    Cybele.pauseClock(RailwayMainAgent.CLOCK_ID);
@@ -120,44 +120,12 @@ public class Planning implements Handler {
     public synchronized void placeTrainIntoFirstStation(CybeleEvent ev) {
 	final TrainPlan poll = queue.poll();
 	final long clockTime = ev.getClockTime();
-	final long departure = poll.departure;
+	final long departure = poll.getDeparture();
 	assert clockTime >= departure;
 	System.out.println(poll);
-	Activity.sendAll(Train.START+poll.train, new Serializable[]{poll.station});//BUG ne vzdy se doruci
+	Activity.sendAll(Train.START+poll.getTrain(), new Serializable[]{poll.getStation()});//BUG ne vzdy se doruci
     }
     
-    /**
-     * 
-     *
-     */
-    class TrainPlan implements Comparable<TrainPlan>, Serializable {
-	private static final long serialVersionUID = 1L;
-	final String train;
-	final String station;
-	long departure;
-	
-	private TrainPlan(String train, String station, long departure) {
-	    super();
-	    this.departure = departure;
-	    this.train = train;
-	    this.station = station;
-	}
-
-	@Override
-	public int compareTo(TrainPlan o) {
-	    final int i = (int) (departure - o.departure);
-	    if (i == 0) {
-		return train.compareTo(o.train);
-	    }
-	    return i;
-	}
-	
-	@Override
-	public String toString() {
-	    return train + " in " + station + " at " + departure;
-	}
-    }
-
     /**
      * getter
      * @return votes

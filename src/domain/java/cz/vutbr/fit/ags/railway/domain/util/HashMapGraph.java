@@ -7,7 +7,7 @@
  * Bedrich Hovorka
  * xhovor07@stud.fit.vutbr.cz
  */
-package cz.vutbr.fit.ags.xhovor07.util;
+package cz.vutbr.fit.ags.railway.domain.util;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;

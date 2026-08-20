@@ -61,7 +61,23 @@ It is also the entry point used by the [`Dockerfile`](Dockerfile) builder stage 
 ./gradlew run
 ```
 
-This launches `cz.vutbr.fit.ags.xhovor07.Main` with the two jars above on the classpath (resolved from `~/.m2`) plus the JVM flags `-ea` and `--patch-module java.base=cybelle`, configured as `applicationDefaultJvmArgs` in `build.gradle.kts`; Cybele reads its `ICS.prop`/`cybele.prop` config from `cybelle/` via that flag. A Swing window opens on launch showing the railway network, live station/track state, and a table of trains currently in transit. There is no automated test suite — verification is manual, through the GUI.
+This launches `cz.vutbr.fit.ags.xhovor07.Main` with the jars above on the classpath (resolved from `~/.m2`) plus the JVM flags `-ea` and `--patch-module java.base=cybelle`, configured as `applicationDefaultJvmArgs` in `build.gradle.kts`; Cybele reads its `ICS.prop`/`cybele.prop` config from `cybelle/` via that flag. A Swing window opens on launch showing the railway network, live station/track state, and a table of trains currently in transit.
+
+### Source layout
+
+| Source set | Directory | What it is | Depends on |
+|---|---|---|---|
+| `domain` | `src/domain/java` | The railway rules as plain Java — timetables, voting rules, queue ordering, graph and pathfinding. Package root `cz.vutbr.fit.ags.railway.domain`. | **nothing** (JDK only) |
+| `main` | `src/main/java` | The Cybele application: agents, activities, GUI, configuration, trace probe. | `domain`, Cybele |
+| `test` | `src/test/java` | L1 unit tests for the `domain` classes (JUnit 5). Runs in `./gradlew build`. | `domain` |
+| `tools` | `tools/java` | Verification drivers (`SeedInterleavingCheck`, `TraceCheck`) — never on the simulation's classpath. | `main` |
+| `characterizationIT` | `src/characterizationIT/java` | The L3 parity harness. Drives an implementation as a **child process**; has no compile-time link to one. | nothing in this repo |
+
+The `domain` source set's dependency configuration is deliberately **empty**, so an accidental `import cybele.kernel.…` there fails the compiler rather than a review. `./gradlew domainPurity` additionally rejects the JDK imports a classpath cannot exclude (`javax.swing`, `java.awt`, `java.lang.reflect`) and any import of the application or the harness. The output is a jar of its own, `opencybele-domain.jar`, which the JADE and Jason branches consume unchanged — see [issue #28](https://github.com/bedaHovorka/OpenCybele1/issues/28).
+
+**The domain classes reproduce the 2008 behaviour, defects and all.** Each pinned quirk carries a `DEF-nn` comment pointing at [`docs/defect-triage.md`](docs/defect-triage.md) §3.1 and is locked in by a unit test named for what it preserves. Do not "fix" one — under the Phase-1 scope guard a behaviour change is a port bug, and several of these quirks are unreachable at scenario scale, so no golden would catch it.
+
+Beyond those unit tests there is no automated test of the simulation itself: end-to-end verification is the L3 parity suite, and interactive verification is manual through the GUI.
 
 ### Headless and bounded runs
 

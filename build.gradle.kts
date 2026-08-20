@@ -21,6 +21,78 @@ application {
     applicationDefaultJvmArgs = listOf("-ea", "--patch-module", "java.base=cybelle")
 }
 
+// ---------------------------------------------------------------------------------------------
+// The domain source set (#28, Phase1.md 1-PORT "extract domain logic into plain classes").
+//
+// `src/domain/java` holds the scheduling, voting and ordering rules as plain Java:
+// StationSchedule, RoadSchedule, RoadQueue(+Item), TrainPlan, DispatchTimeline, VoteEnvelope,
+// TravelDelay, plus the graph/multimap structures moved out of the application package.
+//
+// WHY A SOURCE SET AND NOT JUST A PACKAGE. Its dependency configuration is left EMPTY on
+// purpose. A source set gets its own `domainImplementation`/`domainCompileOnly`, and nothing
+// is added to them, so the domain classes compile against the JDK and nothing else: an
+// `import cybele.kernel.*` in this tree does not fail a review, it fails the compiler. A
+// package inside `main` could not make that promise -- the whole point of criterion 1 ("no
+// framework imports") is that it must be structural.
+//
+// WHY IT SUITS #46. The output is a jar of its own (`opencybele-domain.jar`) whose only
+// content is `cz.vutbr.fit.ags.railway.domain.**`, with no Cybele, JADE, Swing or harness
+// class inside it and no transitive dependency to drag one in. Branch `jason` consumes that
+// artifact -- or the same source directory -- unchanged, which is exactly what "the JADE
+// agents and the Jason internal actions are thin glue over the same classes" requires. The
+// application depends on the jar like any other library, so the direction of the dependency
+// is one-way and enforced: domain never sees the app.
+val domain by sourceSets.creating {
+    java.setSrcDirs(listOf("src/domain/java"))
+}
+
+val domainJar by tasks.registering(Jar::class) {
+    archiveBaseName.set("opencybele-domain")
+    from(domain.output)
+}
+
+// A classpath cannot exclude java.desktop or java.util.Random -- they are in the JDK. This
+// does what the empty configuration cannot: it reads the sources and refuses the imports that
+// would make the domain classes un-reusable, or re-introduce a global clock.
+val domainPurity by tasks.registering {
+    group = "verification"
+    description = "Fails if a domain class imports a framework, a GUI toolkit or the harness (#28)."
+    val sources = domain.java.asFileTree
+    val report = layout.buildDirectory.file("domain-purity/report.txt")
+    inputs.files(sources).withPathSensitivity(PathSensitivity.RELATIVE)
+    outputs.file(report)
+    doLast {
+        // Cybele, JADE, Jason, the harness, every UI toolkit, and reflection -- the last one
+        // because AbstractUnorientedGraph recovered a caller's method name from a stack trace
+        // and #28 deleted it rather than porting it.
+        val forbidden = listOf(
+            "cybele.", "jade.", "jason.", "javax.swing", "java.awt", "javafx.",
+            "cz.vutbr.fit.ags.xhovor07", "cz.vutbr.fit.ags.parity", "java.lang.reflect"
+        )
+        val offences = mutableListOf<String>()
+        sources.forEach { file ->
+            file.readLines().forEachIndexed { i, line ->
+                val trimmed = line.trim()
+                if (trimmed.startsWith("import ")) {
+                    val imported = trimmed.removePrefix("import ").removePrefix("static ").trimEnd(';')
+                    forbidden.filter { imported.startsWith(it) }.forEach {
+                        offences += "${file.name}:${i + 1}: forbidden import '$imported' (matches '$it')"
+                    }
+                }
+            }
+        }
+        val out = report.get().asFile
+        out.parentFile.mkdirs()
+        out.writeText(
+            if (offences.isEmpty()) "domain purity OK: ${sources.files.size} files, no forbidden imports\n"
+            else offences.joinToString("\n", postfix = "\n")
+        )
+        if (offences.isNotEmpty()) {
+            throw GradleException("domain source set is not framework-free:\n" + offences.joinToString("\n"))
+        }
+    }
+}
+
 tasks.withType<JavaCompile>().configureEach {
     // Pin the source encoding rather than inheriting the daemon's platform default:
     // this branch exists to make runs reproducible, and a build that depends on the
@@ -134,6 +206,30 @@ repositories {
 dependencies {
     implementation("com.iai:cybele-api:1.0")
     implementation("com.iai:cybele-impl:1.0")
+    // The domain jar is a library like any other: on the compile and runtime classpath, and
+    // therefore inside `installDist`'s lib/ and on the start script's classpath. The
+    // dependency is deliberately one-way -- `domain` has no dependency on `main`.
+    implementation(files(domainJar))
+
+    // L1 (TESTING.md 4.1): unit tests for the extracted domain rules. JUnit 5 is already a
+    // dependency of the harness source set, so this adds no new coordinate to resolve.
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.named<Test>("test") {
+    useJUnitPlatform()
+    // -ea matches how the application runs (README "Assertions (-ea)", #22): a domain class
+    // asserting its own preconditions must be exercised the same way here as in a recording.
+    jvmArgs("-ea")
+    testLogging {
+        events("passed", "failed", "skipped")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
+}
+
+tasks.named("check") {
+    dependsOn(domainPurity)
 }
 
 // ---------------------------------------------------------------------------------------------

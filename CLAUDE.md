@@ -9,8 +9,11 @@ OpenCybele1 (package `cz.vutbr.fit.ags.xhovor07`) is a 2007/08 school project fo
 ## Build & Run
 
 ```bash
-./gradlew build
+./gradlew build          # compiles every source set, runs the L1 domain unit tests,
+                         # rngProof and domainPurity
 ./gradlew run
+./gradlew test           # just the L1 unit tests for src/domain/java
+./gradlew domainPurity   # just the "no framework imports in the domain" check
 ```
 
 Before the first build, run `scripts/bootstrap-vendor-jars.sh`. It recovers `cybelle/Cybele.jar`/`CybeleImpl.jar` from the `withoutGradle` git tag if absent and installs them into `~/.m2` as `com.iai:cybele-api:1.0`/`com.iai:cybele-impl:1.0`. It is idempotent and does **not** need `mvn` on `PATH` — without Maven it writes the local-repository layout (jar + generated POM) itself. Same script is called by the `Dockerfile` builder stage and is the intended CI entry point, though no CI workflow exists in this repo yet (#25).
@@ -64,7 +67,22 @@ Everything is an **agent** or **activity** in the Cybele kernel, communicating e
   - **`RoadAgent`** — single-track segment between two stations; tracks direction of current travel and a queue of waiting trains ordered primarily by planned timetable slot.
 - **`RailwayObject`** — shared base (`Handler`) that just resolves an agent's own name from its Cybele agent ID.
 - **GUI (`Gui`, `RailwayCanvas`)** — Swing frame with a toolbar to change simulation pace (`Cybele.setPace`), a hand-drawn `RailwayCanvas` (custom `paint`, not layout-managed) showing live station occupancy/road state, and a `JTable` of train states. Repaints are driven by `Observer` notifications from `RailwayMainAgent`.
-- **`util` package** — generic data structures used by the simulation logic: `UnorientedGraph`/`HashMapGraph` (graph of stations/tracks, plus `Util.path`/`Util.pathDirection` for pathfinding), `TreeMultiMap` (sorted multi-map used for station/road timetables), `Doubleton` (unordered pair, used as graph edge key).
+
+### The `domain` source set (`src/domain/java`, package `cz.vutbr.fit.ags.railway.domain`)
+
+Since #28 the railway *rules* are plain Java in a source set of their own, and the agents above are glue over them. Its dependency configuration is deliberately **empty**, so a `cybele.kernel` import there does not compile; `./gradlew domainPurity` additionally rejects Swing/AWT/reflection and any import of the app or the harness. It builds to `opencybele-domain.jar`, which is what lets branches `jade` and `jason` (#37/#46) depend on the same rules unchanged.
+
+- **`StationSchedule`** — the station timetable (`TreeMultiMap<Long,String>`) and its voting rule: window `time ± voteWindow`, one capacity slot held in reserve, `±voteWindow/3` when full, otherwise `plannedTrains·voteWindow/6`.
+- **`StationQueue`** — the FIFO of trains a full station holds at its door.
+- **`RoadSchedule`** — the track timetable plus its inverse (`TreeMap` + `HashMap`, kept in sync) and its voting rule: anything in `time ± delay` defers to `lastKey + delay - time`.
+- **`RoadQueue` / `RoadQueueItem`** — the priority queue of trains waiting for a busy track and the comparator that orders them. Simulated time is a **parameter** of `offer`/`poll`, not a global clock read.
+- **`TrainPlan`** — a scheduled departure and its ordering. Its `toString` is trace-visible.
+- **`DispatchTimeline`** — the dispatch-time accumulation along a path (the two identical loops in `Planning`).
+- **`VoteEnvelope`** — the *obálková metoda*: the election result is `max` of the votes.
+- **`TravelDelay`** — the travel-time expression; the Gaussian draw stays with the agent.
+- **`domain.util` package** — generic data structures: `UnorientedGraph`/`HashMapGraph` (graph of stations/tracks, plus `Util.path`/`Util.pathDirection` for pathfinding), `TreeMultiMap` (sorted multi-map used for station/road timetables), `Doubleton` (unordered pair, used as graph edge key). Moved here unchanged from `cz.vutbr.fit.ags.xhovor07.util`; `AbstractUnorientedGraph` was dead code and was deleted.
+
+**These classes are a transcription, not a cleanup.** Pinned defects (`DEF-03` `long`→`int` narrowing, `DEF-04` dead `frequency` tie-break, `DEF-06` unguarded unboxing NPE, `DEF-16` unclamped negative travel delay, the `compareTo(null) == -1` contract deviation, and the first-path-not-shortest DFS) are reproduced deliberately, each with a `DEF-nn` comment and a unit test in `src/test/java` named for what it preserves. See `docs/defect-triage.md` §3.1/§3.1.1 before changing any of them.
 
 Comments and some Javadoc in the code are in Czech; class/method names and public APIs are in English.
 

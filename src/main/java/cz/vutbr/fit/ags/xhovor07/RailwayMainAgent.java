@@ -29,8 +29,8 @@ import cybele.kernel.Agent;
 import cybele.kernel.Cybele;
 import cybele.kernel.CybeleEvent;
 import cybele.kernel.Handler;
-import cz.vutbr.fit.ags.xhovor07.util.UnorientedGraph;
-import cz.vutbr.fit.ags.xhovor07.util.Util;
+import cz.vutbr.fit.ags.railway.domain.util.UnorientedGraph;
+import cz.vutbr.fit.ags.railway.domain.util.Util;
 
 /**
  * Managing social knowledge

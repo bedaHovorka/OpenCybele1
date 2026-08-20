@@ -75,7 +75,7 @@ javac -nowarn -cp "$API" -d "$WORK/classes" "$HERE"/Exp*.java
 # Order/OrderLock need the app's util classes; OrderLock additionally needs
 # ScenarioConfig (the real topology source since #18). Neither pulls in Cybele.
 javac -nowarn -d "$WORK/classes" \
-      "$REPO"/src/main/java/cz/vutbr/fit/ags/xhovor07/util/*.java \
+      "$REPO"/src/domain/java/cz/vutbr/fit/ags/railway/domain/util/*.java \
       "$REPO"/src/main/java/cz/vutbr/fit/ags/xhovor07/ScenarioConfig.java \
       "$HERE"/Order.java "$HERE"/OrderLock.java
 echo "compiled -> $WORK/classes"
