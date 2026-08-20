@@ -566,7 +566,71 @@ Columns: boot id · instant · scenario · normalized-trace digest · lines · e
 
 ## 12. Reproducing from a fresh clone
 
-_(the run and its output are recorded here after the clone test; see the commit that follows)_
+The acceptance criterion of #24 is that **a fresh clone at the tag reproduces every golden
+byte-for-byte**. It was executed, not asserted. Two clones (the application at the tag, the harness
+at this branch), an **empty** Maven repository so the vendor-jar recovery is exercised rather than
+inherited, and the suite run against the committed bytes:
+
+```bash
+S=<scratch>
+git clone <repo> $S/app && cd $S/app
+git checkout pre-migration-baseline
+MAVEN_REPO_LOCAL=$S/m2 ./scripts/bootstrap-vendor-jars.sh
+./gradlew -Dmaven.repo.local=$S/m2 installDist
+
+git clone <repo> $S/harness && cd $S/harness
+git checkout jade-develop
+./gradlew characterizationIT -Popencybele.dist=$S/app/build/install/opencybele
+```
+
+Actual output, abridged only by dropping the harness' own unit-level tests:
+
+```
+== 1. clone and check out the tag ==
+f4c233c Probe agent emitting the canonical parity trace (#20) (#63)
+pre-migration-baseline
+== 2. bootstrap the vendor jars into an EMPTY local repository ==
+[bootstrap-vendor-jars] installing com.iai:cybele-api:1.0 from cybelle/Cybele.jar into <scratch>/m2 (no mvn on PATH, copying)
+[bootstrap-vendor-jars] installing com.iai:cybele-impl:1.0 from cybelle/CybeleImpl.jar into <scratch>/m2 (no mvn on PATH, copying)
+[bootstrap-vendor-jars] OK — com.iai:cybele-api:1.0 and com.iai:cybele-impl:1.0 available in <scratch>/m2 (2 installed, 0 already current)
+== 3. build the application ==
+cybele-api-1.0.jar  cybele-impl-1.0.jar  opencybele.jar
+== 4. clone the harness + goldens ==
+5112f36586ca03a1…  parity-tests/golden/opencybele-capacity.txt
+3b33b4f0788db91b…  parity-tests/golden/opencybele-congestion.txt
+2e7d34242acebcc9…  parity-tests/golden/opencybele-lifecycle.txt
+84b51584a40b9614…  parity-tests/golden/opencybele-strict.txt
+f6db6287660b38e0…  parity-tests/golden/opencybele-timers.txt
+== 5. run the suite against the committed goldens ==
+OpenCybeleCapacityIT   > a full station refuses a train, a road queue reaches depth two, and voteWindow is visible PASSED
+OpenCybeleCongestionIT > a train is queued on a contended track in the opposing direction, and the golden sees it PASSED
+OpenCybeleLifecycleIT  > the smallest network exercises all fifteen channels and one full train lifecycle PASSED
+OpenCybeleSmokeIT      > the real application runs end to end through OpenCybeleLauncher and matches its golden PASSED
+OpenCybeleStrictIT     > the real application matches its golden LINE FOR LINE at a strict contract PASSED
+OpenCybeleTimersIT     > the four timer sites fire the counts the scenario is sized for, and the noise decides burst membership PASSED
+ParityGateIT           > … SKIPPED   (opt-in; -Dparity.gate.runs was not passed)
+BUILD SUCCESSFUL in 38s
+```
+
+The five file digests printed by the clone are the ones in §10, so the clone's goldens are the
+committed bytes and the runs matched them at `strict` — exact list equality, no tolerance.
+
+Three details that make this a real reproduction rather than a re-run in disguise:
+
+* **The Maven repository was empty.** `bootstrap-vendor-jars.sh` restored both 2008 IAI jars from the
+  `withoutGradle` tag and installed them without `mvn` on `PATH`; Gradle then resolved them through
+  `mavenLocal()` with `-Dmaven.repo.local` pointed at that same directory. Nothing came from the
+  developer's `~/.m2`.
+* **The application was built from the tag**, in a detached checkout of `f4c233c`, not from the
+  worktree the verification runs used.
+* **What was *not* isolated**: the Gradle distribution and its dependency cache (`~/.gradle`), so
+  JUnit and SnakeYAML came from a warm cache rather than from the network, and the JDK is the one in
+  §3. A machine with neither would need network access for the harness' two test-scope dependencies;
+  the application itself has none beyond the two vendor jars.
+
+*(The clone in the transcript above was taken at the commit that introduced this file, before this
+section was filled in with the output. The two trees differ in this file alone — no golden, no
+scenario, no harness source — which `git diff --stat` shows and which no test reads.)*
 
 ## 13. What this manifest does **not** establish
 
