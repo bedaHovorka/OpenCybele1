@@ -207,14 +207,17 @@ class OpenCybeleLifecycleIT {
                 if (admission.isEmpty()) {
                     if (!lastVisited || completed) {
                         violations.add(train + " left " + object + " behind, but that object never"
-                                + " sent it an ENTER_REPLY");
+                                + " sent it an ENTER_REPLY (grep '|ENTER_REPLY|" + object + "|"
+                                + train + "|' in the captured stream)");
                     }
                     continue;
                 }
                 if ((!lastVisited || completed) && !expected.equals(admission.get().next())) {
                     violations.add(train + "'s ENTER_REPLY from " + object + " says next="
                             + admission.get().next() + ", but its own ENTER payloads route it to "
-                            + expected + " (route " + route + ")");
+                            + expected + " (route " + route + "). The two lines are"
+                            + " '|ENTER_REPLY|" + object + "|" + train + "|' and '|ENTER|" + train
+                            + "|" + object + "|' on the captured stream.");
                 }
             }
 
@@ -228,9 +231,12 @@ class OpenCybeleLifecycleIT {
                     int released = causal.leaves(train, object).size();
                     if (released != 1) {
                         violations.add(train + " released " + object + " " + released
-                                + " time(s); every visited object is released exactly once — the"
-                                + " hops by Train.entered, the destination by the destructor"
-                                + " (docs/defect-triage.md §4.2)");
+                                + " time(s) at tick(s) " + causal.leaves(train, object)
+                                + "; every visited object is released exactly once — the hops by"
+                                + " Train.entered, the destination by the destructor"
+                                + " (docs/defect-triage.md §4.2). The lines are 'grep \"|LEAVE|"
+                                + train + "|" + object + "|\"' on the captured stream; route was "
+                                + route);
                     }
                 }
             }

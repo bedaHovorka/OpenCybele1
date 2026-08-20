@@ -100,7 +100,7 @@ permuted within a burst, or when a tick moves by the 8–32 ms the probe's dispa
 | 1 | `OpenCybeleCongestionIT.queuedHandovers` → the `opposingDirection` assertion | **line order across trains**, plus a cross-train `road → station` register mutated while walking | which way each train went down a contended track | 10 (`burst-order`); the direct witness `ROAD_STATE.state` is gone to 7 | **BROKEN — rewritten** |
 | 2 | `OpenCybeleLifecycleIT.assertLeaveFollowsEnterReplyAfterTheFirstHop` | **line order per train** | DEF-07's `ENTER_REPLY`-before-`LEAVE` emission order | 10 | **BROKEN — replaced** |
 | 3 | `OpenCybeleCapacityIT.assertARoadQueueReachedDepthTwo` | **line order**: push on `ENTER`, pop on `ENTER_REPLY` | road queue depth ≥ 2 | 10 | **BROKEN, silently — rewritten** |
-| 4 | `OpenCybeleTimersIT.assertTheNoiseDecidesBurstMembership` | raw tick **difference** of a causally paired `TRAVEL_START`/`TRAVEL_END` | the Gaussian travel noise | 1 (`tick`) | **safe — documented, not changed** |
+| 4 | `OpenCybeleTimersIT.assertTheNoiseDecidesBurstMembership` | raw tick difference of a `TRAVEL_START`/`TRAVEL_END` pair — **and, until this issue, their relative position** | the Gaussian travel noise | 1 (`tick`), 10 `burst-order` | **positionally dependent — repaired, see §4.1** |
 | 5 | `OpenCybeleCongestionIT.assertGoldenCanSeeIt` | raw tick **difference** of one train's `ENTER`/`ENTER_REPLY` on one road | that the queued wait crosses a burst boundary | 1 | **safe — kept** |
 | 6 | `OpenCybeleStrictIT.assertOrderIsStillAsserted` | raw ticks, via `normalizer.segments(filtered)` | how many bursts the run has | 1 | **safe — floor of 10 against a measured 22–23** |
 | 7 | `OpenCybeleCapacityIT.assertAStationRefusedATrain` | set difference over `(train, station)` keys | that some station `ENTER` went unanswered | — | **safe — order-free by construction** |
@@ -129,9 +129,56 @@ Measured, by running the old detector over captures of scenarios that provably n
 
 Both false positives are in exactly the two captures §2's inversion detector flags.
 
+### 3.2 The one this audit found in review rather than in a failure
+
+Item 4 was written up in the first revision of this document as *"already causal pairing, not line
+order … shuffling the capture changes nothing."* **That was false**, and it was caught by review
+rather than by the gate — which is the whole hazard of this class restated, since a claim in a
+Javadoc is not executed.
+
+The pairing was by key, but it was **consumed while walking**: `armed.put(...)` on `TRAVEL_START`,
+`armed.remove(...)` on `TRAVEL_END`. That needs START to precede END *positionally*. On an inversion
+`remove` returns `null`, the sample is dropped from **both** arms in silence, and if the two
+same-burst samples are lost the test fails with
+
+> no traversal completed inside its own burst … a port taking `Math.abs` of the Gaussian looks
+> exactly like this
+
+— accusing a correct port of a defect it does not have. Measured: the two same-burst pairs sit
+**2–4 lines apart**, the same geometry that inverts elsewhere in this document.
+
+Confirmed by permuting each capture **within its bursts** — the reordering `burst-order` declares
+non-contractual — and re-running each detector, 200 shuffles per site:
+
+| detector | shuffles | verdict changes |
+|---|---|---|
+| item 1, `CongestionIT`, rewritten | 200 | **0** |
+| item 2, `LifecycleIT`, rewritten | 200 | **0** |
+| item 3, `CapacityIT`, rewritten | 200 | **0** |
+| item 4, `TimersIT`, **repaired** | 200 | **0** |
+| item 4, `TimersIT`, **as it was** | 200 | **50** |
+
+All 50 are the same failure and it is one-sided: `sameBurst` emptied in 46 of 200 shuffles,
+`nextBurst` in **0**. So the old form could only ever fail *towards* the accusation — never towards
+a false pass.
+
+It was repaired rather than reworded (§4.1). It is worth recording *why it had never actually
+flaked*, because the reason is a real structural fact and not luck:
+
+| pair | captures | inversions |
+|---|---|---|
+| `TRAVEL_START` / `TRAVEL_END`, same `(train, road)` | 25 | **0 of 150 pairs** |
+| `ENTER` / `ENTER_REPLY`, same `(train, object)`, in those same 25 captures | 25 | **5 captures** |
+
+`TRAVEL_END` arrives through the clock as a timer callback (TMR-04); an `ENTER_REPLY` is sent from
+inside the `ENTER` handler, so the request and the reply are two messages in flight at once and the
+timer is not. Two events that never race cannot invert. That is a better argument than the one the
+first revision made — but it is an argument about the application's dispatch, and the assertion no
+longer needs it.
+
 ## 4. What replaced them
 
-All three rewrites use one helper, `TrainTrace`, which re-reads a capture as causal structure:
+Items 1–3 use one helper, `TrainTrace`, which re-reads a capture as causal structure:
 `(train, object)`-keyed payload facts, plus tick **intervals whose width is seconds**. No method in
 it depends on the position of a line in the list.
 
@@ -151,11 +198,69 @@ it depends on the position of a line in the list.
 | 1 · congestion | the queued traversal and the traversal it was queued behind are exact reverses of one another, both read from payload; the wait still has to cross the burst boundary (item 5, unchanged) |
 | 2 · lifecycle | the route reconstructed from `ENTER.position` is one unbroken chain to `target`; every visited object answered once with an `ENTER_REPLY.next` that **agrees with that route**, `null` only at the destination; every visited object released exactly once, the destination by the destructor |
 | 3 · capacity | two queued requests on one road whose waits overlap |
+| 4 · timers | unchanged in substance; the `TRAVEL_START`/`TRAVEL_END` pairing is now a keyed **join** instead of an arm-then-consume walk (§4.1) |
 
 Item 2's replacement is **strictly stronger than the surviving half of what it replaced**: the old
 version never checked the route at all, and captured `ENTER_REPLY.next` in its regex only to discard
 it. `next` is the field that would catch a port routing a train to the wrong end of a track, and it
 is now compared against the route on every hop of every train.
+
+### 4.1 Item 4: join, do not consume
+
+Three lines, and the claim in its Javadoc becomes true rather than softer. Both maps are filled in
+one pass and joined by key afterwards:
+
+```java
+for (String line : raw) { ...armedAt.put(key, tick)... firedAt.put(key, tick)... }
+for (Map.Entry<String, Long> traversal : armedAt.entrySet()) {
+    Long fired = firedAt.get(traversal.getKey());
+    if (fired == null) { continue; }          // armed at the bound, never delivered
+    long elapsed = fired - traversal.getValue();
+    (elapsed <= gap ? sameBurst : nextBurst).add(elapsed);
+}
+```
+
+**Arm-then-consume is the pattern to look for.** All four sites this issue touched had it in some
+form, and it is the one shape that looks key-based and is not: a `Map` plus a `remove()` inside a
+loop over the stream is a positional dependence wearing a key's clothes. `TrainTrace` is built the
+other way round throughout, which is why items 1–3 did not need this fix.
+
+### 4.2 Caveat: a truncated capture, and what "by construction" does and does not cover
+
+`TrainTrace` gives a traversal with no `LEAVE` a `leftAt` of `Long.MAX_VALUE`, and an unanswered
+`ENTER` an `admittedAt` of `Long.MAX_VALUE`. Both are the right reading of a run cut off at its
+bound — the train really was still there — but they mean the derivations are **monotone in
+truncation**: deleting a single `LEAVE` line from a capture makes the road look occupied forever,
+and takes the congestion handover count from 0 to 1 out of nothing.
+
+So §4's "an `ENTER` the road never answered is queued **by construction**" is exact about
+`RoadAgent.enter`'s branch — `acceptTrain` always replies inside the handler — and **not** about a
+capture that stops mid-traversal. The two are the same statement only when the trace is complete.
+
+**Measured, and the two shapes are not equally dangerous — only one of them is:**
+
+| perturbation | tested | claims invented |
+|---|---|---|
+| **tail truncation** — cut a capture at every point from 50 % to 100 % of its length (30 lifecycle + 25 capacity captures) | 7 690 cut points | **0** |
+| **a single missing `LEAVE`** — delete one `LEAVE` line and re-run the handover detector (30 lifecycle captures) | 180 deletions | **30** (one per capture: `tr1`'s) |
+
+Tail truncation is harmless for a structural reason, not by luck: cutting the tail removes every line
+*after* the cut, so a `LEAVE` can never go missing while a later `ENTER` survives to be misread. A
+**hole** in the middle is the dangerous shape, and it invents a queued handover about a sixth of the
+time.
+
+Two things keep that off the suite, and both are outside this file:
+
+* `ScenarioRunner` refuses a capture that never reached EOF (`HARNESS_TIMEOUT`), and each scenario's
+  bound sits in a measured quiet window (`COVERAGE.md` §12.1) — so the harness produces tails, not
+  holes;
+* a port that genuinely drops a `LEAVE` is caught **loudly and by name** by
+  `OpenCybeleLifecycleIT`'s "every visited object released exactly once", which is the assertion
+  added in §4's item 2. The two cover each other: the failure mode that would make the handover
+  detector lie is the one the lifecycle detector reports first.
+
+A future adapter that can hand this code a stream with a hole in it — a lossy transport, a filtered
+capture — needs this caveat revisited before its results are believed.
 
 Validated over the captures in §2 before any suite run: 100/100 clean on `route`/`leave`
 conservation (60 lifecycle + 40 congestion), 40/40 on the congestion handover, 25/25 on capacity
@@ -177,9 +282,13 @@ Two gaps are left open deliberately and are recorded in `COVERAGE.md` rather tha
    normalized trace instead — it is the artefact under contract.
 2. Derive the property from **payload keyed by entity**, not from where lines fell. If permuting the
    capture within a burst changes your answer, you are reading the scheduler.
-3. If you must compare ticks, compare a **difference between two causally paired lines**, and show
+3. **Join, do not consume.** Collect into maps in one pass and pair them afterwards. `map.put(...)`
+   on one event and `map.remove(...)` on another, inside a loop over the stream, is a positional
+   dependence that reads like a key-based one — and it fails *silently*, by dropping the sample,
+   rather than loudly. §3.2 is the whole argument for this step.
+4. If you must compare ticks, compare a **difference between two causally paired lines**, and show
    the distribution has an empty band around your threshold. `assertGoldenCanSeeIt`'s 0–32 ms versus
    424–448 ms is what that looks like; a threshold in a continuum is a tuning constant and will
    cross.
-4. Check your detector against a capture set where the answer should be **no**. §3.1 is the whole
-   argument for step 4.
+5. Check your detector against a capture set where the answer should be **no**. §3.1 is the whole
+   argument for step 5.

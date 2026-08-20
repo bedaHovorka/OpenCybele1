@@ -576,8 +576,19 @@ alphabetically, not causally. `parity-tests/golden/opencybele-lifecycle.txt` end
 44  vl0|<T>|LEAVE|vl0|tr1|<P>|train=vl0     <- the HOP leave, emitted FIRST
 ```
 
-The golden lists them in the opposite order to the one the application emitted them in. What looks
-like "`ENTER_REPLY` before `LEAVE`" is `_` (0x5F) sorting before `|` (0x7C).
+The golden lists them in the opposite order to the one the application emitted them in. Nothing in
+that block is an emission order; it is `NATURAL_ORDER` on the whole line, and it is worth spelling
+out which comparison decides which pair, because there are **three** and they are not the same one:
+
+| pair | decided by | not by |
+|---|---|---|
+| 41 before 42 — `ENTER_REPLY\|stB` before `ENTER\|vl0` | field 3, `_` (0x5F) < `\|` (0x7C) after the common prefix `ENTER` | anything causal — the `ENTER` is what *caused* the reply |
+| 41–42 before 43–44 — every `ENTER*` before every `LEAVE` | field 3, **`E` < `L`** | the DEF-07 ordering it is mistaken for |
+| 43 before 44 — `LEAVE\|vl0\|stB` before `LEAVE\|vl0\|tr1` | field 5, `s` < `t` | emission order, which is `tr1` first |
+
+The middle row is the one that matters here: an `ENTER_REPLY` appearing above a `LEAVE` in any
+golden is `E` sorting before `L`, and it would look exactly the same for a port that emitted them
+the other way round.
 
 *Not assertable from the raw stream either.* The probe records its **handling** order
 (`docs/trace-format.md`), and over 60 captures of `opencybele-lifecycle` 2 print an `ENTER_REPLY`

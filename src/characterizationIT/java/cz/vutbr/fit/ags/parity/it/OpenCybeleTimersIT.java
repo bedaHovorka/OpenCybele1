@@ -150,16 +150,29 @@ class OpenCybeleTimersIT {
      * rather than rewritten, for three reasons that a future edit must not quietly break:
      *
      * <ol>
-     *   <li>It is already <strong>causal pairing</strong>, not line order: the two ticks belong to
-     *       one {@code (train, road)} traversal, matched by key. Shuffling the capture changes
-     *       nothing. That is the property the three rewritten assertions in #72 had to be given.</li>
-     *   <li>The tick it reads is the probe's <em>handling</em> time, so each end carries a few ms of
-     *       dispatch latency — but the quantity compared is a <strong>difference</strong> of two such
-     *       reads, and both errors are of that size. Measured over 25 captures of this scenario,
-     *       149 matched traversals (6 per run, one unfinished at a bound): the same-burst arm read
-     *       0–40 ms and the next-burst arm 288–2456 ms, with <strong>nothing between 40 and
-     *       288</strong>. The 220 ms boundary sits in that empty band, 180 ms from one arm and
-     *       68 ms from the other.</li>
+     *   <li><strong>The pairing is by key, and it is joined rather than consumed.</strong> An
+     *       earlier revision of this method armed on {@code TRAVEL_START} and consumed on
+     *       {@code TRAVEL_END} <em>while walking the stream</em>, which needs START to precede END
+     *       <em>positionally</em> — and on an inversion drops the sample from both arms in silence,
+     *       so the same-burst arm can empty and this test then accuses a correct port of taking
+     *       {@code Math.abs} of the Gaussian. The two maps below are filled in one pass and joined
+     *       afterwards, the same shape {@link TrainTrace} uses, so permuting the capture cannot
+     *       change the result.</li>
+     *   <li><strong>Why the two events do not race in the first place.</strong> Measured over 25
+     *       captures, 150 matched traversals: <strong>0</strong> in which {@code TRAVEL_END} was
+     *       printed before its own {@code TRAVEL_START} — while <strong>5 of those same 25
+     *       captures</strong> contain an {@code ENTER_REPLY} printed before the {@code ENTER} it
+     *       answers. The difference is structural, not luck: {@code TRAVEL_END} arrives through the
+     *       clock as a timer callback (TMR-04), whereas an {@code ENTER_REPLY} is sent from inside
+     *       the {@code ENTER} handler, so the reply and its request are two messages in flight at
+     *       once and the timer is not. The join above means the assertion no longer depends on that
+     *       — but it is why the site was never observed to flake.</li>
+     *   <li><strong>The tick difference has an empty band around the threshold.</strong> The tick is
+     *       the probe's <em>handling</em> time, so each end carries a few ms of dispatch latency —
+     *       but the compared quantity is a <strong>difference</strong> of two such reads. Over the
+     *       same 150 traversals the same-burst arm read 0–40 ms and the next-burst arm 288–2456 ms,
+     *       with <strong>nothing between 40 and 288</strong>. The 220 ms boundary sits in that empty
+     *       band, 180 ms from one arm and 68 ms from the other.</li>
      *   <li>The 68 ms side is the tighter one, and it is <strong>schedule-derived</strong> rather
      *       than latency-derived: it is {@code tr1}'s +294 ms Gaussian draw at a nominal delay of 0.
      *       Per {@code COVERAGE.md} §12.2 a schedule-derived gap is a simulated-time quantity and
@@ -175,24 +188,34 @@ class OpenCybeleTimersIT {
         long gap = CanonicalTraceNormalizer.DEFAULT_SEGMENT_GAP_TICKS;
         Pattern start = Pattern.compile("^(vl\\d+)\\|(\\d+)\\|TRAVEL_START\\|[^|]*\\|(tr\\d+)\\|.*$");
         Pattern end = Pattern.compile("^(vl\\d+)\\|(\\d+)\\|TRAVEL_END\\|(tr\\d+)\\|.*$");
-        Map<String, Long> armed = new LinkedHashMap<>();
+        // Collected in one pass, JOINED afterwards -- never armed-then-consumed while walking. A
+        // consuming walk needs TRAVEL_START to precede TRAVEL_END in the STREAM, and on an
+        // inversion it silently drops the sample from both arms rather than failing: the
+        // same-burst arm can empty out and this test then accuses a correct port of taking
+        // Math.abs of the Gaussian. See docs/raw-assertion-audit.md 4.1.
+        Map<String, Long> armedAt = new LinkedHashMap<>();
+        Map<String, Long> firedAt = new LinkedHashMap<>();
         List<Long> sameBurst = new ArrayList<>();
         List<Long> nextBurst = new ArrayList<>();
 
         for (String line : raw) {
             Matcher s = start.matcher(line);
             if (s.matches()) {
-                armed.put(s.group(1) + "@" + s.group(3), Long.parseLong(s.group(2)));
+                armedAt.put(s.group(1) + "@" + s.group(3), Long.parseLong(s.group(2)));
                 continue;
             }
             Matcher e = end.matcher(line);
             if (e.matches()) {
-                Long at = armed.remove(e.group(1) + "@" + e.group(3));
-                if (at != null) {
-                    long elapsed = Long.parseLong(e.group(2)) - at;
-                    (elapsed <= gap ? sameBurst : nextBurst).add(elapsed);
-                }
+                firedAt.put(e.group(1) + "@" + e.group(3), Long.parseLong(e.group(2)));
             }
+        }
+        for (Map.Entry<String, Long> traversal : armedAt.entrySet()) {
+            Long fired = firedAt.get(traversal.getKey());
+            if (fired == null) {
+                continue;   // armed at the bound and never delivered; not a measurement
+            }
+            long elapsed = fired - traversal.getValue();
+            (elapsed <= gap ? sameBurst : nextBurst).add(elapsed);
         }
 
         assertTrue(!sameBurst.isEmpty(), "no traversal completed inside its own burst. On a road"

@@ -35,9 +35,18 @@ import java.util.regex.Pattern;
  * <h2>What is read instead</h2>
  *
  * <p>Everything below is derived from <strong>payload content</strong>, keyed by
- * {@code (train, object)}, and from <strong>tick intervals whose width is seconds</strong>. No
- * method here depends on the position of a line in the list, and none of them compares two ticks
- * that the application emits within one burst.
+ * {@code (train, object)}, and from <strong>tick intervals whose width is seconds</strong>. Nothing
+ * here compares two ticks the application emits within one burst.
+ *
+ * <p><strong>The one residual dependence on order, stated exactly.</strong> {@link #target(String)}
+ * and {@link #occupantAt(String, long, String)} resolve with {@code findFirst()} over insertion
+ * order. On any trace the baseline can produce that decides nothing — a train's {@code ENTER}
+ * payloads all name the same {@code target}, and a road is single-occupancy (ST-20 / DEF-14), so
+ * each stream has exactly one candidate. It would decide something only for a port whose targets
+ * disagree between hops, or that puts two trains on one track — which is a port bug either way, and
+ * one the assertions in this package are looking for rather than relying on. No assertion's verdict
+ * changes under permutation; which of two already-wrong candidates gets NAMED in the failure
+ * message could.
  *
  * <ul>
  *   <li>{@code ENTER|<train>|<object>|…|position=<P>,target=<D>} gives the edge {@code P -> object}
@@ -98,9 +107,17 @@ final class TrainTrace {
             return admittedAt - requestedAt;
         }
 
-        /** True when this traversal is the exact reverse of {@code other}'s. */
+        /**
+         * True when this traversal is the exact reverse of {@code other}'s.
+         *
+         * <p>{@code !from.equals(to)} is not redundant. Without it a road that answered
+         * {@code next == position} on both traversals — a port bug, not a baseline behaviour —
+         * would satisfy the reversal test with both trains entering from the SAME end, which the
+         * predicate this replaced ({@code occupantFrom != null && !occupantFrom.equals(from)})
+         * correctly called false. Keeping it makes the new form a strict superset of the old.
+         */
         boolean opposes(Traversal other) {
-            return from.equals(other.to()) && to.equals(other.from());
+            return !from.equals(to) && from.equals(other.to()) && to.equals(other.from());
         }
 
         @Override
