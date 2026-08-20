@@ -51,6 +51,39 @@ val domainJar by tasks.registering(Jar::class) {
     from(domain.output)
 }
 
+// ---------------------------------------------------------------------------------------------
+// The jade source set (#27, Phase1.md 1-PORT "messages -> ACLMessage").
+//
+// `src/jade/java` holds the ONE layer of the message ontology that cannot be framework-free:
+// the binding from the domain's message records to `jade.lang.acl.ACLMessage`, the fifteen
+// `MessageTemplate`s, and the topic names the probe (#36) registers to.
+//
+// WHY A SOURCE SET OF ITS OWN, AND NOT `main`. `main` is the Cybele application. This branch's
+// parity gate runs it, its goldens are frozen, and `./gradlew run` / `installDist` must keep
+// launching it with `--patch-module java.base=cybelle` and nothing else on the classpath.
+// Putting the JADE jar on `implementation` would drop jade-4.3.jar into `build/install/
+// opencybele/lib` and onto the start script's classpath, which is a change to the thing under
+// measurement for no benefit -- the Cybele agents deliberately do NOT use this ontology (that
+// is #30-#34's job, ticket by ticket, each with its own gate run). A source set gives the
+// classes a home, a compile check on every build, and zero reach into the running application.
+//
+// It depends on `domain` and on JADE, and on nothing else. In particular it must never import
+// `cz.vutbr.fit.ags.xhovor07` -- the split between this and `domain` is the split between
+// "needs jade.lang.acl" and "reusable verbatim by branch jason (#46)".
+val jadeOntology by sourceSets.creating {
+    java.setSrcDirs(listOf("src/jade/java"))
+    compileClasspath += domain.output
+    runtimeClasspath += domain.output
+}
+
+dependencies {
+    "jadeOntologyImplementation"("net.sf.ingenias:jade:4.3")
+}
+
+tasks.named("check") {
+    dependsOn(jadeOntology.classesTaskName)
+}
+
 // A classpath cannot exclude java.desktop or java.util.Random -- they are in the JDK. This
 // does what the empty configuration cannot: it reads the sources and refuses the imports that
 // would make the domain classes un-reusable, or re-introduce a global clock.
@@ -215,9 +248,21 @@ dependencies {
     // dependency of the harness source set, so this adds no new coordinate to resolve.
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+
+    // #27's binding tests -- template disjointness and the ACLMessage round trip -- need the
+    // real JADE classes to be worth anything: a hand-rolled stub would prove that the stub is
+    // disjoint. JADE is on the TEST classpath only. It is deliberately NOT on `implementation`;
+    // see the jadeOntology source set above for why.
+    testImplementation("net.sf.ingenias:jade:4.3")
 }
 
+// The binding classes are compiled by their own source set; the unit tests see them the same
+// way #30-#34 will, as a compiled output on the classpath rather than as loose sources.
+sourceSets["test"].compileClasspath += jadeOntology.output
+sourceSets["test"].runtimeClasspath += jadeOntology.output
+
 tasks.named<Test>("test") {
+    dependsOn(jadeOntology.classesTaskName)
     useJUnitPlatform()
     // -ea matches how the application runs (README "Assertions (-ea)", #22): a domain class
     // asserting its own preconditions must be exercised the same way here as in a recording.

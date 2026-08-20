@@ -82,9 +82,28 @@ Since #28 the railway *rules* are plain Java in a source set of their own, and t
 - **`TravelDelay`** — the travel-time expression; the Gaussian draw stays with the agent.
 - **`domain.util` package** — generic data structures: `UnorientedGraph`/`HashMapGraph` (graph of stations/tracks, plus `Util.path`/`Util.pathDirection` for pathfinding), `TreeMultiMap` (sorted multi-map used for station/road timetables), `Doubleton` (unordered pair, used as graph edge key). Moved here unchanged from `cz.vutbr.fit.ags.xhovor07.util`; `AbstractUnorientedGraph` was dead code and was deleted.
 
+- **`domain.msg` package** — the message ontology (#27): `Channel` (all fifteen Cybele channels as data — event token, payload keys, endpoint kinds, subject rule, FIPA performative), `RailwayMessage` and the fifteen immutable payload records, `Payloads` (trace field-7 rendering and its inverse), `TraceLine` (the seven-field trace line), plus `Performative`/`Subject`/`Party`/`RoadDirection`. Pure data, no framework: branch `jason` (#46) reuses it verbatim. See [`docs/message-ontology.md`](docs/message-ontology.md).
+
 **These classes are a transcription, not a cleanup.** Pinned defects (`DEF-03` `long`→`int` narrowing, `DEF-04` dead `frequency` tie-break, `DEF-06` unguarded unboxing NPE, `DEF-16` unclamped negative travel delay, the `compareTo(null) == -1` contract deviation, and the first-path-not-shortest DFS) are reproduced deliberately, each with a `DEF-nn` comment and a unit test in `src/test/java` named for what it preserves. See `docs/defect-triage.md` §3.1/§3.1.1 before changing any of them.
 
 Comments and some Javadoc in the code are in Czech; class/method names and public APIs are in English.
+
+### The `jadeOntology` source set (`src/jade/java`, package `cz.vutbr.fit.ags.railway.jade`)
+
+The one layer of the message ontology that cannot be framework-free: `RailwayOntology` (the
+`:ontology` slot and topic name per channel, and the FIPA act name → JADE `int` lookup),
+`Messages` (build/read an `ACLMessage` — direct AID unicast, plus the optional probe topic as a
+second receiver) and `Templates` (the fifteen `MessageTemplate`s, the per-agent-kind unions, and
+the `not(inbound)` drain).
+
+It is **not** on the Cybele application's classpath: JADE is on `jadeOntologyImplementation` and
+on `testImplementation`, never on `implementation`, so `./gradlew run` and `installDist` are the
+Cybele launch they always were. The Cybele agents deliberately do not use the ontology yet —
+rewiring them is #30–#34, ticket by ticket, each with its own parity gate run.
+
+```bash
+./gradlew compileJadeOntologyJava   # just this source set
+```
 
 ## Parity harness (`characterizationIT`)
 
