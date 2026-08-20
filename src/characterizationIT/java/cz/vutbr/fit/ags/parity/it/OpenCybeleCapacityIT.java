@@ -13,7 +13,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -125,32 +124,59 @@ class OpenCybeleCapacityIT {
      * returns. So a road that only ever holds one queued train never calls
      * {@code OueueItem.compareTo}. Depth two is the threshold, and this is the only scenario that
      * reaches it.
+     *
+     * <h2>#72: derived causally, not from where the lines fell</h2>
+     *
+     * <p>The first revision walked the raw stream keeping a per-road list of trains, pushing on
+     * {@code ENTER} and popping on {@code ENTER_REPLY}, and called two entries "depth two". That
+     * read line order, which is the probe's <em>handling</em> order and inverts for lines sharing a
+     * tick ({@code docs/raw-assertion-audit.md} §2) — and here the failure is silent rather than
+     * flaky: an {@code ENTER_REPLY} printed before its own {@code ENTER} never popped anything, the
+     * train stayed on the list for the rest of the run, and the <em>next</em> ordinary entry to that
+     * road satisfied "depth two" without any queue having formed. The assertion would have gone on
+     * passing after a retune that removed the behaviour it names.
+     *
+     * <p>What is read instead is the branch condition itself. {@code RoadAgent.enter} pushes exactly
+     * when the road is not {@code FREE}, so a request is queued exactly when another train's
+     * traversal contains its tick; and an {@code ENTER} the road never answered is queued by
+     * construction, because {@code acceptTrain} always replies inside the handler. Depth two is then
+     * two queued requests on one road whose waits overlap — intervals seconds wide, no line order,
+     * no threshold.
      */
     private static void assertARoadQueueReachedDepthTwo(List<String> raw) {
-        Pattern enter = Pattern.compile("^(vl\\d+)\\|(\\d+)\\|ENTER\\|[^|]*\\|(tr\\d+)\\|.*$");
-        Pattern reply = Pattern.compile("^(vl\\d+)\\|\\d+\\|ENTER_REPLY\\|(tr\\d+)\\|.*$");
-        Map<String, List<String>> pending = new LinkedHashMap<>();
-        List<String> depthTwo = new ArrayList<>();
-        for (String line : raw) {
-            Matcher e = enter.matcher(line);
-            if (e.matches()) {
-                List<String> waiting = pending.computeIfAbsent(e.group(3), k -> new ArrayList<>());
-                waiting.add(e.group(1));
-                if (waiting.size() >= 2) {
-                    depthTwo.add(e.group(3) + " held " + waiting + " at tick " + e.group(2));
-                }
-                continue;
+        TrainTrace causal = TrainTrace.of(raw);
+        assertTrue(causal.malformed().isEmpty(), "the causal reconstruction is unsound for this"
+                + " capture, so nothing below means what it says: " + causal.malformed());
+
+        List<TrainTrace.Request> queued = new ArrayList<>();
+        for (TrainTrace.Request request : causal.roadRequests()) {
+            boolean unanswered = causal.admittedAt(request) == Long.MAX_VALUE;
+            boolean pushed = causal.occupantAt(request.object(), request.at(), request.train())
+                    .isPresent();
+            if (unanswered || pushed) {
+                queued.add(request);
             }
-            Matcher r = reply.matcher(line);
-            if (r.matches()) {
-                pending.getOrDefault(r.group(2), new ArrayList<>()).remove(r.group(1));
+        }
+
+        List<String> depthTwo = new ArrayList<>();
+        for (int i = 0; i < queued.size(); i++) {
+            for (int j = i + 1; j < queued.size(); j++) {
+                TrainTrace.Request a = queued.get(i);
+                TrainTrace.Request b = queued.get(j);
+                if (!a.object().equals(b.object())) {
+                    continue;
+                }
+                if (a.at() < causal.admittedAt(b) && b.at() < causal.admittedAt(a)) {
+                    depthTwo.add(a.object() + " held " + a.train() + " (from " + a.at() + ") and "
+                            + b.train() + " (from " + b.at() + ") at the same time");
+                }
             }
         }
         assertTrue(!depthTwo.isEmpty(), "no road ever held two trains at once, so"
                 + " PriorityQueue.offer never compared anything and OueueItem.compareTo — with"
                 + " DEF-03's int narrowing and DEF-04's dead tie-break inside it — did not run."
                 + " This is the only scenario in the set that reaches it; losing that silently is"
-                + " what this assertion prevents.");
+                + " what this assertion prevents. Queued road requests seen: " + queued);
     }
 
     /**

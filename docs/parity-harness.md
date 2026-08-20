@@ -219,6 +219,13 @@ tolerance budget applies only to which ids exist and buys nothing when none go m
 5. **Liveness**, also on the raw stream.
 6. **Normalize** — refusing an empty result — then record or compare at the declared contract level.
 
+A scenario's own `*IT` class then adds **property assertions** on top of those six steps. Some of
+them must read the RAW capture, because the quantity they are about is one the normalizer erases.
+That is allowed and sometimes unavoidable — but the raw capture is the probe's *handling* order, not
+the application's send order, so an assertion must never derive a property from where the lines fell.
+The full enumeration of every such site, the measured inversion rate, and the recipe for writing one
+safely are in [`raw-assertion-audit.md`](raw-assertion-audit.md).
+
 Steps 3 and 4 are in that order for a reason that was got wrong first time round. The latch used to
 sit *after* the scan, so a run that exited 5 **and** printed a throwable — the overwhelmingly likely
 shape, since a dead clock channel is usually preceded by a swallowed throwable — failed as an

@@ -12,13 +12,10 @@ import cz.vutbr.fit.ags.parity.spec.ScenarioSpecParser;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -49,6 +46,9 @@ class OpenCybeleLifecycleIT {
     private static final Pattern CANONICAL =
             Pattern.compile("^([^|]+)\\|<T>\\|([A-Z_]+)\\|([^|]*)\\|([^|]*)\\|[^|]*\\|(.*)$");
 
+    /** Below this many hops after a train's first, the hop assertions stop meaning anything. */
+    private static final int MIN_HOPS = 4;
+
     @Test
     @DisplayName("the smallest network exercises all fifteen channels and one full train lifecycle")
     void lifecycleScenarioCoversEveryChannelAndTheDestructor() {
@@ -67,7 +67,7 @@ class OpenCybeleLifecycleIT {
 
         assertEveryChannelAppears(trace);
         assertOnlyTrainsDie(trace);
-        assertLeaveFollowsEnterReplyAfterTheFirstHop(raw);
+        assertEveryHopIsPairedAndEveryObjectReleasedOnce(raw);
 
         if (GoldenStore.recording()) {
             System.out.println("parity: recorded " + trace.size() + " line(s) to " + report.goldenFile());
@@ -130,65 +130,132 @@ class OpenCybeleLifecycleIT {
     }
 
     /**
-     * INVENTORY DEF-07, which {@code docs/defect-triage.md} classes (a) — deterministic, "the port
-     * must reproduce it" — and pins by exactly this ordering: {@code Train.entered} sends
-     * {@code LEAVE} to the OLD object <em>after</em> the new object has already incremented its
-     * occupancy, so for every hop <strong>after the first</strong> the new object's
-     * {@code ENTER_REPLY} precedes the old object's {@code LEAVE}.
+     * Every hop of every train, checked against the route the train's own payloads describe — and
+     * every object it visited released exactly once, the destination by the destructor.
      *
-     * <p><strong>The first hop is the exception and is special-cased here</strong>, exactly as the
-     * triage cell warns: {@code leaveObject} is a no-op while {@code position == null}
-     * (Train.java:110-114), so a train's first {@code ENTER_REPLY} has no paired {@code LEAVE} and a
-     * rule written literally from the cell false-positives on every train.
+     * <h2>What this replaced, and why (#72)</h2>
      *
-     * <p>Asserted on the RAW stream. The normalizer sorts within a burst, and these two lines share
-     * one, so the projected trace is the wrong place to look for an emission order.
+     * <p>This method used to assert DEF-07's <em>emission order</em> directly: "for every hop after
+     * the first, the new object's {@code ENTER_REPLY} precedes the old object's {@code LEAVE}", read
+     * off the raw stream. {@code docs/defect-triage.md} §3.1's classification of DEF-07 as (a) —
+     * deterministic, the port must reproduce it — is <strong>correct and unchanged</strong>: the
+     * <em>send</em> order inside {@code Train.entered} really is fixed. The observable was the
+     * problem.
+     *
+     * <ul>
+     *   <li>The probe stamps and prints when it <em>handles</em> a message, not when the sender sent
+     *       it ({@code docs/trace-format.md}, "{@code tick} — simulated, and read at handling
+     *       time"), and lines sharing a tick "are emitted in whatever order the kernel delivered
+     *       them". On an uncontended hop the reply comes back in the same tick, so DEF-07's two
+     *       lines are exactly such a pair. Measured over 60 captures of this scenario, 2 print an
+     *       {@code ENTER_REPLY} before the {@code ENTER} it answers, which throws the old pairing
+     *       queue permanently out of step and produces two violations from one inverted line.</li>
+     *   <li>The projected trace cannot carry it either. {@code burst-order} sorts within a burst, so
+     *       {@code parity-tests/golden/opencybele-lifecycle.txt} lists {@code LEAVE|vl0|stB}
+     *       <em>before</em> {@code LEAVE|vl0|tr1} — the opposite of the order the application
+     *       emitted them in. The claim that the ordering "is in every golden" was false.</li>
+     * </ul>
+     *
+     * <p>DEF-07 is therefore pinned where the wait separates its two lines into different bursts and
+     * the golden can hold it: {@code OpenCybeleCongestionIT}'s queued hop. What is asserted here
+     * instead is <strong>strictly stronger than the surviving half of the old check</strong>, and
+     * costs no order at all:
+     *
+     * <ol>
+     *   <li>the route reconstructed from {@code ENTER.position} is a single unbroken chain from
+     *       {@code position=null} to {@code target} — the old version never checked the route;</li>
+     *   <li>every visited object answered exactly once, and its {@code ENTER_REPLY.next} <em>agrees
+     *       with that route</em>, {@code null} only at the destination. That is the direction and
+     *       routing contract, on the one field no projection rule touches, and it was previously
+     *       captured by the regex and thrown away;</li>
+     *   <li>every visited object was released exactly once and nothing else was — the conservation
+     *       {@code docs/defect-triage.md} §4.2 measured when it de-claimed DEF-08 ("199 {@code LEAVE}
+     *       records, zero {@code (train, object)} pairs with more than one"), which nothing in the
+     *       suite asserted until now. The destructor's {@code LEAVE} is identified <strong>positively
+     *       </strong>, as the one for the destination of a train that reached {@code state=KILL},
+     *       rather than by the old "the position happens to match" fallback that silently absorbed
+     *       a mis-paired line.</li>
+     * </ol>
+     *
+     * <p>A train still in flight at the run's bound is held only to (1) and to the part of (2) its
+     * route reaches; the end-of-route claims apply to trains that completed.
      */
-    private static void assertLeaveFollowsEnterReplyAfterTheFirstHop(List<String> raw) {
-        Pattern reply = Pattern.compile("^(vl\\d+)\\|\\d+\\|ENTER_REPLY\\|([^|]+)\\|.*$");
-        Pattern leave = Pattern.compile("^(vl\\d+)\\|\\d+\\|LEAVE\\|[^|]*\\|([^|]+)\\|.*$");
-        Map<String, String> position = new LinkedHashMap<>();
-        Map<String, Deque<String>> owed = new LinkedHashMap<>();
-        List<String> violations = new ArrayList<>();
-        int hopsChecked = 0;
+    private static void assertEveryHopIsPairedAndEveryObjectReleasedOnce(List<String> raw) {
+        TrainTrace causal = TrainTrace.of(raw);
+        assertTrue(causal.malformed().isEmpty(), "the causal reconstruction is unsound for this"
+                + " capture, so nothing below means what it says: " + causal.malformed());
 
-        for (String line : raw) {
-            Matcher r = reply.matcher(line);
-            if (r.matches()) {
-                String train = r.group(1);
-                String previous = position.get(train);
-                if (previous != null) {
-                    // Hop 2 and later: this reply must be followed by a LEAVE for the OLD object.
-                    owed.computeIfAbsent(train, k -> new ArrayDeque<>()).add(previous);
-                    hopsChecked++;
-                }
-                position.put(train, r.group(2));
+        List<String> violations = new ArrayList<>();
+        int hops = 0;
+
+        for (String train : causal.trains()) {
+            violations.addAll(causal.routeProblems(train));
+            List<String> route = causal.route(train);
+            if (route.isEmpty()) {
+                violations.add(train + " never entered anything");
                 continue;
             }
-            Matcher l = leave.matcher(line);
-            if (l.matches()) {
-                String train = l.group(1);
-                Deque<String> pending = owed.getOrDefault(train, new ArrayDeque<>());
-                if (!pending.isEmpty()) {
-                    String expected = pending.poll();
-                    if (!expected.equals(l.group(2))) {
-                        violations.add("expected " + train + " to LEAVE " + expected
-                                + " but it left " + l.group(2) + ": " + line);
+            hops += route.size() - 1;
+            boolean completed = causal.completed(train);
+            Optional<String> target = causal.target(train);
+
+            for (int i = 0; i < route.size(); i++) {
+                String object = route.get(i);
+                boolean lastVisited = i + 1 == route.size();
+                String expected = lastVisited ? "null" : route.get(i + 1);
+                Optional<TrainTrace.Admission> admission = causal.admission(train, object);
+                if (admission.isEmpty()) {
+                    if (!lastVisited || completed) {
+                        violations.add(train + " left " + object + " behind, but that object never"
+                                + " sent it an ENTER_REPLY (grep '|ENTER_REPLY|" + object + "|"
+                                + train + "|' in the captured stream)");
                     }
-                } else if (!l.group(2).equals(position.get(train))) {
-                    // The only LEAVE with nothing owed is the destructor's, for the CURRENT
-                    // position — docs/defect-triage.md §4.2, which de-claims DEF-08 and records
-                    // that this LEAVE is what balances the destination station's occupied++.
-                    violations.add("unpaired LEAVE that is not the destructor's: " + line);
+                    continue;
+                }
+                if ((!lastVisited || completed) && !expected.equals(admission.get().next())) {
+                    violations.add(train + "'s ENTER_REPLY from " + object + " says next="
+                            + admission.get().next() + ", but its own ENTER payloads route it to "
+                            + expected + " (route " + route + "). The two lines are"
+                            + " '|ENTER_REPLY|" + object + "|" + train + "|' and '|ENTER|" + train
+                            + "|" + object + "|' on the captured stream.");
+                }
+            }
+
+            if (completed) {
+                String arrivedAt = route.get(route.size() - 1);
+                if (target.isPresent() && !target.get().equals(arrivedAt)) {
+                    violations.add(train + " died at " + arrivedAt + " but its ENTER payloads name "
+                            + target.get() + " as the target");
+                }
+                for (String object : route) {
+                    int released = causal.leaves(train, object).size();
+                    if (released != 1) {
+                        violations.add(train + " released " + object + " " + released
+                                + " time(s) at tick(s) " + causal.leaves(train, object)
+                                + "; every visited object is released exactly once — the hops by"
+                                + " Train.entered, the destination by the destructor"
+                                + " (docs/defect-triage.md §4.2). The lines are 'grep \"|LEAVE|"
+                                + train + "|" + object + "|\"' on the captured stream; route was "
+                                + route);
+                    }
+                }
+            }
+            String prefix = train + "@";
+            for (String pair : causal.leftPairs()) {
+                if (pair.startsWith(prefix) && !route.contains(pair.substring(prefix.length()))) {
+                    violations.add(train + " sent a LEAVE for " + pair.substring(prefix.length())
+                            + ", which is not on its route " + route);
                 }
             }
         }
 
-        assertTrue(violations.isEmpty(), "DEF-07's ordering invariant is broken. docs/defect-triage.md"
-                + " §3.1 classes it (a) — deterministic, the port must reproduce it — and pins it by"
-                + " exactly this ordering: " + violations);
-        assertTrue(hopsChecked >= 4, "only " + hopsChecked + " hop(s) after a train's first were"
-                + " available to check DEF-07 against; the scenario has shrunk below what this"
-                + " assertion needs to mean anything");
+        assertTrue(violations.isEmpty(), "a train's hops do not match the route its own ENTER and"
+                + " ENTER_REPLY payloads describe, or an object was released the wrong number of"
+                + " times. DEF-07's ordering is pinned by OpenCybeleCongestionIT, where the queued"
+                + " wait separates the two lines into different bursts; what is checked here is the"
+                + " pairing itself, which no ordering can perturb: " + violations);
+        assertTrue(hops >= MIN_HOPS, "only " + hops + " hop(s) after a train's first were available"
+                + " to check; the scenario has shrunk below what this assertion needs to mean"
+                + " anything");
     }
 }
