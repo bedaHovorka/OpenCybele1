@@ -37,16 +37,16 @@ Goal: pin current behavior so completely that the JADE port can be judged mechan
 
 ### 1-PRE.3 Scenario coverage extension
 Extend scenarios until every row of the Stage-0 inventory is exercised at least once:
-- [x] One scenario per agent type in isolation (where meaningful) — `opencybele-lifecycle`; see COVERAGE.md §3 for why true isolation is not a configuration this system has.
-- [x] One scenario per message type / interaction pair — all fifteen channels appear in all four scenarios, asserted by `OpenCybeleLifecycleIT` rather than claimed.
-- [x] One scenario per timer/periodic activity (assert tick counts over a bounded window, not durations — T§7) — `opencybele-timers`.
+- [x] One scenario per agent type in isolation (where meaningful) — `opencybele-lifecycle`; see COVERAGE.md §4 for why true isolation is not a configuration this system has.
+- [x] One scenario per message type / interaction pair — all fifteen channels appear in all five scenarios, asserted by `OpenCybeleLifecycleIT` rather than claimed.
+- [x] One scenario per timer/periodic activity (assert tick counts over a bounded window, not durations — T§7) — `opencybele-timers`, which asserts the firing counts of all four sites as equalities. It does **not** pin DEF-16: a clamping port passes the whole suite, and COVERAGE.md §10.9 hands that defect to #28 with the measurement.
 - [x] Startup/shutdown scenario (agent lifecycle order, initial messages) — `opencybele-lifecycle`, including the asymmetry that only `Train` ever dies.
 - [x] At least one "full system" scenario combining everything — `opencybele-strict`, the shipped topology unchanged.
-- [x] Edge behaviors worth pinning — only if the current system has defined observable behavior for them. Of the three named in #23, **one is covered** (a road occupied in the opposing direction, `opencybele-congestion`) and **two are not, with measurements**: a station at capacity was not reachable at any configuration tried, and origin-equals-destination is rejected by `ScenarioConfig` at startup. COVERAGE.md §10.1 and §10.3.
+- [x] Edge behaviors worth pinning — only if the current system has defined observable behavior for them. Of the three named in #23, **two are covered**: a road occupied in the opposing direction (`opencybele-congestion`) and a station at capacity (`opencybele-capacity`, added in revision after the first claim that this branch was unreachable was falsified — COVERAGE.md §10.1 keeps the retraction). The third, origin-equals-destination, is **rejected by `ScenarioConfig` at startup** and its code path is taken by every arrival instead; COVERAGE.md §10.3.
 - [x] **Coverage checklist committed: [`parity-tests/scenarios/COVERAGE.md`](../parity-tests/scenarios/COVERAGE.md)** — inventory row → scenario id, with a written justification, backed by a measurement, for every unmapped row. It also carries the gate and mutation results per scenario, and the two bound-margin rules a future scenario author needs (§12).
 
 ### 1-PRE.4 Record & freeze goldens
-> **Handed over by 1-PRE.3:** the four scenarios are byte-reproducible across 10 consecutive runs
+> **Handed over by 1-PRE.3:** the five scenarios are byte-reproducible across 10 consecutive runs
 > **within one session** (`parity-tests/scenarios/COVERAGE.md` §2.1, with the trace digests written
 > down). The **cross-occasion half is not established** for any of them — every gate invocation so
 > far is from one boot on one day, and reproducibility here has a measured session-level component.

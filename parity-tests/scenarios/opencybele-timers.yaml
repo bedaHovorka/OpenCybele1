@@ -1,4 +1,5 @@
-# The four one-shot timer sites, and the only scenario that makes DEF-16 happen on purpose.
+# The four one-shot timer sites, as counts over a bounded window -- and the only scenario that
+# makes the travel-time noise (CFG-04) observable on its own.
 #
 # INVENTORY TMR-01..04 are four `Activity.setTimer` sites and ZERO repeating timers -- the
 # `repeating` overload is never used in the codebase (CNT-10). A port that reaches for JADE's
@@ -19,36 +20,62 @@
 # itself.
 #
 # ------------------------------------------------------------------------------------------
-# WHY `sim.road.delaysSec: tr1=0` -- THIS IS THE POINT OF THE SCENARIO
+# WHY `sim.road.delaysSec: tr1=0` -- AND WHAT IT DOES *NOT* PIN
 #
-# TMR-04's delay is `delay*1000 + (long)(500*nextGaussian())`, which goes NEGATIVE, and Cybele
-# fires a negative-delay timer IMMEDIATELY (INVENTORY SEM-06: -1500 ms -> callback in 1-5 ms).
-# That is DEF-16, and docs/defect-triage.md classes it (a) -- deterministic, "PIN -- do not
-# clamp", "a port that clamps to 0 produces a diff and THAT is the port bug".
+# TMR-04's delay is `delay*1000 + (long)(500*nextGaussian())`. On the shipped 1 s roads that goes
+# negative on 2.2645 % of traversals (measured, 2e6 draws), and Cybele fires a negative-delay timer
+# IMMEDIATELY -- SEM-06: -1500 ms -> callback in 1-5 ms. That is DEF-16. At `delay = 0` the
+# expression is just `500*nextGaussian()`, so the sign of the draw decides, and at a pinned seed it
+# decides the same way every run.
 #
-# On the shipped topology the branch is taken on 2.2645 % of traversals (measured, 2e6 draws),
-# which is far too rare to put in a golden: it would appear or not appear depending on where a
-# train got dropped. At `delay = 0` the same expression is just `500*nextGaussian()`, so the
-# branch is taken on roughly HALF of them, and at a pinned seed on exactly the ones the golden
-# records. Measured over four captures of this configuration, tr1's three traversals took
+# Measured on `tr1`, four captures, TRAVEL_START to TRAVEL_END on the simulated clock:
 #
-#     vl0  8 ms       vl1  24-32 ms       vl2  296 ms
+#     vl0    8 ms        vl1   24-32 ms        vl2   296 ms
 #
-# from TRAVEL_START to TRAVEL_END. The first two are the fire-immediately branch; the third is an
-# ordinary positive draw. Both branches, in one three-train run, reproducibly.
+# and the underlying armed values are approximately -703, +28 and +294: a fired-at-once timer shows
+# up as ~8 ms of kernel latency, so vl0's reading is only consistent with a NON-POSITIVE delay,
+# while vl1's and vl2's track their positive values.
 #
-# HOW A GOLDEN SEES IT, given that `tick` is projected to <T>. It sees it through BURST
-# STRUCTURE: CanonicalTraceNormalizer segments the trace at tick gaps > DEFAULT_SEGMENT_GAP_TICKS
-# (220 ms) and sorts within a segment. An instantaneous traversal keeps TRAVEL_END in the SAME
-# burst as its TRAVEL_START; a 296 ms one puts it in the NEXT burst. So the two branches are
-# different goldens, and a port that clamped the delay to zero would collapse vl2's pair into one
-# burst and fail.
+# >>> DEF-16 IS NOT PINNED BY THIS SCENARIO, OR BY ANY GOLDEN. <<<
 #
-# THE MARGIN, since that rule is the load-bearing one: the tightest distance to the 220 ms burst
-# boundary in this scenario is vl2's 296 ms -- 76 ms of headroom -- and on the other side vl1's
-# 24-32 ms, 188 ms of headroom. Both were stable across four captures, and the observed run-to-run
-# jitter on these gaps is 8 ms. This is recorded because a future retune that moves a traversal to
-# ~220 ms would make the golden flake for a reason that has nothing to do with timers.
+# An earlier revision of this file claimed it was, and that claim was falsified directly: a
+# reviewer patched `RoadAgent.travelStart` to `Math.max(0, delayInSeconds() + (long)(500*...))`,
+# confirmed the clamp in bytecode, rebuilt the dist and ran the whole suite -- **all four scenarios
+# stayed byte-identical to their goldens and everything passed.**
+#
+# The reason is structural and it kills the idea rather than the tuning. There is exactly ONE
+# non-positive draw here, and *Cybele fires a 0 timer exactly as immediately as a -703 one*. So a
+# clamping port differs from the baseline only in a value no observer can read: the trace records
+# when the callback ran, and both run at once. No arrival rate, seed or delay fixes that, because
+# the two behaviours are observationally identical on this kernel.
+#
+# `docs/defect-triage.md` §3.1 tells #39 that "a port that clamps to 0 produces a diff and THAT is
+# the port bug". **It does not.** DEF-16 needs an L1 unit test on the extracted delay expression
+# (#28), and parity-tests/scenarios/COVERAGE.md §10.9 records the measurement.
+#
+# WHAT THE ZERO-DELAY ROAD DOES PIN, and it is worth having:
+#
+#   * CFG-04, the noise itself -- MAGNITUDE AND SIGN. A port that dropped the Gaussian would put
+#     every traversal at 0 and collapse vl2's TRAVEL_END into its TRAVEL_START's burst; a port that
+#     used |g| would push vl0's to ~703 ms and out of its burst. Both fail. That is a real and
+#     otherwise-unmade claim: on 1 s roads the noise is a small perturbation of a large constant
+#     and is swallowed by the burst structure.
+#   * `RoadAgent.computeDifference`'s `plannedTrains == 0` arm, taken on every vote here because
+#     `subMap(t-0, t+0)` is empty by construction. No other scenario takes it.
+#   * TMR-04's firing count, one per traversal, asserted as an equality in OpenCybeleTimersIT.
+#
+# HOW A GOLDEN SEES ANY OF IT, given that `tick` is projected to <T>: through BURST STRUCTURE.
+# CanonicalTraceNormalizer segments at tick gaps > DEFAULT_SEGMENT_GAP_TICKS (220 ms) and sorts
+# within a segment, so a traversal at or under 220 ms keeps TRAVEL_END in its TRAVEL_START's burst
+# and one over 220 ms puts it in the next. Both shapes are present here, and the ONLY assertion
+# OpenCybeleTimersIT makes about them is that both are present -- it deliberately does not call
+# them "the DEF-16 branch" and "the ordinary branch", because vl1's same-burst placement comes from
+# a POSITIVE 28 ms draw and not from DEF-16 at all.
+#
+# THE MARGIN. The tightest distance to the 220 ms boundary is vl2's 296 ms -- 76 ms of headroom --
+# and on the other side vl1's 24-32 ms, 188 ms of headroom. Both were stable across four captures,
+# and the observed run-to-run jitter on these gaps is 8 ms. A future retune that moves a traversal
+# to ~220 ms would make the golden flake for a reason that has nothing to do with timers.
 #
 # `sim.road.delaysSec` accepts 0 (ScenarioConfig requires >= 0 for delays; capacities are the key
 # that requires >= 1). A zero-delay road also takes RoadAgent.computeDifference's
@@ -61,12 +88,13 @@
 id: opencybele-timers
 description: >
   Three stations, two tracks -- one of them with a ZERO nominal delay -- three trains, 23.5 s
-  (simulated) headless at a pinned seed. Sized so that TMR-01 is distinguishable from TMR-02 and
-  so that TMR-04 takes its fire-immediately branch (DEF-16) twice and its ordinary branch once.
+  (simulated) headless at a pinned seed. Sized so that TMR-01 is distinguishable from TMR-02, and
+  so that the travel-time noise decides, on its own, whether a traversal's TRAVEL_END lands in its
+  TRAVEL_START's burst or the next one. It does NOT pin DEF-16; see the block below.
 
 # ---------------------------------------------------------------------------------------------
-# CONTRACT: strict. MEASURED: 10/10 byte-identical within a session and agreeing across
-# occasions; both halves are recorded with their dates in parity-tests/scenarios/COVERAGE.md.
+# CONTRACT: strict. MEASURED: within-session and cross-occasion status, with dates, are in
+# parity-tests/scenarios/COVERAGE.md §2.1.
 #
 # THE BOUND. At this seed the trains are created at simulated 2560, 8160 and 19624 and the last
 # event of the run is vl2's arrival at 21520; the next event of any kind is the fourth train's

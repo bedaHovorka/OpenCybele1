@@ -33,10 +33,12 @@ description: >
 # ---------------------------------------------------------------------------------------------
 # CONTRACT: strict. MEASURED, not assumed.
 #
-#   * within-session: 10/10 byte-identical normalized traces (parityGate, -Dparity.gate.runs=10)
-#   * cross-occasion: a second gate invocation, separated by hours, agreed on the departure-id set
-#     (ParityGate ledger, docs/trace-normalizer.md 6.3). Both halves are recorded in
-#     parity-tests/scenarios/COVERAGE.md with their dates.
+#   * within-session: 10/10 byte-identical normalized traces (parityGate, -Dparity.gate.runs=10),
+#     twice.
+#   * cross-occasion: NOT ESTABLISHED. Every gate invocation so far is from one session on one
+#     boot, and ParityGate rightly declines to count two of those as two occasions. See
+#     parity-tests/scenarios/COVERAGE.md §2.1, which carries the digests so a later occasion can be
+#     compared against them.
 #
 # There is nothing here for DEF-02 to drop that would not fail loudly: with two trains, losing one
 # takes the run from 2 departures to 1 and the liveness floor below fires before the comparison

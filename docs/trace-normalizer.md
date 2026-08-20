@@ -327,7 +327,7 @@ creation (so it is *further* from the `Cybele.terminate()` NPE hazard than 25000
 
 Result: **14 of 14 captures byte-identical**, and the shipped gate is 10 for 10.
 
-`opencybele-smoke` is left exactly as #13 recorded it — same golden, same `summary` contract, same
+`opencybele-smoke` is left exactly as #13 recorded it (**#23 has since folded that scenario into `opencybele-strict` and deleted its golden; nothing was re-recorded — see `parity-tests/scenarios/COVERAGE.md` §1**) — same golden, same `summary` contract, same
 bound — because tightening it means re-recording its golden, and that is a decision for the issue
 that owns the scenario. **The recommendation to #23 is to fold the two by moving the smoke bound to
 24000**; the two files are otherwise identical and carrying both is a cost, not a design.

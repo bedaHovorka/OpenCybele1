@@ -138,6 +138,13 @@ class ScenarioCatalogIT {
                 "24000 sits inside the measured 1952 ms gap between event bursts; 25000 does not."
                         + " docs/trace-normalizer.md §5.1.");
 
+        // NARROW ON PURPOSE, and the narrowness is a known hole: a near-duplicate differing in TWO
+        // keys evades this loop (demonstrated in review). Widening it would reject legitimate
+        // scenarios — opencybele-capacity differs from strict in nine keys and is not a duplicate of
+        // anything — and there is no threshold that separates "one number changed" from "a different
+        // scenario" for two keys. Net enforcement holds elsewhere: coverageMapMatchesTheCatalogue
+        // requires every scenario to be named in COVERAGE.md, which is where a reviewer sees a
+        // scenario that has no distinct purpose.
         List<String> duplicates = new ArrayList<>();
         for (ScenarioSpec other : specs) {
             if (other.id().equals(strict.id())) {

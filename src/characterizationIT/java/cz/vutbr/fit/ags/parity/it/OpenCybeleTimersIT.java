@@ -35,14 +35,20 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  *       scenario's bound. The scenario's liveness rules carry floors; this carries the numbers, so
  *       that a port which fires TMR-04 once per train instead of once per traversal fails with
  *       "expected 6 travel timers, saw 3" rather than with a golden diff.</li>
- *   <li><strong>DEF-16 — the negative delay that Cybele fires immediately</strong> — is present in
- *       <em>both</em> of its branches. {@code docs/defect-triage.md} §3.1 classes it (a), "PIN — do
- *       not clamp", and says plainly that "a port that clamps to 0 produces a diff and THAT is the
- *       port bug". That claim needs a scenario in which an unclamped negative delay actually
- *       occurs, and until #23 there was none.</li>
+ *   <li><strong>The travel-time noise (CFG-04) is observable on its own</strong>, magnitude and
+ *       sign, because {@code tr1}'s nominal delay is 0 and the Gaussian is therefore the whole
+ *       delay. On the shipped 1 s roads it is a small perturbation of a large constant and the
+ *       burst structure swallows it.</li>
  * </ol>
  *
- * <p><strong>On "not durations".</strong> The DEF-16 check below reads the gap between a
+ * <p><strong>What this scenario does NOT pin, contrary to an earlier revision: DEF-16.</strong> A
+ * clamping port ({@code Math.max(0, …)}) was built and produced byte-identical goldens for all four
+ * scenarios, because Cybele fires a {@code 0} timer exactly as immediately as a {@code -703} one.
+ * The correction and its measurement are in {@code COVERAGE.md} §10.9 and in
+ * {@link #assertTheNoiseDecidesBurstMembership}; DEF-16 belongs to #28 as an L1 test on the
+ * extracted delay expression.
+ *
+ * <p><strong>On "not durations".</strong> The noise check below reads the gap between a
  * {@code TRAVEL_START} and its {@code TRAVEL_END}. That gap is on the <em>simulated</em> clock, and
  * it is compared against {@link CanonicalTraceNormalizer#segmentGapTicks()} rather than against a
  * number of milliseconds chosen here — i.e. the assertion is "these two lines fall on the same side
@@ -60,24 +66,25 @@ class OpenCybeleTimersIT {
     private static final int TMR_04_FIRINGS = 6;          // TRAVEL_END: three trains x two roads
 
     @Test
-    @DisplayName("the four timer sites fire the counts the scenario is sized for, and DEF-16 fires immediately")
-    void timerScenarioPinsFiringCountsAndTheNegativeDelayBranch() {
+    @DisplayName("the four timer sites fire the counts the scenario is sized for, and the noise decides burst membership")
+    void timerScenarioPinsFiringCountsAndTheTravelNoise() {
         assumeTrue(OpenCybeleLauncher.isAvailable(), OpenCybeleLauncher.unavailableMessage());
 
         ParityLayout layout = ParityLayout.fromSystemProperties();
         ScenarioSpec spec = ScenarioSpecParser.parse(layout.scenariosDir().resolve(SCENARIO + ".yaml"));
         assertEquals(ContractLevel.STRICT, spec.contract());
         assertTrue(spec.launcher().properties().get("sim.road.delaysSec").contains("tr1=0"),
-                "tr1's nominal delay must stay 0: it is the entire mechanism by which this scenario"
-                        + " reaches DEF-16's fire-immediately branch reproducibly rather than on"
-                        + " 2.2645 % of traversals");
+                "tr1's nominal delay must stay 0: it is the entire mechanism by which the travel"
+                        + " noise becomes the whole delay and therefore observable at all. On a 1 s"
+                        + " road it is a small perturbation of a large constant and the burst"
+                        + " structure swallows it.");
 
         RunReport report = ScenarioRunner.usingDefaultLayout().run(spec, new OpenCybeleLauncher());
         List<String> raw = report.captured().lines();
         ScenarioAssertions.assertAdapterContract(spec, raw, report.normalized());
 
         assertFiringCounts(raw);
-        assertBothBranchesOfTheTravelTimer(raw);
+        assertTheNoiseDecidesBurstMembership(raw);
 
         if (GoldenStore.recording()) {
             System.out.println("parity: recorded " + report.normalized().size() + " line(s) to "
@@ -102,22 +109,46 @@ class OpenCybeleTimersIT {
     }
 
     /**
-     * DEF-16, both branches, in one run.
+     * CFG-04 — the travel-time noise, magnitude <em>and</em> sign — and <strong>not</strong>
+     * DEF-16.
      *
-     * <p>{@code tr1}'s nominal delay is 0, so the armed value is {@code (long)(500*nextGaussian())}
-     * and roughly half the draws are at or below zero. Cybele fires such a timer at once (SEM-06:
-     * −1500 ms → callback in 1–5 ms), so the traversal is instantaneous and {@code TRAVEL_END}
-     * stays inside its {@code TRAVEL_START}'s burst; an ordinary positive draw pushes it out into
-     * the next one. Both must be present, or the scenario has stopped covering what
-     * {@code COVERAGE.md} says it covers.
+     * <p>An earlier revision of this test called the two sides of the burst boundary "DEF-16's
+     * fire-immediately branch" and "the ordinary branch". That was wrong twice over, and the
+     * correction is the point of this comment.
+     *
+     * <ol>
+     *   <li>A clamping port — {@code Math.max(0, delayInSeconds() + (long)(500*nextGaussian()))} —
+     *       was built, confirmed in bytecode, and produced <strong>byte-identical goldens for all
+     *       four scenarios</strong>. Cybele fires a {@code 0} timer exactly as immediately as a
+     *       {@code -703} one, so the clamp changes nothing any observer can read. DEF-16 is
+     *       unmappable by a golden; it belongs to #28 as an L1 test. COVERAGE.md §10.9.</li>
+     *   <li>{@code vl1}'s same-burst placement comes from a <strong>positive 28 ms</strong> draw,
+     *       not from a negative one — so "two on the fire-immediately branch" was a
+     *       mis-attribution even as a description of this run.</li>
+     * </ol>
+     *
+     * <p>What the assertion below <em>does</em> establish is real and is otherwise unmade anywhere
+     * in the set: with {@code tr1}'s nominal delay at 0, the Gaussian is the <em>whole</em> delay,
+     * so its magnitude and its sign both decide burst membership. A port that dropped the noise
+     * would put every traversal at 0 and lose the over-boundary case; a port that used
+     * {@code Math.abs} would push {@code vl0}'s ~-703 to ~+703 and lose the under-boundary case.
+     * Both halves are therefore checked, and both are named for what they are — same burst and next
+     * burst — rather than for a defect they do not distinguish.
+     *
+     * <p><strong>On "not durations".</strong> The gap read here is on the <em>simulated</em> clock
+     * and is compared against {@link CanonicalTraceNormalizer#DEFAULT_SEGMENT_GAP_TICKS} rather
+     * than against a number chosen here, so the claim is "these two lines fall on the same side of
+     * the normalizer's burst boundary" — a statement about the projected trace's ordering, and the
+     * only form in which this behaviour reaches a golden at all. No wall-clock duration is read
+     * anywhere in this file.
      */
-    private static void assertBothBranchesOfTheTravelTimer(List<String> raw) {
+    private static void assertTheNoiseDecidesBurstMembership(List<String> raw) {
         long gap = CanonicalTraceNormalizer.DEFAULT_SEGMENT_GAP_TICKS;
         Pattern start = Pattern.compile("^(vl\\d+)\\|(\\d+)\\|TRAVEL_START\\|[^|]*\\|(tr\\d+)\\|.*$");
         Pattern end = Pattern.compile("^(vl\\d+)\\|(\\d+)\\|TRAVEL_END\\|(tr\\d+)\\|.*$");
         Map<String, Long> armed = new LinkedHashMap<>();
-        List<Long> immediate = new ArrayList<>();
-        List<Long> ordinary = new ArrayList<>();
+        List<Long> sameBurst = new ArrayList<>();
+        List<Long> nextBurst = new ArrayList<>();
 
         for (String line : raw) {
             Matcher s = start.matcher(line);
@@ -130,17 +161,19 @@ class OpenCybeleTimersIT {
                 Long at = armed.remove(e.group(1) + "@" + e.group(3));
                 if (at != null) {
                     long elapsed = Long.parseLong(e.group(2)) - at;
-                    (elapsed <= gap ? immediate : ordinary).add(elapsed);
+                    (elapsed <= gap ? sameBurst : nextBurst).add(elapsed);
                 }
             }
         }
 
-        assertTrue(!immediate.isEmpty(), "no traversal completed inside its own burst, so DEF-16's"
-                + " fire-immediately branch was not taken. tr1's delay must be 0 and the seed must"
-                + " be pinned; observed simulated gaps: " + ordinary);
-        assertTrue(!ordinary.isEmpty(), "every traversal completed inside its own burst, so the"
-                + " ORDINARY branch is missing and the scenario proves only half of what"
-                + " COVERAGE.md claims; observed simulated gaps: " + immediate);
+        assertTrue(!sameBurst.isEmpty(), "no traversal completed inside its own burst. On a road"
+                + " whose nominal delay is 0 that means the noise never came out at or below zero —"
+                + " a port taking Math.abs of the Gaussian looks exactly like this. Observed"
+                + " simulated gaps: " + nextBurst);
+        assertTrue(!nextBurst.isEmpty(), "every traversal completed inside its own burst, so the"
+                + " noise never produced a value over " + gap + " ms — a port that dropped the"
+                + " Gaussian entirely looks exactly like this. Observed simulated gaps: "
+                + sameBurst);
     }
 
     private static long count(List<String> lines, String regex) {

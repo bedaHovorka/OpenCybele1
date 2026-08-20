@@ -31,7 +31,7 @@
 #     vl2 enters tr2 at stC heading LEFT while vl1 is still on it
 #         -> RoadAgent.enter takes the `state != FREE` branch -> push()
 #         -> ROAD_STATE publishes the UNCHANGED TRAVEL_RIGHT, and NO ENTER_REPLY is sent
-#     424-456 simulated ms later vl1 leaves tr2
+#     424-440 simulated ms later vl1 leaves tr2
 #         -> RoadAgent.leave takes the `queue.size() != 0` branch -> pop() -> acceptTrain(vl2)
 #         -> vl2's ENTER_REPLY is sent FROM INSIDE leave(), with next=stB (TRAVEL_LEFT)
 #
@@ -53,9 +53,10 @@
 #     docs/trace-normalizer.md 2.2 exists to keep, and until #23 no scenario had a non-zero one
 #     outside opencybele-strict.
 #
-# WHAT IT DELIBERATELY DOES NOT COVER: the STATION-side queue (`Station.enter`'s `queue.offer`
-# branch, EVT-12/ST-16). That branch could not be reached at any configuration tried, and the
-# measurements are recorded in parity-tests/scenarios/COVERAGE.md rather than papered over.
+# WHAT IT DOES NOT COVER: the STATION-side queue (`Station.enter`'s `queue.offer` branch,
+# EVT-12/ST-16) and a road queue of depth two. Both are covered by opencybele-capacity, which was
+# added in revision after the claim that the station branch was unreachable was falsified -- see
+# parity-tests/scenarios/COVERAGE.md 10.1, which keeps the retraction rather than editing it out.
 # ------------------------------------------------------------------------------------------
 #
 # Format: docs/parity-harness.md. Trace format: docs/trace-format.md (on opencybele-baseline).
@@ -68,7 +69,7 @@ description: >
   deferred by seconds rather than by nothing.
 
 # ---------------------------------------------------------------------------------------------
-# CONTRACT: strict. MEASURED: within-session and cross-occasion results, with their dates, are in
+# CONTRACT: strict. MEASURED: within-session and cross-occasion status, with dates, are in
 # parity-tests/scenarios/COVERAGE.md.
 #
 # THE BOUND, AND THE TWO MARGINS IT IS SIZED AGAINST
