@@ -226,6 +226,74 @@ class TraceNormalizerIT {
     }
 
     @Test
+    @DisplayName("idempotent even when the burst sort leaves a state line at the head of a burst")
+    void idempotentWhenABurstStartsWithAStateLine() {
+        // THE SHAPE THAT BREAKS IT, and the reason the general fixture above is not enough.
+        //
+        // Pass one sorts within a burst, and `stA…` sorts before `vl0…`. So a burst whose lines
+        // include a STATION_INFO comes out with that STATION_INFO at its head — directly after the
+        // startup block. An unguarded second pass then reads it as PART of the startup block and
+        // re-sorts, and here stA would migrate above stB.
+        //
+        // Nothing in today's opencybele-strict has this shape (its first post-startup line is a
+        // PATH_FIND_REPLY), which is exactly why it needs a test rather than a run. It matters
+        // because ScenarioRunner normalizes the GOLDEN on every comparison: a golden with this
+        // shape — a different topology, a different pace, a JADE probe with different emission
+        // timing — could never match its own recording, and would be reported as "a port bug until
+        // proven a harness defect; re-recording is not a triage option."
+        List<String> capture = List.of(
+                "stB|1000|STATION_INFO|stB|Main|-|occupied=0,capacity=5",
+                "vl0|2000|PLAN_TRAIN|Main|Main|-|train=vl0,from=stA,to=stB",
+                "stA|2008|STATION_INFO|stA|Main|-|occupied=1,capacity=6");
+
+        List<String> once = NORMALIZER.normalize(capture);
+        assertEquals(List.of(
+                        "stB|<T>|STATION_INFO|stB|Main|<P>|occupied=<N>,capacity=5",
+                        "stA|<T>|STATION_INFO|stA|Main|<P>|occupied=<N>,capacity=6",
+                        "vl0|<T>|PLAN_TRAIN|Main|Main|<P>|train=vl0,from=stA,to=stB"),
+                once,
+                "pass one: stB is the startup block, and the burst sorts stA ahead of vl0");
+        assertEquals(once, NORMALIZER.normalize(once),
+                "pass two must not re-read stA as part of the startup block and sort it above stB");
+    }
+
+    @Test
+    @DisplayName("diff keeps its magnitude at a declared resolution rather than being erased")
+    void diffIsQuantisedNotErased() {
+        // Erased, `diff` left a port free to return 0 from every vote and still match byte for
+        // byte: it is the only payload carrying what computeDifference computed, which #28
+        // extracts, #34 restructures and #36/#43 must reimplement.
+        assertEquals(List.of("vl8|<T>|VOTE|tr5|Main|<P>|voter=tr5,train=vl8,diff=<T~41000>"),
+                NORMALIZER.normalize(List.of("vl8|1|VOTE|tr5|Main|-|voter=tr5,train=vl8,diff=41904")));
+        assertEquals(List.of("vl8|<T>|VOTE|tr5|Main|<P>|voter=tr5,train=vl8,diff=<T~41000>"),
+                NORMALIZER.normalize(List.of("vl8|1|VOTE|tr5|Main|-|voter=tr5,train=vl8,diff=41920")),
+                "the whole measured 8-24 ms jitter band must land in one bucket");
+
+        // The two failures it is there to catch.
+        assertNotEquals(NORMALIZER.normalize(List.of("vl8|1|VOTE|tr5|Main|-|voter=tr5,train=vl8,diff=41904")),
+                NORMALIZER.normalize(List.of("vl8|1|VOTE|tr5|Main|-|voter=tr5,train=vl8,diff=0")),
+                "a port that votes zero must not match a port that demands 41 s");
+        assertNotEquals(NORMALIZER.normalize(List.of("vl4|1|VOTE|tr7|Main|-|voter=tr7,train=vl4,diff=5176")),
+                NORMALIZER.normalize(List.of("vl4|1|VOTE|tr7|Main|-|voter=tr7,train=vl4,diff=2176")),
+                "a missing road delay is 1-5 s in this topology and must not survive the bucket");
+    }
+
+    @Test
+    @DisplayName("the absolute clock instants are erased, and the measurement says why")
+    void absoluteInstantsAreErasedNotQuantised() {
+        // expected/planned/departure are base + k*1000 (road delays are whole seconds) on a base
+        // that jitters ~200 ms, so any 1000 ms bucket is RESONANT with the data: one base crossing
+        // a boundary moves every leg of the election at once. Measured, quantising them took the
+        // strict scenario from 14/14 byte-identical to 5 distinct traces in 14.
+        assertEquals(NORMALIZER.normalize(List.of("vl2|1|VOTE_REQUEST|Main|stC|-|train=vl2,expected=10032")),
+                NORMALIZER.normalize(List.of("vl2|1|VOTE_REQUEST|Main|stC|-|train=vl2,expected=9840")),
+                "9840 and 10032 are the same election in two real runs and must normalize alike");
+        assertEquals(NORMALIZER.normalize(List.of("vl3 in stA at 13144")),
+                NORMALIZER.normalize(List.of("vl3 in stA at 12944")),
+                "measured departures of vl3 in two real runs, either side of a 1000 ms boundary");
+    }
+
+    @Test
     @DisplayName("no line is added or removed — only rewritten and moved")
     void lineCountIsPreserved() {
         List<String> out = NORMALIZER.normalize(RUN_A);
@@ -327,8 +395,11 @@ class TraceNormalizerIT {
     @Test
     @DisplayName("the burst width is a parameter, and a wider one really does merge bursts")
     void burstWidthIsAParameter() {
-        assertEquals(3, NORMALIZER.segments(RUN_A).size(),
-                "kernel banner plus startup block, then the two elections 3 s apart");
+        // Two: the banner, the startup block and the first election are within one burst width of
+        // each other (1320 - 1112 = 208 <= 220), and the second election is 3 s later. That the
+        // answer moved from 3 to 2 when the width went 200 -> 220 is the point of the assertion.
+        assertEquals(2, NORMALIZER.segments(RUN_A).size(),
+                "banner + startup + first election, then the election 3 s later");
         assertEquals(1, new CanonicalTraceNormalizer(10_000L).segments(RUN_A).size());
     }
 }

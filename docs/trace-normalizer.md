@@ -8,8 +8,12 @@
 > (the JADE and Jason probes) and [#39](https://github.com/bedaHovorka/OpenCybele1/issues/39)
 > (parity-diff triage).
 >
-> Input contract: `docs/trace-format.md` on `opencybele-baseline`. Pipeline position:
-> `docs/parity-harness.md`. Defect classification: `docs/defect-triage.md`.
+> Input contract: [`docs/trace-format.md`](https://github.com/bedaHovorka/OpenCybele1/blob/opencybele-baseline/docs/trace-format.md)
+> (**branch `opencybele-baseline`**). Pipeline position: `docs/parity-harness.md`. Defect
+> classification: `docs/defect-triage.md`. Session-level reproducibility:
+> [`docs/kernel-config.md`](https://github.com/bedaHovorka/OpenCybele1/blob/opencybele-baseline/docs/kernel-config.md)
+> (**also `opencybele-baseline`** — it is not on this branch, and it is load-bearing evidence for
+> §6, so every citation below names the branch).
 >
 > **The headline, so it is not buried.** The normalizer removes *all* of the ordering variance this
 > application produces: across **52 captured runs** there is not one pair with the same content in a
@@ -35,19 +39,32 @@ Everything below is in
 `src/characterizationIT/java/cz/vutbr/fit/ags/parity/normalize/`, tested in
 `it/TraceNormalizerIT.java`.
 
-### 1.1 It is applied to the golden too, and that is why nothing was re-recorded
+### 1.1 It is applied to the golden too, so no pre-existing golden was re-recorded
 
 `ScenarioRunner` normalizes the **golden** with the same normalizer before comparing. So a golden
-recorded under #12's placeholder — raw ticks, an unsorted startup block, interleaved `println`s —
-is projected into exactly the form a fresh run reaches, and the file on disk never changes.
+recorded under #12's placeholder — raw ticks, an unsorted startup block, interleaved `println`s — is
+projected into exactly the form a fresh run reaches, and the file on disk never changes.
 `Phase1.md` L7 forbids re-recording for anything but a harness defect; this design means landing the
-normalizer does not even raise the question.
+normalizer does not even raise the question. `parity-tests/golden/opencybele-smoke.txt` and
+`smoke-stub.txt` are untouched by this work and still match.
+
+**One golden here *is* recorded, and it is this issue's own:**
+`parity-tests/golden/opencybele-strict.txt` was created with the scenario it belongs to and
+re-recorded within this branch each time a rule changed. That is not the case L7 is about — there is
+no earlier behaviour being papered over, and the file has never been merged or relied on. It is
+called out so that "no golden was re-recorded" is never read as broader than it is.
 
 That works because `normalize` is **idempotent**: a trace whose canonical lines already carry `<T>`
-in field 2 is recognised as projected and its order is left alone, and no projection can match its
-own output. `TraceNormalizerIT.idempotent` asserts it, and the proof it matters is
-`parity-tests/golden/opencybele-smoke.txt`: unchanged by this issue, and still matched by
-`OpenCybeleSmokeIT`.
+in field 2 is recognised as projected, and its ordering rules — the burst sort *and the startup-block
+scan* — are skipped. Both halves matter. The first revision guarded only the burst sort, which was a
+latent trap: pass one's sort can leave a `STATION_INFO` or `ROAD_STATE` line at the head of the first
+burst, and an unguarded pass two would absorb it into the startup block and re-sort. Today's
+`opencybele-strict` does not have that shape, so nothing failed — but because the golden is
+normalized on **every** comparison, the first golden that did have it (a different topology, a
+different pace, a JADE probe with different emission timing) could never have matched its own
+recording, and would have been reported as *"a port bug until proven a harness defect"*.
+`TraceNormalizerIT.idempotentWhenABurstStartsWithAStateLine` is that counterexample, and it fails
+against the unguarded version.
 
 ## 2. The rules
 
@@ -58,20 +75,73 @@ carrying its justification in the code as `TraceRule.because()`.
 
 | id | What it rewrites | Observed variance source |
 |---|---|---|
-| `tick` | field 2 → `<T>` | The simulated clock advances with the wall clock, so the same event lands either side of a tick boundary run to run. `docs/trace-format.md` family 1. |
-| `expected` | `VOTE_REQUEST` payload → `expected=<T>` | `Cybele.getTime` when the election opened. Family 2. |
-| `planned` | `VOTE_RESULT` payload → `planned=<T>` | The agreed departure instant, same reading. Family 3. |
-| `diff` | `VOTE` payload → `diff=<T>` | A delay computed against a timetable in absolute simulated time. Family 4. Verified here rather than assumed: two runs at one seed agree on 80 of 93 `diff` values and differ on 13 (`13920`/`13888`, `3254`/`3222`, `736`/`712`). |
-| `departure` | `<train> in <station> at <n>` → `at <T>` | The application's own `println`, in the captured stream since before the probe existed. Family 5. |
-| `occupied` | `STATION_INFO` payload → `occupied=<N>` | INVENTORY **DEF-13**: the payload crosses the channel by reference under `Local;NoSerialization` and the station keeps mutating it. Measured (#20): 6–12 lines differing across three runs at one pinned seed, counts trading in lockstep between adjacent values on the same station. "The value is a race, not a timestamp." |
-| `road-state` | `ROAD_STATE` payload → `state=<S>` | **New here — see §2.3.** |
-| `performative` | field 6 → `<P>` | Constant `-` on the baseline; populated on JADE (#27) and Jason (#48). Decided in #20. **Its variance is cross-branch, not run-to-run** — see §4.2. |
+| `tick` | field 2 → `<T>` | Erased. The simulated clock advances with the wall clock, so the same event lands either side of a tick boundary run to run. `trace-format.md` family 1. |
+| `expected` | `VOTE_REQUEST` payload → `expected=<T>` | Erased. `Cybele.getTime` when the election opened. Family 2. **Not quantised — see §2.2.** |
+| `planned` | `VOTE_RESULT` payload → `planned=<T>` | Erased. The agreed departure instant, same reading. Family 3. **Not quantised — see §2.2.** |
+| `departure` | `<train> in <station> at <n>` → `at <T>` | Erased. The application's own `println`, in the captured stream since before the probe existed. Family 5. **Not quantised — see §2.2.** |
+| `diff` | `VOTE` payload → `diff=<T~41000>` | **Quantised**, floor to 1 000 ms — see §2.2. |
+| `occupied` | `STATION_INFO` payload → `occupied=<N>` | Erased. INVENTORY **DEF-13**: the payload crosses the channel by reference under `Local;NoSerialization` and the station keeps mutating it. Measured (#20): 6–12 lines differing across three runs at one pinned seed, counts trading in lockstep between adjacent values on the same station. Values are `0..capacity`, so there is no resolution below the jitter to quantise to. |
+| `road-state` | `ROAD_STATE` payload → `state=<S>` | Erased. **Not a race on the value — see §2.3.** |
+| `performative` | field 6 → `<P>` | Erased. Constant `-` on the baseline; populated on JADE (#27) and Jason (#48). Decided in #20. **Its variance is cross-branch, not run-to-run** — see §7. |
+
+### 2.2 `diff` is quantised; the three absolute instants are not
+
+Erasing a value is the last resort, not the default. It was the default in the first revision of this
+work, and it cost more than it looked like:
+
+> **Measured, and this is the finding that forced the change:** rewriting every `diff=` in a real
+> capture to `0` passed the strict golden **byte-identically**. `diff` is the output of
+> `computeDifference` — the delay each station and road demands — and it is the *only* payload
+> carrying the election's arithmetic. #28 extracts that method, #34 restructures the protocol around
+> it, and #36/#43 must reimplement it. Erased, a JADE port that returned zero from every vote, or
+> that left road delay out of the computation, produced a byte-identical trace.
+
+So `diff` keeps its magnitude at a declared resolution: `diff=41904` → `diff=<T~41000>`.
+
+**Why 1 000 ms.** Aligning all 93 votes by `(train, voter)` across the scenario's 14 captures: 78
+values are identical in every run, 15 vary, and every varying value moves inside a band of 24–56 ms
+on magnitudes up to 41 920. Floored to 1 000, **none of the 15 bands crosses a bucket boundary**.
+
+**The honest margin, which is not the headline arithmetic.** "24 ms of jitter against 41 896 of
+signal" suggests ~40× headroom. The number that matters is the distance from a jitter band to the
+nearest bucket edge, and the tightest is **80 ms against a 56 ms span** — 1.4×, on
+`(vl8, tr1) = 4864…4920`, which sits just under 5 000. Three keys share that shape, because road
+delays are whole seconds and the data therefore clusters *just below* multiples of 1 000. Rounding
+to nearest instead of flooring was tried and is worse here, not better: it moves the boundary to the
+half-second and the tightest margin drops from 80 ms to 60 ms.
+
+So this constant is defensible but not comfortable, and the escape hatch is recorded rather than
+discovered later: at a quantum of **4 000** the tightest margin is 248 ms and no band straddles in
+either corpus, at the cost of no longer resolving a 1 s road delay. `TIME_QUANTUM` is a constant in
+one place for that reason.
+
+**Why `expected`, `planned` and `departure` are *not* quantised — measured, not assumed.** The same
+change was applied to all four, and it took the strict scenario from **14/14 byte-identical to 5
+distinct traces in 14**. The cause is structural and worth carrying to #23 and #36:
+
+* They are **absolute clock instants**, and the base jitters far more than a duration does. vl2's
+  election opened at 9840 / 9928 / 9944 / 10032 across four runs — a ~200 ms spread, not 24 ms.
+  vl3's departure `println` read 12944 / 13032 / 13056 / 13144, which crosses 13 000 on its own.
+* Every leg of one election is **base + k·1000**, because road delays are whole seconds. So a 1 000
+  ms bucket is *resonant* with the data: when the base crosses a boundary, **all eleven legs of that
+  election move together**. It is the worst possible quantum for this field, and a coarser one only
+  lowers the probability — at 8 000 ms it is still ~2.5 % per train, ~20 % per run, which no
+  zero-flake gate survives.
+
+`diff` escapes this because it is a **duration** — a difference of two absolute times, so the
+jittering base cancels.
+
+**What is therefore still unpinned, said plainly.** The golden does not pin the absolute schedule: a
+port that computed every `diff` correctly and then departed every train at *t*=0 would match on
+these fields. It would not match overall — the burst structure is derived from the tick spacing, so
+collapsing every election onto one instant merges bursts and changes the golden's line order
+wholesale. The claim is "unpinned by the payload, caught by the shape", not "caught by nothing".
 
 `capacity` is deliberately **not** projected: it is configuration a port must replicate.
 `TRAIN_STATE`'s `state` is **not** projected either — it is a behaviour string, not a raced enum,
 and it is one of the few payloads that says what the system decided.
 
-### 2.2 Ordering rules
+### 2.3 Ordering rules
 
 | id | What it does | Observed variance source |
 |---|---|---|
@@ -85,36 +155,61 @@ survives. The `started` stream is **sorted by train name** — it has one produc
 cross-train order is arbitrary, and the line carries nothing the `in … at` stream and the canonical
 `START` lines do not already pin.
 
-### 2.3 `ROAD_STATE.state` — a seventh run-varying family, and what it actually is
+### 2.4 `ROAD_STATE.state` — what it actually is, and what #39 must not conclude
 
 `docs/trace-format.md` recorded an unexplained residual: *"`ROAD_STATE` on `tr6` also varied … Its
 payload is an immutable enum, so aliasing cannot be the cause; the likeliest explanation is ordinary
 behavioural drift downstream of the departure nondeterminism."*
 
-**That guess is wrong, and the evidence is now direct.** In the runs where it appears, *every other
-line of the trace is byte-identical* — there is no behavioural drift to be downstream of. The
-mechanism is visible in the ticks:
+**An earlier revision of this document claimed that guess was wrong and called the mechanism
+publish-after-mutation, "the same defect class as DEF-13". That claim was itself wrong, and it is
+retracted.** It is not merely unproven — it is impossible. In `RoadAgent`, `enter` and `leave` are
+both `synchronized` on the road, each mutates `state` and calls `sendState()` *inside the same
+lock*, and `sendState` copies the enum reference into a fresh array immediately. Nothing can land in
+between and there is no alias to inherit.
+
+**What actually varies is which code path the road took**, and the trace shows it:
 
 ```
-vl0|10656|LEAVE|vl0|tr6|-|train=vl0          tr6|10656|ROAD_STATE|tr6|Main|-|state=FREE
-vl1|10688|ENTER|vl1|tr6|-|…                  tr6|10688|ROAD_STATE|tr6|Main|-|state=TRAVEL_LEFT
+7 of 8 runs                              1 of 8
+  vl0|LEAVE|tr6                            vl1|ENTER|tr6          <- ENTER arrives FIRST
+  tr6|ROAD_STATE|state=FREE                vl0|LEAVE|tr6
+  vl1|ENTER|tr6                            tr6|ROAD_STATE|state=TRAVEL_LEFT
+  vl1|ENTER_REPLY|tr6|vl1                  vl1|ENTER_REPLY|tr6    <- REPLY comes AFTER the LEAVE
 ```
 
-32 simulated milliseconds apart, two different threads. In 3 of 14 runs at one seed the **first**
-line reads `TRAVEL_LEFT` as well: `RoadAgent` assigns `state` and publishes it as two steps, and the
-entering train's assignment landed in between. That is a publish-after-mutation race — the **same
-defect class as DEF-13**, on a different field, not an enum-immutability question at all.
+In the ordinary run `leave()` finds `queue.size() == 0`, sets `FREE` and publishes it; the later
+`enter()` finds the road free and takes `acceptTrain` directly. In the anomalous run `vl1`'s `ENTER`
+arrives while the road is still busy, so it goes down `push()` → `queue.offer` and publishes the
+*unchanged* `TRAVEL_LEFT`; `leave()` then takes the `queue.size() != 0` branch → `pop()` →
+`acceptTrain`, and publishes `TRAVEL_LEFT` again. Hence `TRAVEL_LEFT, TRAVEL_LEFT` instead of
+`FREE, TRAVEL_LEFT`. `ENTER_REPLY` moving across the `LEAVE` is the visible signature of the queued
+path, because in that path the reply is sent from inside `leave()`.
 
-So `state` is projected, and the cost is stated plainly rather than minimised: a port that reported
-every track as `FREE` for ever would not fail on this family. It would still fail everywhere else,
-because **direction of travel is pinned exactly** by `ENTER`'s `position=`, `ENTER_REPLY`'s `next=`
-and the `TRAVEL_START`/`TRAVEL_END` pairs — `ROAD_STATE.state` is derived from those events and adds
-no independent observable. The alternative, `docs/trace-format.md`'s "keep busy tracks out of a
-strict contract", would mean no scenario in this topology could ever reach `strict`: `tr6` is on the
-only route between `stC` and `stA`.
+So this field is the trace's **only witness to "did the road hand a queued train over directly, or
+go idle and then accept?"** — genuinely different code through `push`/`pop`, `OueueItem`'s
+comparator and the road's timetable. That is exactly the behavioural difference `trace-format.md`
+suspected.
 
-#39 should read a `ROAD_STATE` value diff as a **normalizer** matter, not a port bug — the same
-verdict `docs/defect-triage.md` §8.3 already gives `STATION_INFO.occupied`.
+It is still projected, for the reason the baseline forces: which path is taken is not reproducible
+here (1 run in 8 at this seed) and without the rule `strict` flakes at that rate. But the cost is
+larger than the earlier revision admitted, and it is not "direction of travel is safe, so nothing is
+lost" — direction *is* still pinned exactly by `ENTER`'s `position=`, `ENTER_REPLY`'s `next=` and the
+`TRAVEL_START`/`TRAVEL_END` pairs, but the queue path is not.
+
+> **Guidance for #39, corrected.** The earlier text said to read a `ROAD_STATE` diff as "a normalizer
+> matter, not a port bug". **Do not use that rule — it was derived from the wrong mechanism and it
+> would dismiss a real port bug**, because a port that never queues produces the ordinary shape every
+> time and passes. The rule is: `ROAD_STATE.state` is *unpinnable in the baseline*, so a difference in
+> that field alone is not by itself a port bug — but the code path it hides is real, so **check
+> `ENTER_REPLY`'s position relative to the matching `LEAVE`** before dismissing it. A port whose
+> `ENTER_REPLY` never follows a `LEAVE` on a contended track has lost the queue path, and that is a
+> port bug this projection cannot see.
+
+One more correction to the earlier revision: it claimed that in the anomalous runs "every other line
+of the trace is byte-identical". That was true only of the *normalized* trace. In the raw capture the
+`ENTER_REPLY` sits in a different position and the downstream ticks differ; those differences are
+absorbed by `burst-order` and `tick`, not absent.
 
 ## 3. The burst width — a tuning constant, and it is admitted to be one
 
@@ -132,19 +227,38 @@ more than `DEFAULT_SEGMENT_GAP_TICKS` simulated milliseconds.
 intra-burst gap 104 ms, smallest inter-burst gap 208 ms), and pooling 52 runs dissolves it: 26 848
 gaps of 0 ms, 2 497 of 8 ms, then a thin continuous tail with no empty band anywhere between 16 ms
 and 400 ms. The threshold was therefore chosen by measuring the thing that matters — how often two
-runs with *identical content* still come out in a different order:
+runs with *identical content* still come out in a different order — over all 52 captures:
 
-| gap (ms) | 100 | 120 | 150 | 180 | **200** | 220 | 250 | 300 | 500 | 1000 | 5000 |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| extra orderings, 52 runs | 3 | 3 | 2 | 2 | **1** | 1 | 4 | 5 | 2 | 1 | 0 |
-| bursts | 26 | 24 | 24 | 24 | **24** | 24 | 24 | 20 | 14 | 9 | 2 |
+| gap (ms) | 100 | 120 | 150 | 180 | **200** | **220** | 250 | 300 | 400 | 500 | 1000 | 5000 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| extra orderings | 2 | 2 | 1 | 1 | **0** | **0** | 3 | 4 | 5 | 1 | 0 | 0 |
+| segment counts seen | 23–33 | 23–29 | 23–28 | 22–25 | **22–24** | **22–24** | 20–23 | 18–22 | 15–19 | 12–15 | 8–9 | 1 |
 
-200 ms is the narrowest width at the observed minimum. Widening further does buy the last ordering
-back — and 5 000 ms collapses the run into two bursts, at which point the golden pins a **multiset
-and no order at all**. That is the "lock that cannot fail" shape this project has rejected four
-times, so it is guarded rather than trusted: `CanonicalTraceNormalizer.segments(...)` exposes the
-count and `OpenCybeleStrictIT` asserts a floor of 10, plus that the normalized trace is *not* in
-sorted order.
+(An earlier revision printed a different row here from the one in the code, because the two were
+measured against different rule sets. There is now one measurement, taken with the shipped rules,
+and it is in `CanonicalTraceNormalizer.DEFAULT_SEGMENT_GAP_TICKS` as well as here.)
+
+200 and 220 are the only narrow widths at zero. **220 is shipped**, on an independent 8-capture sweep
+that found the *segment count* stable at 220–250 and jittering at 200 — and because 220 is no worse
+than 200 anywhere in the table above.
+
+**The segment count jitters at 220 too**, in this corpus: 22 or 23 across 14 captures of
+`opencybele-strict`, exactly as at 200. That is not a contradiction of the sweep that chose 220. A
+boundary can move without changing the output, because two lines either side of it may sort the same
+way whether they share a burst or not — which is why the count is a health check asserted with a
+*floor*, never an equality, and why `extra orderings` rather than `segment counts` is the column that
+selected the constant.
+
+Widening further buys the last ordering back — and 5 000 ms collapses the run into two bursts, at
+which point the golden pins a **multiset and no order at all**. That is the "lock that cannot fail"
+shape this project has rejected four times, so it is guarded rather than trusted:
+`CanonicalTraceNormalizer.segments(...)` exposes the count and `OpenCybeleStrictIT` asserts a floor
+of 10 — **on the normalizer the adapter is actually using**, found with
+`CanonicalTraceNormalizer.findIn(...)`. Asserting it against a freshly constructed default was the
+first version and it guarded the constant rather than the pipeline: widening the adapter's width to
+5 000 left the floor measuring 220 and passing green while the comparison had collapsed to one
+segment. The companion "the trace is not globally sorted" assertion does not catch that either,
+because a single sorted burst preceded by a sorted startup block is not globally sorted.
 
 **What the width costs, said once and plainly.** Within one burst the golden pins *which lines
 occurred*, not *in what order*. Order across bursts is pinned exactly. That is the right trade
@@ -193,9 +307,9 @@ shipped normalizer. **Zero ordering differences.** Every remaining difference is
 
 | Cause | Rate | Whose |
 |---|---|---|
-| **Shutdown-window truncation.** At `sim.stop.maxClockMs = 25000` the trace's last event burst *begins* at simulated 25072 — 72 ms past the bound — so it is emitted while the run is already tearing down. Measured tail lengths: 623 lines ×26, 611 ×1, 609 ×3, 607 ×8. | 12 / 38 | **#23.** Move the bound into a gap in the *event* timeline, not just the arrival timeline. |
+| **Shutdown-window truncation.** At `sim.stop.maxClockMs = 25000` the trace's last event burst *begins* at simulated 25072 — 72 ms past the bound — so it is emitted while the run is already tearing down. Measured tail lengths: 623 lines ×25, 611 ×1, 609 ×3, 607 ×8, plus one 623-line run that now differs on a quantised `diff` (§2.2) rather than on length. | 13 / 38 | **#23.** Move the bound into a gap in the *event* timeline, not just the arrival timeline. |
 | **DEF-02 train drop.** A `START` published to a channel the `Train` had not opened. | 1 / 38 | Class (c), `docs/defect-triage.md`. |
-| **`ROAD_STATE.state` race** (§2.3) | 3 / 14 before the `road-state` rule; **0** after | Was #21's; now projected. |
+| **`ROAD_STATE.state` path** (§2.4) | 1 / 8 (independently), 3 / 14 here, before the rule; **0** after | Unpinnable in the baseline; projected, with the #39 caveat in §2.4. |
 
 And the counterfactual, on the same corpus: **before this normalizer, 13 captures produced 13
 distinct traces.** Nothing agreed with anything.
@@ -228,20 +342,50 @@ scenario is ~40 s and a gate that makes every unrelated change pay for it is a g
 off. Without `-Dparity.gate.runs` it **skips and prints the command**, rather than passing
 vacuously.
 
-### 6.1 What a wedged run does
+### 6.1 What a wedged run does — corrected
 
 Every repetition goes through `ScenarioRunner`, so the whole judging stack runs before a trace is
 allowed to count: harness timeout, exit classification, the error scan on the raw stream, the
-declared disposition, the liveness floors, then the golden comparison. DEF-22 hangs roughly one run
-in 45 with a clean process and nothing in the stream; such a run is killed as `HARNESS_TIMEOUT` and
-**fails** the gate. It can never be one of the N.
+declared disposition, the liveness floors, then the golden comparison.
+
+**An earlier revision of this document, of `ParityGate`, of the strict scenario and of the PR body
+all said that a DEF-22 wedge "is killed as `HARNESS_TIMEOUT` and can never be one of the N". That is
+wrong**, it contradicts this repository's own `docs/ci.md` and `docs/defect-triage.md`, and it is
+retracted here in all four places.
+
+What actually happens: the latch wedges `Planning`, but `Generator` is fire-and-forget and the two
+activities do not head-of-line block each other (`Agent.createActivity` passes
+`ConcurManagement.CONCURRENT`, and `IAIConcurManagement.getRunnable` skips a blocked node — proved in
+bytecode, #16). So generation continues, the simulated-time bound still fires, and **the process
+exits 0**, with zero `AssertionError` and zero `Exception in thread "` across 146 measurement runs.
+`sim.stop.stallMs` structurally cannot catch it either: it measures the gap between *generated*
+trains, and generation is the half that keeps working. `run.harnessTimeoutMs` is a real backstop —
+for a child that genuinely never exits, which is a different failure.
+
+So a wedged run passes the exit classification and the error scan. What it cannot pass is the
+**trace**: its departure stream truncates mid-run, so it fails a liveness floor if the wedge came
+early enough, and otherwise it fails the golden comparison.
+
+**The true story is better than the false one.** It means the *contract level* is what makes a wedge
+catchable at all: at `strict` a wedge is a certain failure, while at `summary` a late one can hide
+inside a tolerance. That is an argument for tightening a scenario, not for a bigger timeout, and it
+is one more reason for #23 to fold `opencybele-smoke` into `opencybele-strict`.
+
+Two consequences to carry:
+
+* A wedge fails as a **golden mismatch**, and `ScenarioRunner` reports a golden mismatch as *"a port
+  bug until proven a harness defect; re-recording is not a triage option"*. On the baseline that
+  message is maximally misdirecting. Check the departure count before believing it.
+* `docs/defect-triage.md` §6 tells #24 that a wedged **recording** must be discarded on departure
+  count, not on exit status. **The harness does not do that for it.** This gate compares runs to each
+  other and to a golden; it cannot see that the golden itself was recorded from a wedged run.
 
 ### 6.2 What ten consecutive runs establishes — and what it does not
 
 This is the part the issue's own acceptance criterion gets wrong, and the gate says so on every
 invocation.
 
-Reproducibility here has a **session-level** component. `docs/kernel-config.md` measured 114
+Reproducibility here has a **session-level** component. `docs/kernel-config.md` (branch `opencybele-baseline`) measured 114
 consecutive runs resolving the DEF-02 race identically, and a *later session* resolving it the other
 way 7 times in 9, with nothing changed — and, under "What this does not answer", records that
 **what** persists "is not established here". There is no machine-state property to query. The gate
@@ -270,6 +414,21 @@ entry. The comparison itself is the one §8.2 asks for: **entity-id sets**, not 
 orderings. A qualifying earlier occasion with a different id set **fails** the gate, and the message
 says to retune the scenario rather than re-record the golden.
 
+Three residuals in the mechanism, named rather than left to be found:
+
+* **`ParityGate.run` throws only on within-session divergence.** The cross-occasion disagreement is
+  *computed* there and *asserted* in `ParityGateIT`, so "a disagreement fails the gate" is true via
+  the opt-in test, not via the method. Anything else embedding `run` must check
+  `Result.crossOccasionDisagreements()` itself.
+* **The ledger stores `digest` and `lines` but compares only `entityIds`.** That is deliberate —
+  §8.2 asks for departure-id sets, not line counts and not orderings — but it means a cross-occasion
+  entry with the same ids and a different trace is recorded and not judged. The two extra columns
+  are there for a human to look at.
+* **A different boot id means a different boot *or a different machine*,** and those are not the same
+  axis. §8.2 is about a property that persists for hours on one machine; a second machine is separate
+  evidence — arguably weaker for that specific question and stronger for portability. The gate does
+  not distinguish them and must not be read as having done so.
+
 Two honest caveats:
 
 * **The 4-hour threshold is a convention, not a measurement.** §8.2 says as much about "hours":
@@ -281,7 +440,7 @@ Two honest caveats:
 
 ### 6.4 Measuring on `:0` is measuring nothing
 
-`docs/kernel-config.md`: a sweep on the desktop's `:0` produced departure-id sets differing by 5–10
+`docs/kernel-config.md` (branch `opencybele-baseline`): a sweep on the desktop's `:0` produced departure-id sets differing by 5–10
 ids between runs of the *same* configuration, and the identical sweep on an isolated display
 collapsed that to zero. Every scenario here sets `sim.headless=true`, and every measurement in this
 document was taken headless. Any variance number for this program taken on a shared display should
@@ -321,6 +480,20 @@ exactly why the acceptance criterion demands a **synthetic three-branch sample**
 JADE-shaped line and a Jason-shaped line describing the same message must normalize to one line, and
 must diverge into three when the rule is removed.
 
+**Two rules are low-power at this seed, and the score should not be read as strength.**
+
+* **`println-streams`** scores 2/14 here and 1/8 in an independent sweep. It is only load-bearing
+  when two trains tie on a departure millisecond, which this seed almost never produces; the measured
+  three-orderings-in-six-runs came from seed `987654321`. The unit fixture uses those measured
+  orderings, so it is not a dead lock — but **#23 should add a scenario that actually ties**, or this
+  rule goes untested against a real run for the rest of Phase 1.
+* **`occupied`** scores 4/14, and the scope is narrower than DEF-13 sounds: of the eight stations,
+  **five have a perfectly stable occupancy sequence across all 14 captures** and only `stA`, `stE` and
+  `stG` vary (an independent 8-capture sweep found only `stA`). Rewriting every `occupied=` to a
+  constant passes byte-identically, so the field pins nothing today. The rule stays because DEF-13 is
+  structural — the alias exists on every station and which one is caught depends on load — but #23
+  should know it is buying insurance against three stations, not eight.
+
 ## 8. What could not be determined
 
 * **Verification on both branches.** The acceptance criteria ask that every normalizer change be
@@ -331,9 +504,25 @@ must diverge into three when the rule is removed.
 * **Cross-occasion reproducibility of `opencybele-strict`.** The gate is 10 for 10 within one
   session, and the ledger contains one entry. The cross-occasion claim needs a second invocation
   after a reboot or hours later; §6.3 is the procedure and the gate refuses to fake it.
-* **Whether 200 ms is right for a scenario other than this one.** It was measured on 52 runs of one
+* **Whether 220 ms is right for a scenario other than this one.** It was measured on 52 runs of one
   topology at one pace. The width is a constructor parameter for that reason, and
   `OpenCybeleStrictIT`'s segment floor is what would notice if a future scenario made it degenerate.
-* **The DEF-22 hang rate**, which `docs/kernel-config.md` already calls an estimate from a sample
-  not designed to measure it. None of the 52 runs recorded here hung; at ~2 % that is ~1 expected,
-  so their absence is evidence of nothing.
+* **Whether the 1 000 ms `diff` quantum survives a heavier scenario.** The tightest measured margin
+  is 80 ms against a 56 ms jitter band (§2.2) — 1.4×, not the 40× the headline ratio suggests — and
+  the jitter grows with load: the same corpus at a different bound shows `(vl8, tr1)` spanning 568 ms
+  once behaviourally divergent runs are included. Within one behavioural class nothing straddles, in
+  either corpus. If it ever does, the recorded answer is a quantum of 4 000 (248 ms margin, no
+  straddles anywhere), at the price of no longer resolving a 1 s road delay.
+* **Whether `expected`/`planned`/`departure` can be pinned at all.** Erasing them is measured as
+  necessary (§2.2), not preferred. No quantum works, because the base jitter is ~200 ms and the legs
+  are spaced at whole seconds; something other than quantisation — a per-election *relative* encoding,
+  which the line-local rule model here cannot express — would be needed, and that is a change to
+  `trace-format.md` rather than to this normalizer.
+* **The DEF-22 hang rate**, which `docs/kernel-config.md` (branch `opencybele-baseline`) already
+  calls an estimate from a sample not designed to measure it. None of the 52 runs recorded here
+  wedged; at ~2 % that is ~1 expected, so their absence is evidence of nothing. Note also that this
+  document previously mis-stated how a wedge is *detected*; §6.1 carries the correction.
+* **Whether the queue path `road-state` hides is exercised at all in a given run.** It appeared once
+  in eight captures, on one track. §2.4 tells #39 to check `ENTER_REPLY` against `LEAVE`, but nothing
+  in the suite asserts that the path is taken, so a port could lose it silently until #23 writes a
+  scenario that forces contention on a single track.

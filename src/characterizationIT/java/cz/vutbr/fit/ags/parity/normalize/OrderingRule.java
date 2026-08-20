@@ -40,10 +40,11 @@ public enum OrderingRule implements TraceRule {
      * at a pinned seed: equal-tick sorting left 190–220 of 623 lines displaced between any two
      * full-length runs, all of them pure reorderings of an identical multiset.
      *
-     * <p>The bursts are read off the gap distribution rather than guessed. In three separate runs
-     * of that scenario 528–532 of the ~575 inter-line gaps are 0 or 8 ms, the largest gap inside a
-     * burst is 104 ms, and the smallest gap between two bursts is 208 ms — a clean valley, and the
-     * segmentation it produces (24 bursts, identical size profile) is the same in every run.
+     * <p><strong>There is no clean valley to put the width in.</strong> A three-run sample looked
+     * like one; pooling 52 runs dissolves it into a continuum with no empty band between 16 ms and
+     * 400 ms. The width was therefore chosen by measuring ordering instability directly, and it is
+     * a constructor parameter because it is a tuning constant rather than a fact —
+     * {@link CanonicalTraceNormalizer#DEFAULT_SEGMENT_GAP_TICKS} carries the sweep.
      *
      * <p><strong>What this deliberately stops asserting:</strong> the order of two lines emitted
      * within the same burst. That order is not a property of the system — the probe is one serial

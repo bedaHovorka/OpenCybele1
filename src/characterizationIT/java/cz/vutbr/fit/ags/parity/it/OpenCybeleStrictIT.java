@@ -87,8 +87,14 @@ class OpenCybeleStrictIT {
      * the wrong order. Both halves of that are checked here rather than trusted.
      */
     private static void assertOrderIsStillAsserted(RunReport report) {
-        CanonicalTraceNormalizer normalizer = new CanonicalTraceNormalizer();
-        List<String> filtered = new DiagnosticFilter(new OpenCybeleLauncher().diagnosticPrefixes())
+        OpenCybeleLauncher adapter = new OpenCybeleLauncher();
+        // From the ADAPTER, not a fresh default: a floor measured against `new
+        // CanonicalTraceNormalizer()` guards the constant rather than the pipeline, and would stay
+        // green while the normalizer actually in use had collapsed the run into one segment.
+        CanonicalTraceNormalizer normalizer = CanonicalTraceNormalizer.findIn(adapter.normalizer())
+                .orElseThrow(() -> new AssertionError("the adapter's normalizer no longer contains a"
+                        + " CanonicalTraceNormalizer, so nothing here is measuring the projection"));
+        List<String> filtered = new DiagnosticFilter(adapter.diagnosticPrefixes())
                 .normalize(report.captured().lines());
         int segments = normalizer.segments(filtered).size();
         assertTrue(segments >= MIN_SEGMENTS,

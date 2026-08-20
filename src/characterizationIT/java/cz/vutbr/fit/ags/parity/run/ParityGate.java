@@ -28,7 +28,7 @@ import java.util.TreeSet;
  * <h2>Why the issue's own criterion is not sufficient, and is kept anyway</h2>
  *
  * <p>Reproducibility here has a <strong>session-level</strong> component, and it is measured, not
- * suspected. {@code docs/kernel-config.md} records 114 consecutive runs resolving the DEF-02
+ * suspected. {@code docs/kernel-config.md} (on {@code opencybele-baseline}) records 114 consecutive runs resolving the DEF-02
  * departure race identically, and a <em>later session</em> resolving it the other way 7 times in 9,
  * with nothing changed. Its own conclusion: <em>"whatever fixes it is a machine-state property that
  * persists for hours, not something that re-rolls per run"</em>, and — under "What this does not
@@ -61,10 +61,60 @@ import java.util.TreeSet;
  *
  * <p>Every repetition goes through {@link ScenarioRunner}, so the whole judgement stack applies
  * before a run is allowed to contribute a trace: harness timeout, exit classification, the error
- * scan on the raw stream, the declared disposition, and the liveness floors. That matters here
- * specifically because of DEF-22 — roughly one run in 45 hangs with a clean process and nothing in
- * the stream. Such a run is killed as {@code HARNESS_TIMEOUT} and fails the gate; it can never be
- * counted as one of the N.
+ * scan on the raw stream, the declared disposition, the liveness floors, then the golden
+ * comparison.
+ *
+ * <p><strong>DEF-22 is not caught by any of the cheap ones, and saying otherwise would be worse
+ * than saying nothing.</strong> An earlier draft of this class claimed a wedged run "is killed as
+ * HARNESS_TIMEOUT". It is not. {@code docs/defect-triage.md} measures the real shape: the latch
+ * wedges {@code Planning}, but {@code Generator} is fire-and-forget and the two activities do not
+ * head-of-line block each other, so generation continues, the simulated-time bound still fires and
+ * <strong>the process exits 0</strong> — with zero {@code AssertionError} and zero
+ * {@code Exception in thread "} across 146 measurement runs. {@code sim.stop.stallMs} structurally
+ * cannot catch it either: it measures the gap between <em>generated</em> trains, and generation is
+ * the half that keeps working.
+ *
+ * <p>So a wedged run passes the exit classification and the error scan. What it cannot pass is the
+ * <em>trace</em>: its departure stream truncates mid-run, so it fails a liveness floor if the wedge
+ * came early enough, and otherwise it fails the golden comparison. <strong>That is why the contract
+ * level is load-bearing for the gate</strong> — at {@code strict} a wedge is a certain failure,
+ * while at {@code summary} a late wedge can hide inside a tolerance. It is the one thing about this
+ * gate that argues for tightening a scenario rather than for a bigger timeout.
+ *
+ * <p>Two consequences worth carrying:
+ *
+ * <ul>
+ *   <li>A wedge fails the gate as a <em>golden mismatch</em>, and {@code ScenarioRunner} reports a
+ *       golden mismatch as "a port bug until proven a harness defect". On the baseline that message
+ *       is misdirecting; check the departure count before believing it.</li>
+ *   <li>{@code docs/defect-triage.md} §6 tells #24 that a wedged <em>recording</em> must be
+ *       discarded on departure count, not on exit status. The harness does not do that for it. This
+ *       gate compares runs against each other and against a golden; it cannot tell that the golden
+ *       itself was recorded from a wedged run.</li>
+ * </ul>
+ *
+ * <p>{@code run.harnessTimeoutMs} remains a real backstop, for a child that genuinely never exits.
+ * That is a different failure from DEF-22, and conflating the two is what produced the wrong claim.
+ *
+ * <h2>Three things this gate does not do, spelled out</h2>
+ *
+ * <ul>
+ *   <li>{@link #run} <strong>throws only on within-session divergence.</strong> A cross-occasion
+ *       disagreement is computed here and <em>asserted</em> in {@code ParityGateIT}, so "a
+ *       disagreement fails the gate" is true via the opt-in test and not via this method. A caller
+ *       embedding {@link #run} elsewhere must check
+ *       {@link Result#crossOccasionDisagreements()} itself.</li>
+ *   <li>The ledger stores {@code digest} and {@code lines} but <strong>compares only
+ *       {@code entityIds}</strong>. That is deliberate — {@code docs/defect-triage.md} §8.2 asks for
+ *       departure-id sets, not line counts and not orderings, because a cross-occasion digest
+ *       difference would be dominated by things the mode does not control. The other two columns
+ *       are recorded so a human can look, not so the gate can judge.</li>
+ *   <li>A different {@code bootId} means a different <strong>boot or a different machine</strong>,
+ *       and those are not the same axis. §8.2 is about a property that persists for hours on one
+ *       machine; a second machine is separate evidence, arguably weaker for that specific question
+ *       and stronger for portability. The gate does not distinguish them, and should not be read as
+ *       having done so.</li>
+ * </ul>
  */
 public final class ParityGate {
 
@@ -317,9 +367,16 @@ public final class ParityGate {
             }
 
             sb.append("  NOT ESTABLISHED: that a golden recorded now matches a run later.")
-                    .append(" docs/kernel-config.md measured 114 consecutive runs agreeing and a")
+                    .append(" docs/kernel-config.md (branch opencybele-baseline) measured 114")
+                    .append(" consecutive runs agreeing and a")
                     .append(" LATER session disagreeing 7 times in 9, with nothing changed, and")
                     .append(" could not identify what persists. Consecutive runs sample one mode.")
+                    .append(nl);
+            sb.append("  ALSO NOT ESTABLISHED: that the GOLDEN was recorded from a healthy run.")
+                    .append(" DEF-22 wedges Planning while Generator keeps going, so a wedged run")
+                    .append(" exits 0 with a clean stream and a truncated departure stream. This")
+                    .append(" gate compares runs to each other and to the golden; it cannot see")
+                    .append(" that the golden itself was wedged (docs/defect-triage.md 6).")
                     .append(nl);
 
             List<Entry> evidence = crossOccasionEvidence();

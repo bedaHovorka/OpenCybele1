@@ -479,10 +479,10 @@ normalizer.** The projection is sufficient: over 52 headless captures there is n
 with the same content in a different order, where before it 13 captures gave 13 distinct traces.
 What blocks this scenario is one number in its own file. At its seed the last event burst *begins*
 at simulated 25072, 72 ms past the `sim.stop.maxClockMs = 25000` bound, so it is emitted inside the
-shutdown window: 26 of 38 runs printed all 623 lines, the other 12 printed 611, 609 or 607. Missing
+shutdown window: 25 of 38 runs printed all 623 lines and matched, the rest printed 611, 609 or 607. Missing
 lines are not projectable, and `causal` is no easier than `strict` here — it compares each entity's
 projection exactly and the unattributed bucket exactly and with no tolerance, and the truncated
-burst is full of unattributed lines. Both fail at the same 25 of 38.
+burst is full of unattributed lines. Both fail at the same rate.
 
 `opencybele-strict` is the same configuration with the bound moved to 24000, inside the 1952 ms gap
 between bursts: 14 of 14 captures byte-identical, the gate 10 for 10, contract `strict`. #23 should
@@ -541,7 +541,8 @@ throughout. **Moving that number is not a cosmetic edit.**
 ## Deliberately left to other issues
 
 * **#21 — the normalizer. Landed.** `DiagnosticFilter` still drops the declared diagnostic
-  prefixes, and `CanonicalTraceNormalizer` now runs after it: eight value projections, a
+  prefixes, and `CanonicalTraceNormalizer` now runs after it: eight value projections — seven
+  erased, `VOTE.diff` **quantised** so the election's arithmetic stays pinned at 1 s — a
   startup-block sort by agent name, burst-local ordering, and the two application `println`s split
   into independent streams. It is also applied to the **golden** before comparison, which is why no
   golden was re-recorded. Rules, measurements, mutation results and the zero-flake gate are in

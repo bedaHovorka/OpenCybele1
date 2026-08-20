@@ -88,10 +88,19 @@ launcher:
     sim.stop.stallMs: "10000"
 
 run:
-  # Well above the child's own 60 s net, because this is the backstop for the case where that net
-  # did NOT fire: ~1 run in 45 hangs outright with a clean process and nothing in the stream
-  # (DEF-22), which sim.stop.stallMs structurally cannot catch. A kill is HARNESS_TIMEOUT and can
-  # never pass -- which is what keeps a wedged run out of the zero-flake gate's numerator.
+  # A backstop for a child that genuinely NEVER EXITS. A kill is HARNESS_TIMEOUT and can never pass.
+  #
+  # It is NOT the net for DEF-22, and an earlier revision of this file said it was. docs/defect-triage.md
+  # measures the real shape: the latch wedges Planning, but Generator is fire-and-forget and the two
+  # activities do not head-of-line block each other, so generation continues, the simulated-time
+  # bound still fires, and THE PROCESS EXITS 0 -- with zero AssertionError and zero
+  # "Exception in thread" across 146 measurement runs. sim.stop.stallMs cannot catch it either: it
+  # measures the gap between GENERATED trains, and generation is the half that keeps working.
+  #
+  # What catches a wedge is the TRACE: the departure stream truncates, so a liveness floor fires if
+  # the wedge came early enough and the golden comparison fires otherwise. That is why the contract
+  # level is load-bearing here -- at `strict` a wedge is a certain failure, while at `summary` a late
+  # one can hide inside a tolerance.
   harnessTimeoutMs: 120000
   expect: bound-reached
 
