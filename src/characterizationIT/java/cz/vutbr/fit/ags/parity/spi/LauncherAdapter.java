@@ -1,5 +1,6 @@
 package cz.vutbr.fit.ags.parity.spi;
 
+import cz.vutbr.fit.ags.parity.normalize.CanonicalTraceNormalizer;
 import cz.vutbr.fit.ags.parity.normalize.DiagnosticFilter;
 import cz.vutbr.fit.ags.parity.spec.ScenarioSpec;
 
@@ -68,11 +69,20 @@ public interface LauncherAdapter {
     }
 
     /**
-     * The normalizer applied to the captured stream before it is recorded or compared. The default
-     * drops diagnostics per {@link #diagnosticPrefixes()} and nothing else; <a
-     * href="https://github.com/bedaHovorka/OpenCybele1/issues/21">#21</a> replaces it.
+     * The normalizer applied to the captured stream before it is recorded or compared, and to the
+     * golden before it is compared against.
+     *
+     * <p>Two stages, deliberately: {@link DiagnosticFilter} with <em>this adapter's</em> declared
+     * prefixes, then the implementation-neutral {@link CanonicalTraceNormalizer} of <a
+     * href="https://github.com/bedaHovorka/OpenCybele1/issues/21">#21</a>. What is
+     * target-specific — which lines are diagnostics — stays in the adapter; what is contract-level
+     * — which values are run-varying, and which orderings are not properties of the system —
+     * stays in the normalizer, so JADE and Jason inherit it without an edit.
+     *
+     * <p>An adapter whose target does not emit the canonical trace at all should override this and
+     * return the filter alone, rather than leave the projection to match nothing.
      */
     default TraceNormalizer normalizer() {
-        return new DiagnosticFilter(diagnosticPrefixes());
+        return new DiagnosticFilter(diagnosticPrefixes()).andThen(new CanonicalTraceNormalizer());
     }
 }

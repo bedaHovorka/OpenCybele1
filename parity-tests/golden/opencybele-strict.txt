@@ -1,0 +1,607 @@
+Cybele version 1.2 starting ...
+*** Loading exception service (expecting impl. of GSI ver. 1.0) ... 
+*** Loading concurmgmt service (expecting impl. of GSI ver. 1.0) ... 
+*** Loading evmgmt service (expecting impl. of GSI ver. 1.1) ... 
+*** Loading thmgmt service (expecting impl. of GSI ver. 1.1) ... 
+*** Loading intlevent service (expecting impl. of GSI ver. 1.0) ... 
+*** Loading comm service (expecting impl. of GSI ver. 1.0) ... 
+*** Loading timer service (expecting impl. of GSI ver. 1.1) ... 
+... Cybele started
+stA|<T>|STATION_INFO|stA|Main|<P>|occupied=<N>,capacity=6
+stB|<T>|STATION_INFO|stB|Main|<P>|occupied=<N>,capacity=5
+stC|<T>|STATION_INFO|stC|Main|<P>|occupied=<N>,capacity=2
+stD|<T>|STATION_INFO|stD|Main|<P>|occupied=<N>,capacity=2
+stE|<T>|STATION_INFO|stE|Main|<P>|occupied=<N>,capacity=5
+stF|<T>|STATION_INFO|stF|Main|<P>|occupied=<N>,capacity=2
+stG|<T>|STATION_INFO|stG|Main|<P>|occupied=<N>,capacity=3
+stH|<T>|STATION_INFO|stH|Main|<P>|occupied=<N>,capacity=2
+tr1|<T>|ROAD_STATE|tr1|Main|<P>|state=<S>
+tr2|<T>|ROAD_STATE|tr2|Main|<P>|state=<S>
+tr3|<T>|ROAD_STATE|tr3|Main|<P>|state=<S>
+tr4|<T>|ROAD_STATE|tr4|Main|<P>|state=<S>
+tr5|<T>|ROAD_STATE|tr5|Main|<P>|state=<S>
+tr6|<T>|ROAD_STATE|tr6|Main|<P>|state=<S>
+tr7|<T>|ROAD_STATE|tr7|Main|<P>|state=<S>
+stB|<T>|PATH_FIND_REPLY|Main|stB|<P>|target=stC,direction=tr5
+stB|<T>|PATH_FIND|stB|Main|<P>|from=stB,to=stC
+stB|<T>|STATION_INFO|stB|Main|<P>|occupied=<N>,capacity=5
+stB|<T>|STATION_INFO|stB|Main|<P>|occupied=<N>,capacity=5
+tr5|<T>|ROAD_STATE|tr5|Main|<P>|state=<S>
+vl0|<T>|ENTER_REPLY|stB|vl0|<P>|object=stB,next=tr5
+vl0|<T>|ENTER_REPLY|tr5|vl0|<P>|object=tr5,next=stD
+vl0|<T>|ENTER|vl0|stB|<P>|train=vl0,position=null,target=stC
+vl0|<T>|ENTER|vl0|tr5|<P>|train=vl0,position=stB,target=stC
+vl0|<T>|LEAVE|vl0|stB|<P>|train=vl0
+vl0|<T>|PLAN_TRAIN|Main|Main|<P>|train=vl0,from=stB,to=stC
+vl0|<T>|START|Main|vl0|<P>|station=stB
+vl0|<T>|TRAIN_STATE|vl0|Main|<P>|state=stB -> stC : entered to stB
+vl0|<T>|TRAIN_STATE|vl0|Main|<P>|state=stB -> stC : entered to tr5
+vl0|<T>|TRAIN_STATE|vl0|Main|<P>|state=stB -> stC : vl0 generated
+vl0|<T>|TRAVEL_START|vl0|tr5|<P>|train=vl0
+vl0|<T>|VOTE_REQUEST|Main|stB|<P>|train=vl0,expected=<T>
+vl0|<T>|VOTE_REQUEST|Main|stC|<P>|train=vl0,expected=<T>
+vl0|<T>|VOTE_REQUEST|Main|stD|<P>|train=vl0,expected=<T>
+vl0|<T>|VOTE_REQUEST|Main|stE|<P>|train=vl0,expected=<T>
+vl0|<T>|VOTE_REQUEST|Main|stF|<P>|train=vl0,expected=<T>
+vl0|<T>|VOTE_REQUEST|Main|tr4|<P>|train=vl0,expected=<T>
+vl0|<T>|VOTE_REQUEST|Main|tr5|<P>|train=vl0,expected=<T>
+vl0|<T>|VOTE_REQUEST|Main|tr6|<P>|train=vl0,expected=<T>
+vl0|<T>|VOTE_REQUEST|Main|tr7|<P>|train=vl0,expected=<T>
+vl0|<T>|VOTE_RESULT|Main|stB|<P>|train=vl0,planned=<T>
+vl0|<T>|VOTE_RESULT|Main|stC|<P>|train=vl0,planned=<T>
+vl0|<T>|VOTE_RESULT|Main|stD|<P>|train=vl0,planned=<T>
+vl0|<T>|VOTE_RESULT|Main|stE|<P>|train=vl0,planned=<T>
+vl0|<T>|VOTE_RESULT|Main|stF|<P>|train=vl0,planned=<T>
+vl0|<T>|VOTE_RESULT|Main|tr4|<P>|train=vl0,planned=<T>
+vl0|<T>|VOTE_RESULT|Main|tr5|<P>|train=vl0,planned=<T>
+vl0|<T>|VOTE_RESULT|Main|tr6|<P>|train=vl0,planned=<T>
+vl0|<T>|VOTE_RESULT|Main|tr7|<P>|train=vl0,planned=<T>
+vl0|<T>|VOTE|stB|Main|<P>|voter=stB,train=vl0,diff=<T~0>
+vl0|<T>|VOTE|stC|Main|<P>|voter=stC,train=vl0,diff=<T~0>
+vl0|<T>|VOTE|stD|Main|<P>|voter=stD,train=vl0,diff=<T~0>
+vl0|<T>|VOTE|stE|Main|<P>|voter=stE,train=vl0,diff=<T~0>
+vl0|<T>|VOTE|stF|Main|<P>|voter=stF,train=vl0,diff=<T~0>
+vl0|<T>|VOTE|tr4|Main|<P>|voter=tr4,train=vl0,diff=<T~0>
+vl0|<T>|VOTE|tr5|Main|<P>|voter=tr5,train=vl0,diff=<T~0>
+vl0|<T>|VOTE|tr6|Main|<P>|voter=tr6,train=vl0,diff=<T~0>
+vl0|<T>|VOTE|tr7|Main|<P>|voter=tr7,train=vl0,diff=<T~0>
+stA|<T>|PATH_FIND_REPLY|Main|stA|<P>|target=stC,direction=tr1
+stA|<T>|PATH_FIND|stA|Main|<P>|from=stA,to=stC
+stA|<T>|STATION_INFO|stA|Main|<P>|occupied=<N>,capacity=6
+stA|<T>|STATION_INFO|stA|Main|<P>|occupied=<N>,capacity=6
+tr1|<T>|ROAD_STATE|tr1|Main|<P>|state=<S>
+vl1|<T>|ENTER_REPLY|stA|vl1|<P>|object=stA,next=tr1
+vl1|<T>|ENTER_REPLY|tr1|vl1|<P>|object=tr1,next=stH
+vl1|<T>|ENTER|vl1|stA|<P>|train=vl1,position=null,target=stC
+vl1|<T>|ENTER|vl1|tr1|<P>|train=vl1,position=stA,target=stC
+vl1|<T>|LEAVE|vl1|stA|<P>|train=vl1
+vl1|<T>|PLAN_TRAIN|Main|Main|<P>|train=vl1,from=stA,to=stC
+vl1|<T>|START|Main|vl1|<P>|station=stA
+vl1|<T>|TRAIN_STATE|vl1|Main|<P>|state=stA -> stC : entered to stA
+vl1|<T>|TRAIN_STATE|vl1|Main|<P>|state=stA -> stC : entered to tr1
+vl1|<T>|TRAIN_STATE|vl1|Main|<P>|state=stA -> stC : vl1 generated
+vl1|<T>|TRAVEL_START|vl1|tr1|<P>|train=vl1
+vl1|<T>|VOTE_REQUEST|Main|stA|<P>|train=vl1,expected=<T>
+vl1|<T>|VOTE_REQUEST|Main|stC|<P>|train=vl1,expected=<T>
+vl1|<T>|VOTE_REQUEST|Main|stE|<P>|train=vl1,expected=<T>
+vl1|<T>|VOTE_REQUEST|Main|stF|<P>|train=vl1,expected=<T>
+vl1|<T>|VOTE_REQUEST|Main|stG|<P>|train=vl1,expected=<T>
+vl1|<T>|VOTE_REQUEST|Main|stH|<P>|train=vl1,expected=<T>
+vl1|<T>|VOTE_REQUEST|Main|tr1|<P>|train=vl1,expected=<T>
+vl1|<T>|VOTE_REQUEST|Main|tr2|<P>|train=vl1,expected=<T>
+vl1|<T>|VOTE_REQUEST|Main|tr3|<P>|train=vl1,expected=<T>
+vl1|<T>|VOTE_REQUEST|Main|tr6|<P>|train=vl1,expected=<T>
+vl1|<T>|VOTE_REQUEST|Main|tr7|<P>|train=vl1,expected=<T>
+vl1|<T>|VOTE_RESULT|Main|stA|<P>|train=vl1,planned=<T>
+vl1|<T>|VOTE_RESULT|Main|stC|<P>|train=vl1,planned=<T>
+vl1|<T>|VOTE_RESULT|Main|stE|<P>|train=vl1,planned=<T>
+vl1|<T>|VOTE_RESULT|Main|stF|<P>|train=vl1,planned=<T>
+vl1|<T>|VOTE_RESULT|Main|stG|<P>|train=vl1,planned=<T>
+vl1|<T>|VOTE_RESULT|Main|stH|<P>|train=vl1,planned=<T>
+vl1|<T>|VOTE_RESULT|Main|tr1|<P>|train=vl1,planned=<T>
+vl1|<T>|VOTE_RESULT|Main|tr2|<P>|train=vl1,planned=<T>
+vl1|<T>|VOTE_RESULT|Main|tr3|<P>|train=vl1,planned=<T>
+vl1|<T>|VOTE_RESULT|Main|tr6|<P>|train=vl1,planned=<T>
+vl1|<T>|VOTE_RESULT|Main|tr7|<P>|train=vl1,planned=<T>
+vl1|<T>|VOTE|stA|Main|<P>|voter=stA,train=vl1,diff=<T~0>
+vl1|<T>|VOTE|stC|Main|<P>|voter=stC,train=vl1,diff=<T~0>
+vl1|<T>|VOTE|stE|Main|<P>|voter=stE,train=vl1,diff=<T~0>
+vl1|<T>|VOTE|stF|Main|<P>|voter=stF,train=vl1,diff=<T~0>
+vl1|<T>|VOTE|stG|Main|<P>|voter=stG,train=vl1,diff=<T~0>
+vl1|<T>|VOTE|stH|Main|<P>|voter=stH,train=vl1,diff=<T~0>
+vl1|<T>|VOTE|tr1|Main|<P>|voter=tr1,train=vl1,diff=<T~0>
+vl1|<T>|VOTE|tr2|Main|<P>|voter=tr2,train=vl1,diff=<T~0>
+vl1|<T>|VOTE|tr3|Main|<P>|voter=tr3,train=vl1,diff=<T~0>
+vl1|<T>|VOTE|tr6|Main|<P>|voter=tr6,train=vl1,diff=<T~0>
+vl1|<T>|VOTE|tr7|Main|<P>|voter=tr7,train=vl1,diff=<T~0>
+stH|<T>|PATH_FIND_REPLY|Main|stH|<P>|target=stC,direction=tr2
+stH|<T>|PATH_FIND|stH|Main|<P>|from=stH,to=stC
+stH|<T>|STATION_INFO|stH|Main|<P>|occupied=<N>,capacity=2
+stH|<T>|STATION_INFO|stH|Main|<P>|occupied=<N>,capacity=2
+tr1|<T>|ROAD_STATE|tr1|Main|<P>|state=<S>
+tr2|<T>|ROAD_STATE|tr2|Main|<P>|state=<S>
+vl1|<T>|ENTER_REPLY|stH|vl1|<P>|object=stH,next=tr2
+vl1|<T>|ENTER_REPLY|tr2|vl1|<P>|object=tr2,next=stG
+vl1|<T>|ENTER|vl1|stH|<P>|train=vl1,position=tr1,target=stC
+vl1|<T>|ENTER|vl1|tr2|<P>|train=vl1,position=stH,target=stC
+vl1|<T>|LEAVE|vl1|stH|<P>|train=vl1
+vl1|<T>|LEAVE|vl1|tr1|<P>|train=vl1
+vl1|<T>|TRAIN_STATE|vl1|Main|<P>|state=stA -> stC : entered to stH
+vl1|<T>|TRAIN_STATE|vl1|Main|<P>|state=stA -> stC : entered to tr2
+vl1|<T>|TRAVEL_END|tr1|vl1|<P>|road=tr1
+vl1|<T>|TRAVEL_START|vl1|tr2|<P>|train=vl1
+stD|<T>|PATH_FIND_REPLY|Main|stD|<P>|target=stC,direction=tr4
+stD|<T>|PATH_FIND|stD|Main|<P>|from=stD,to=stC
+stD|<T>|STATION_INFO|stD|Main|<P>|occupied=<N>,capacity=2
+stD|<T>|STATION_INFO|stD|Main|<P>|occupied=<N>,capacity=2
+tr4|<T>|ROAD_STATE|tr4|Main|<P>|state=<S>
+tr5|<T>|ROAD_STATE|tr5|Main|<P>|state=<S>
+vl0|<T>|ENTER_REPLY|stD|vl0|<P>|object=stD,next=tr4
+vl0|<T>|ENTER_REPLY|tr4|vl0|<P>|object=tr4,next=stE
+vl0|<T>|ENTER|vl0|stD|<P>|train=vl0,position=tr5,target=stC
+vl0|<T>|ENTER|vl0|tr4|<P>|train=vl0,position=stD,target=stC
+vl0|<T>|LEAVE|vl0|stD|<P>|train=vl0
+vl0|<T>|LEAVE|vl0|tr5|<P>|train=vl0
+vl0|<T>|TRAIN_STATE|vl0|Main|<P>|state=stB -> stC : entered to stD
+vl0|<T>|TRAIN_STATE|vl0|Main|<P>|state=stB -> stC : entered to tr4
+vl0|<T>|TRAVEL_END|tr5|vl0|<P>|road=tr5
+vl0|<T>|TRAVEL_START|vl0|tr4|<P>|train=vl0
+stG|<T>|PATH_FIND_REPLY|Main|stG|<P>|target=stC,direction=tr3
+stG|<T>|PATH_FIND|stG|Main|<P>|from=stG,to=stC
+stG|<T>|STATION_INFO|stG|Main|<P>|occupied=<N>,capacity=3
+stG|<T>|STATION_INFO|stG|Main|<P>|occupied=<N>,capacity=3
+tr2|<T>|ROAD_STATE|tr2|Main|<P>|state=<S>
+tr3|<T>|ROAD_STATE|tr3|Main|<P>|state=<S>
+vl1|<T>|ENTER_REPLY|stG|vl1|<P>|object=stG,next=tr3
+vl1|<T>|ENTER_REPLY|tr3|vl1|<P>|object=tr3,next=stE
+vl1|<T>|ENTER|vl1|stG|<P>|train=vl1,position=tr2,target=stC
+vl1|<T>|ENTER|vl1|tr3|<P>|train=vl1,position=stG,target=stC
+vl1|<T>|LEAVE|vl1|stG|<P>|train=vl1
+vl1|<T>|LEAVE|vl1|tr2|<P>|train=vl1
+vl1|<T>|TRAIN_STATE|vl1|Main|<P>|state=stA -> stC : entered to stG
+vl1|<T>|TRAIN_STATE|vl1|Main|<P>|state=stA -> stC : entered to tr3
+vl1|<T>|TRAVEL_END|tr2|vl1|<P>|road=tr2
+vl1|<T>|TRAVEL_START|vl1|tr3|<P>|train=vl1
+stE|<T>|PATH_FIND_REPLY|Main|stE|<P>|target=stC,direction=tr6
+stE|<T>|PATH_FIND|stE|Main|<P>|from=stE,to=stC
+stE|<T>|STATION_INFO|stE|Main|<P>|occupied=<N>,capacity=5
+stE|<T>|STATION_INFO|stE|Main|<P>|occupied=<N>,capacity=5
+tr4|<T>|ROAD_STATE|tr4|Main|<P>|state=<S>
+tr6|<T>|ROAD_STATE|tr6|Main|<P>|state=<S>
+vl0|<T>|ENTER_REPLY|stE|vl0|<P>|object=stE,next=tr6
+vl0|<T>|ENTER_REPLY|tr6|vl0|<P>|object=tr6,next=stF
+vl0|<T>|ENTER|vl0|stE|<P>|train=vl0,position=tr4,target=stC
+vl0|<T>|ENTER|vl0|tr6|<P>|train=vl0,position=stE,target=stC
+vl0|<T>|LEAVE|vl0|stE|<P>|train=vl0
+vl0|<T>|LEAVE|vl0|tr4|<P>|train=vl0
+vl0|<T>|TRAIN_STATE|vl0|Main|<P>|state=stB -> stC : entered to stE
+vl0|<T>|TRAIN_STATE|vl0|Main|<P>|state=stB -> stC : entered to tr6
+vl0|<T>|TRAVEL_END|tr4|vl0|<P>|road=tr4
+vl0|<T>|TRAVEL_START|vl0|tr6|<P>|train=vl0
+vl2|<T>|PLAN_TRAIN|Main|Main|<P>|train=vl2,from=stC,to=stA
+vl2|<T>|TRAIN_STATE|vl2|Main|<P>|state=stC -> stA : vl2 generated
+vl2|<T>|VOTE_REQUEST|Main|stA|<P>|train=vl2,expected=<T>
+vl2|<T>|VOTE_REQUEST|Main|stC|<P>|train=vl2,expected=<T>
+vl2|<T>|VOTE_REQUEST|Main|stE|<P>|train=vl2,expected=<T>
+vl2|<T>|VOTE_REQUEST|Main|stF|<P>|train=vl2,expected=<T>
+vl2|<T>|VOTE_REQUEST|Main|stG|<P>|train=vl2,expected=<T>
+vl2|<T>|VOTE_REQUEST|Main|stH|<P>|train=vl2,expected=<T>
+vl2|<T>|VOTE_REQUEST|Main|tr1|<P>|train=vl2,expected=<T>
+vl2|<T>|VOTE_REQUEST|Main|tr2|<P>|train=vl2,expected=<T>
+vl2|<T>|VOTE_REQUEST|Main|tr3|<P>|train=vl2,expected=<T>
+vl2|<T>|VOTE_REQUEST|Main|tr6|<P>|train=vl2,expected=<T>
+vl2|<T>|VOTE_REQUEST|Main|tr7|<P>|train=vl2,expected=<T>
+vl2|<T>|VOTE_RESULT|Main|stA|<P>|train=vl2,planned=<T>
+vl2|<T>|VOTE_RESULT|Main|stC|<P>|train=vl2,planned=<T>
+vl2|<T>|VOTE_RESULT|Main|stE|<P>|train=vl2,planned=<T>
+vl2|<T>|VOTE_RESULT|Main|stF|<P>|train=vl2,planned=<T>
+vl2|<T>|VOTE_RESULT|Main|stG|<P>|train=vl2,planned=<T>
+vl2|<T>|VOTE_RESULT|Main|stH|<P>|train=vl2,planned=<T>
+vl2|<T>|VOTE_RESULT|Main|tr1|<P>|train=vl2,planned=<T>
+vl2|<T>|VOTE_RESULT|Main|tr2|<P>|train=vl2,planned=<T>
+vl2|<T>|VOTE_RESULT|Main|tr3|<P>|train=vl2,planned=<T>
+vl2|<T>|VOTE_RESULT|Main|tr6|<P>|train=vl2,planned=<T>
+vl2|<T>|VOTE_RESULT|Main|tr7|<P>|train=vl2,planned=<T>
+vl2|<T>|VOTE|stA|Main|<P>|voter=stA,train=vl2,diff=<T~0>
+vl2|<T>|VOTE|stC|Main|<P>|voter=stC,train=vl2,diff=<T~0>
+vl2|<T>|VOTE|stE|Main|<P>|voter=stE,train=vl2,diff=<T~0>
+vl2|<T>|VOTE|stF|Main|<P>|voter=stF,train=vl2,diff=<T~0>
+vl2|<T>|VOTE|stG|Main|<P>|voter=stG,train=vl2,diff=<T~0>
+vl2|<T>|VOTE|stH|Main|<P>|voter=stH,train=vl2,diff=<T~0>
+vl2|<T>|VOTE|tr1|Main|<P>|voter=tr1,train=vl2,diff=<T~0>
+vl2|<T>|VOTE|tr2|Main|<P>|voter=tr2,train=vl2,diff=<T~0>
+vl2|<T>|VOTE|tr3|Main|<P>|voter=tr3,train=vl2,diff=<T~0>
+vl2|<T>|VOTE|tr6|Main|<P>|voter=tr6,train=vl2,diff=<T~2000>
+vl2|<T>|VOTE|tr7|Main|<P>|voter=tr7,train=vl2,diff=<T~8000>
+stE|<T>|STATION_INFO|stE|Main|<P>|occupied=<N>,capacity=5
+stE|<T>|STATION_INFO|stE|Main|<P>|occupied=<N>,capacity=5
+stF|<T>|PATH_FIND_REPLY|Main|stF|<P>|target=stC,direction=tr7
+stF|<T>|PATH_FIND|stF|Main|<P>|from=stF,to=stC
+stF|<T>|STATION_INFO|stF|Main|<P>|occupied=<N>,capacity=2
+stF|<T>|STATION_INFO|stF|Main|<P>|occupied=<N>,capacity=2
+tr3|<T>|ROAD_STATE|tr3|Main|<P>|state=<S>
+tr6|<T>|ROAD_STATE|tr6|Main|<P>|state=<S>
+tr6|<T>|ROAD_STATE|tr6|Main|<P>|state=<S>
+tr7|<T>|ROAD_STATE|tr7|Main|<P>|state=<S>
+vl0|<T>|ENTER_REPLY|stF|vl0|<P>|object=stF,next=tr7
+vl0|<T>|ENTER_REPLY|tr7|vl0|<P>|object=tr7,next=stC
+vl0|<T>|ENTER|vl0|stF|<P>|train=vl0,position=tr6,target=stC
+vl0|<T>|ENTER|vl0|tr7|<P>|train=vl0,position=stF,target=stC
+vl0|<T>|LEAVE|vl0|stF|<P>|train=vl0
+vl0|<T>|LEAVE|vl0|tr6|<P>|train=vl0
+vl0|<T>|TRAIN_STATE|vl0|Main|<P>|state=stB -> stC : entered to stF
+vl0|<T>|TRAIN_STATE|vl0|Main|<P>|state=stB -> stC : entered to tr7
+vl0|<T>|TRAVEL_END|tr6|vl0|<P>|road=tr6
+vl0|<T>|TRAVEL_START|vl0|tr7|<P>|train=vl0
+vl1|<T>|ENTER_REPLY|stE|vl1|<P>|object=stE,next=tr6
+vl1|<T>|ENTER_REPLY|tr6|vl1|<P>|object=tr6,next=stF
+vl1|<T>|ENTER|vl1|stE|<P>|train=vl1,position=tr3,target=stC
+vl1|<T>|ENTER|vl1|tr6|<P>|train=vl1,position=stE,target=stC
+vl1|<T>|LEAVE|vl1|stE|<P>|train=vl1
+vl1|<T>|LEAVE|vl1|tr3|<P>|train=vl1
+vl1|<T>|TRAIN_STATE|vl1|Main|<P>|state=stA -> stC : entered to stE
+vl1|<T>|TRAIN_STATE|vl1|Main|<P>|state=stA -> stC : entered to tr6
+vl1|<T>|TRAVEL_END|tr3|vl1|<P>|road=tr3
+vl1|<T>|TRAVEL_START|vl1|tr6|<P>|train=vl1
+stA|<T>|PATH_FIND_REPLY|Main|stA|<P>|target=stB,direction=tr1
+stA|<T>|PATH_FIND|stA|Main|<P>|from=stA,to=stB
+stA|<T>|STATION_INFO|stA|Main|<P>|occupied=<N>,capacity=6
+stA|<T>|STATION_INFO|stA|Main|<P>|occupied=<N>,capacity=6
+tr1|<T>|ROAD_STATE|tr1|Main|<P>|state=<S>
+vl3|<T>|ENTER_REPLY|stA|vl3|<P>|object=stA,next=tr1
+vl3|<T>|ENTER_REPLY|tr1|vl3|<P>|object=tr1,next=stH
+vl3|<T>|ENTER|vl3|stA|<P>|train=vl3,position=null,target=stB
+vl3|<T>|ENTER|vl3|tr1|<P>|train=vl3,position=stA,target=stB
+vl3|<T>|LEAVE|vl3|stA|<P>|train=vl3
+vl3|<T>|PLAN_TRAIN|Main|Main|<P>|train=vl3,from=stA,to=stB
+vl3|<T>|START|Main|vl3|<P>|station=stA
+vl3|<T>|TRAIN_STATE|vl3|Main|<P>|state=stA -> stB : entered to stA
+vl3|<T>|TRAIN_STATE|vl3|Main|<P>|state=stA -> stB : entered to tr1
+vl3|<T>|TRAIN_STATE|vl3|Main|<P>|state=stA -> stB : vl3 generated
+vl3|<T>|TRAVEL_START|vl3|tr1|<P>|train=vl3
+vl3|<T>|VOTE_REQUEST|Main|stA|<P>|train=vl3,expected=<T>
+vl3|<T>|VOTE_REQUEST|Main|stB|<P>|train=vl3,expected=<T>
+vl3|<T>|VOTE_REQUEST|Main|stD|<P>|train=vl3,expected=<T>
+vl3|<T>|VOTE_REQUEST|Main|stE|<P>|train=vl3,expected=<T>
+vl3|<T>|VOTE_REQUEST|Main|stG|<P>|train=vl3,expected=<T>
+vl3|<T>|VOTE_REQUEST|Main|stH|<P>|train=vl3,expected=<T>
+vl3|<T>|VOTE_REQUEST|Main|tr1|<P>|train=vl3,expected=<T>
+vl3|<T>|VOTE_REQUEST|Main|tr2|<P>|train=vl3,expected=<T>
+vl3|<T>|VOTE_REQUEST|Main|tr3|<P>|train=vl3,expected=<T>
+vl3|<T>|VOTE_REQUEST|Main|tr4|<P>|train=vl3,expected=<T>
+vl3|<T>|VOTE_REQUEST|Main|tr5|<P>|train=vl3,expected=<T>
+vl3|<T>|VOTE_RESULT|Main|stA|<P>|train=vl3,planned=<T>
+vl3|<T>|VOTE_RESULT|Main|stB|<P>|train=vl3,planned=<T>
+vl3|<T>|VOTE_RESULT|Main|stD|<P>|train=vl3,planned=<T>
+vl3|<T>|VOTE_RESULT|Main|stE|<P>|train=vl3,planned=<T>
+vl3|<T>|VOTE_RESULT|Main|stG|<P>|train=vl3,planned=<T>
+vl3|<T>|VOTE_RESULT|Main|stH|<P>|train=vl3,planned=<T>
+vl3|<T>|VOTE_RESULT|Main|tr1|<P>|train=vl3,planned=<T>
+vl3|<T>|VOTE_RESULT|Main|tr2|<P>|train=vl3,planned=<T>
+vl3|<T>|VOTE_RESULT|Main|tr3|<P>|train=vl3,planned=<T>
+vl3|<T>|VOTE_RESULT|Main|tr4|<P>|train=vl3,planned=<T>
+vl3|<T>|VOTE_RESULT|Main|tr5|<P>|train=vl3,planned=<T>
+vl3|<T>|VOTE|stA|Main|<P>|voter=stA,train=vl3,diff=<T~0>
+vl3|<T>|VOTE|stB|Main|<P>|voter=stB,train=vl3,diff=<T~0>
+vl3|<T>|VOTE|stD|Main|<P>|voter=stD,train=vl3,diff=<T~0>
+vl3|<T>|VOTE|stE|Main|<P>|voter=stE,train=vl3,diff=<T~0>
+vl3|<T>|VOTE|stG|Main|<P>|voter=stG,train=vl3,diff=<T~0>
+vl3|<T>|VOTE|stH|Main|<P>|voter=stH,train=vl3,diff=<T~0>
+vl3|<T>|VOTE|tr1|Main|<P>|voter=tr1,train=vl3,diff=<T~0>
+vl3|<T>|VOTE|tr2|Main|<P>|voter=tr2,train=vl3,diff=<T~0>
+vl3|<T>|VOTE|tr3|Main|<P>|voter=tr3,train=vl3,diff=<T~0>
+vl3|<T>|VOTE|tr4|Main|<P>|voter=tr4,train=vl3,diff=<T~0>
+vl3|<T>|VOTE|tr5|Main|<P>|voter=tr5,train=vl3,diff=<T~0>
+stC|<T>|STATION_INFO|stC|Main|<P>|occupied=<N>,capacity=2
+stC|<T>|STATION_INFO|stC|Main|<P>|occupied=<N>,capacity=2
+stH|<T>|PATH_FIND_REPLY|Main|stH|<P>|target=stB,direction=tr2
+stH|<T>|PATH_FIND|stH|Main|<P>|from=stH,to=stB
+stH|<T>|STATION_INFO|stH|Main|<P>|occupied=<N>,capacity=2
+stH|<T>|STATION_INFO|stH|Main|<P>|occupied=<N>,capacity=2
+tr1|<T>|ROAD_STATE|tr1|Main|<P>|state=<S>
+tr2|<T>|ROAD_STATE|tr2|Main|<P>|state=<S>
+tr7|<T>|ROAD_STATE|tr7|Main|<P>|state=<S>
+vl0|<T>|ENTER_REPLY|stC|vl0|<P>|object=stC,next=null
+vl0|<T>|ENTER|vl0|stC|<P>|train=vl0,position=tr7,target=stC
+vl0|<T>|LEAVE|vl0|stC|<P>|train=vl0
+vl0|<T>|LEAVE|vl0|tr7|<P>|train=vl0
+vl0|<T>|TRAIN_STATE|vl0|Main|<P>|state=KILL
+vl0|<T>|TRAIN_STATE|vl0|Main|<P>|state=stB -> stC : entered to stC
+vl0|<T>|TRAVEL_END|tr7|vl0|<P>|road=tr7
+vl3|<T>|ENTER_REPLY|stH|vl3|<P>|object=stH,next=tr2
+vl3|<T>|ENTER_REPLY|tr2|vl3|<P>|object=tr2,next=stG
+vl3|<T>|ENTER|vl3|stH|<P>|train=vl3,position=tr1,target=stB
+vl3|<T>|ENTER|vl3|tr2|<P>|train=vl3,position=stH,target=stB
+vl3|<T>|LEAVE|vl3|stH|<P>|train=vl3
+vl3|<T>|LEAVE|vl3|tr1|<P>|train=vl3
+vl3|<T>|TRAIN_STATE|vl3|Main|<P>|state=stA -> stB : entered to stH
+vl3|<T>|TRAIN_STATE|vl3|Main|<P>|state=stA -> stB : entered to tr2
+vl3|<T>|TRAVEL_END|tr1|vl3|<P>|road=tr1
+vl3|<T>|TRAVEL_START|vl3|tr2|<P>|train=vl3
+stF|<T>|STATION_INFO|stF|Main|<P>|occupied=<N>,capacity=2
+stF|<T>|STATION_INFO|stF|Main|<P>|occupied=<N>,capacity=2
+tr6|<T>|ROAD_STATE|tr6|Main|<P>|state=<S>
+tr7|<T>|ROAD_STATE|tr7|Main|<P>|state=<S>
+vl1|<T>|ENTER_REPLY|stF|vl1|<P>|object=stF,next=tr7
+vl1|<T>|ENTER_REPLY|tr7|vl1|<P>|object=tr7,next=stC
+vl1|<T>|ENTER|vl1|stF|<P>|train=vl1,position=tr6,target=stC
+vl1|<T>|ENTER|vl1|tr7|<P>|train=vl1,position=stF,target=stC
+vl1|<T>|LEAVE|vl1|stF|<P>|train=vl1
+vl1|<T>|LEAVE|vl1|tr6|<P>|train=vl1
+vl1|<T>|TRAIN_STATE|vl1|Main|<P>|state=stA -> stC : entered to stF
+vl1|<T>|TRAIN_STATE|vl1|Main|<P>|state=stA -> stC : entered to tr7
+vl1|<T>|TRAVEL_END|tr6|vl1|<P>|road=tr6
+vl1|<T>|TRAVEL_START|vl1|tr7|<P>|train=vl1
+stG|<T>|PATH_FIND_REPLY|Main|stG|<P>|target=stB,direction=tr3
+stG|<T>|PATH_FIND|stG|Main|<P>|from=stG,to=stB
+stG|<T>|STATION_INFO|stG|Main|<P>|occupied=<N>,capacity=3
+stG|<T>|STATION_INFO|stG|Main|<P>|occupied=<N>,capacity=3
+tr2|<T>|ROAD_STATE|tr2|Main|<P>|state=<S>
+tr3|<T>|ROAD_STATE|tr3|Main|<P>|state=<S>
+vl3|<T>|ENTER_REPLY|stG|vl3|<P>|object=stG,next=tr3
+vl3|<T>|ENTER_REPLY|tr3|vl3|<P>|object=tr3,next=stE
+vl3|<T>|ENTER|vl3|stG|<P>|train=vl3,position=tr2,target=stB
+vl3|<T>|ENTER|vl3|tr3|<P>|train=vl3,position=stG,target=stB
+vl3|<T>|LEAVE|vl3|stG|<P>|train=vl3
+vl3|<T>|LEAVE|vl3|tr2|<P>|train=vl3
+vl3|<T>|TRAIN_STATE|vl3|Main|<P>|state=stA -> stB : entered to stG
+vl3|<T>|TRAIN_STATE|vl3|Main|<P>|state=stA -> stB : entered to tr3
+vl3|<T>|TRAVEL_END|tr2|vl3|<P>|road=tr2
+vl3|<T>|TRAVEL_START|vl3|tr3|<P>|train=vl3
+vl4|<T>|PLAN_TRAIN|Main|Main|<P>|train=vl4,from=stC,to=stA
+vl4|<T>|TRAIN_STATE|vl4|Main|<P>|state=stC -> stA : vl4 generated
+vl4|<T>|VOTE_REQUEST|Main|stA|<P>|train=vl4,expected=<T>
+vl4|<T>|VOTE_REQUEST|Main|stC|<P>|train=vl4,expected=<T>
+vl4|<T>|VOTE_REQUEST|Main|stE|<P>|train=vl4,expected=<T>
+vl4|<T>|VOTE_REQUEST|Main|stF|<P>|train=vl4,expected=<T>
+vl4|<T>|VOTE_REQUEST|Main|stG|<P>|train=vl4,expected=<T>
+vl4|<T>|VOTE_REQUEST|Main|stH|<P>|train=vl4,expected=<T>
+vl4|<T>|VOTE_REQUEST|Main|tr1|<P>|train=vl4,expected=<T>
+vl4|<T>|VOTE_REQUEST|Main|tr2|<P>|train=vl4,expected=<T>
+vl4|<T>|VOTE_REQUEST|Main|tr3|<P>|train=vl4,expected=<T>
+vl4|<T>|VOTE_REQUEST|Main|tr6|<P>|train=vl4,expected=<T>
+vl4|<T>|VOTE_REQUEST|Main|tr7|<P>|train=vl4,expected=<T>
+vl4|<T>|VOTE_RESULT|Main|stA|<P>|train=vl4,planned=<T>
+vl4|<T>|VOTE_RESULT|Main|stC|<P>|train=vl4,planned=<T>
+vl4|<T>|VOTE_RESULT|Main|stE|<P>|train=vl4,planned=<T>
+vl4|<T>|VOTE_RESULT|Main|stF|<P>|train=vl4,planned=<T>
+vl4|<T>|VOTE_RESULT|Main|stG|<P>|train=vl4,planned=<T>
+vl4|<T>|VOTE_RESULT|Main|stH|<P>|train=vl4,planned=<T>
+vl4|<T>|VOTE_RESULT|Main|tr1|<P>|train=vl4,planned=<T>
+vl4|<T>|VOTE_RESULT|Main|tr2|<P>|train=vl4,planned=<T>
+vl4|<T>|VOTE_RESULT|Main|tr3|<P>|train=vl4,planned=<T>
+vl4|<T>|VOTE_RESULT|Main|tr6|<P>|train=vl4,planned=<T>
+vl4|<T>|VOTE_RESULT|Main|tr7|<P>|train=vl4,planned=<T>
+vl4|<T>|VOTE|stA|Main|<P>|voter=stA,train=vl4,diff=<T~0>
+vl4|<T>|VOTE|stC|Main|<P>|voter=stC,train=vl4,diff=<T~0>
+vl4|<T>|VOTE|stE|Main|<P>|voter=stE,train=vl4,diff=<T~0>
+vl4|<T>|VOTE|stF|Main|<P>|voter=stF,train=vl4,diff=<T~0>
+vl4|<T>|VOTE|stG|Main|<P>|voter=stG,train=vl4,diff=<T~0>
+vl4|<T>|VOTE|stH|Main|<P>|voter=stH,train=vl4,diff=<T~0>
+vl4|<T>|VOTE|tr1|Main|<P>|voter=tr1,train=vl4,diff=<T~0>
+vl4|<T>|VOTE|tr2|Main|<P>|voter=tr2,train=vl4,diff=<T~0>
+vl4|<T>|VOTE|tr3|Main|<P>|voter=tr3,train=vl4,diff=<T~7000>
+vl4|<T>|VOTE|tr6|Main|<P>|voter=tr6,train=vl4,diff=<T~6000>
+vl4|<T>|VOTE|tr7|Main|<P>|voter=tr7,train=vl4,diff=<T~5000>
+stC|<T>|STATION_INFO|stC|Main|<P>|occupied=<N>,capacity=2
+stC|<T>|STATION_INFO|stC|Main|<P>|occupied=<N>,capacity=2
+tr7|<T>|ROAD_STATE|tr7|Main|<P>|state=<S>
+vl1|<T>|ENTER_REPLY|stC|vl1|<P>|object=stC,next=null
+vl1|<T>|ENTER|vl1|stC|<P>|train=vl1,position=tr7,target=stC
+vl1|<T>|LEAVE|vl1|stC|<P>|train=vl1
+vl1|<T>|LEAVE|vl1|tr7|<P>|train=vl1
+vl1|<T>|TRAIN_STATE|vl1|Main|<P>|state=KILL
+vl1|<T>|TRAIN_STATE|vl1|Main|<P>|state=stA -> stC : entered to stC
+vl1|<T>|TRAVEL_END|tr7|vl1|<P>|road=tr7
+vl5|<T>|PLAN_TRAIN|Main|Main|<P>|train=vl5,from=stA,to=stC
+vl5|<T>|TRAIN_STATE|vl5|Main|<P>|state=stA -> stC : vl5 generated
+vl5|<T>|VOTE_REQUEST|Main|stA|<P>|train=vl5,expected=<T>
+vl5|<T>|VOTE_REQUEST|Main|stC|<P>|train=vl5,expected=<T>
+vl5|<T>|VOTE_REQUEST|Main|stE|<P>|train=vl5,expected=<T>
+vl5|<T>|VOTE_REQUEST|Main|stF|<P>|train=vl5,expected=<T>
+vl5|<T>|VOTE_REQUEST|Main|stG|<P>|train=vl5,expected=<T>
+vl5|<T>|VOTE_REQUEST|Main|stH|<P>|train=vl5,expected=<T>
+vl5|<T>|VOTE_REQUEST|Main|tr1|<P>|train=vl5,expected=<T>
+vl5|<T>|VOTE_REQUEST|Main|tr2|<P>|train=vl5,expected=<T>
+vl5|<T>|VOTE_REQUEST|Main|tr3|<P>|train=vl5,expected=<T>
+vl5|<T>|VOTE_REQUEST|Main|tr6|<P>|train=vl5,expected=<T>
+vl5|<T>|VOTE_REQUEST|Main|tr7|<P>|train=vl5,expected=<T>
+vl5|<T>|VOTE_RESULT|Main|stA|<P>|train=vl5,planned=<T>
+vl5|<T>|VOTE_RESULT|Main|stC|<P>|train=vl5,planned=<T>
+vl5|<T>|VOTE_RESULT|Main|stE|<P>|train=vl5,planned=<T>
+vl5|<T>|VOTE_RESULT|Main|stF|<P>|train=vl5,planned=<T>
+vl5|<T>|VOTE_RESULT|Main|stG|<P>|train=vl5,planned=<T>
+vl5|<T>|VOTE_RESULT|Main|stH|<P>|train=vl5,planned=<T>
+vl5|<T>|VOTE_RESULT|Main|tr1|<P>|train=vl5,planned=<T>
+vl5|<T>|VOTE_RESULT|Main|tr2|<P>|train=vl5,planned=<T>
+vl5|<T>|VOTE_RESULT|Main|tr3|<P>|train=vl5,planned=<T>
+vl5|<T>|VOTE_RESULT|Main|tr6|<P>|train=vl5,planned=<T>
+vl5|<T>|VOTE_RESULT|Main|tr7|<P>|train=vl5,planned=<T>
+vl5|<T>|VOTE|stA|Main|<P>|voter=stA,train=vl5,diff=<T~0>
+vl5|<T>|VOTE|stC|Main|<P>|voter=stC,train=vl5,diff=<T~0>
+vl5|<T>|VOTE|stE|Main|<P>|voter=stE,train=vl5,diff=<T~0>
+vl5|<T>|VOTE|stF|Main|<P>|voter=stF,train=vl5,diff=<T~0>
+vl5|<T>|VOTE|stG|Main|<P>|voter=stG,train=vl5,diff=<T~0>
+vl5|<T>|VOTE|stH|Main|<P>|voter=stH,train=vl5,diff=<T~0>
+vl5|<T>|VOTE|tr1|Main|<P>|voter=tr1,train=vl5,diff=<T~0>
+vl5|<T>|VOTE|tr2|Main|<P>|voter=tr2,train=vl5,diff=<T~0>
+vl5|<T>|VOTE|tr3|Main|<P>|voter=tr3,train=vl5,diff=<T~15000>
+vl5|<T>|VOTE|tr6|Main|<P>|voter=tr6,train=vl5,diff=<T~5000>
+vl5|<T>|VOTE|tr7|Main|<P>|voter=tr7,train=vl5,diff=<T~0>
+stC|<T>|PATH_FIND_REPLY|Main|stC|<P>|target=stA,direction=tr7
+stC|<T>|PATH_FIND|stC|Main|<P>|from=stC,to=stA
+stC|<T>|STATION_INFO|stC|Main|<P>|occupied=<N>,capacity=2
+stC|<T>|STATION_INFO|stC|Main|<P>|occupied=<N>,capacity=2
+tr7|<T>|ROAD_STATE|tr7|Main|<P>|state=<S>
+vl2|<T>|ENTER_REPLY|stC|vl2|<P>|object=stC,next=tr7
+vl2|<T>|ENTER_REPLY|tr7|vl2|<P>|object=tr7,next=stF
+vl2|<T>|ENTER|vl2|stC|<P>|train=vl2,position=null,target=stA
+vl2|<T>|ENTER|vl2|tr7|<P>|train=vl2,position=stC,target=stA
+vl2|<T>|LEAVE|vl2|stC|<P>|train=vl2
+vl2|<T>|START|Main|vl2|<P>|station=stC
+vl2|<T>|TRAIN_STATE|vl2|Main|<P>|state=stC -> stA : entered to stC
+vl2|<T>|TRAIN_STATE|vl2|Main|<P>|state=stC -> stA : entered to tr7
+vl2|<T>|TRAVEL_START|vl2|tr7|<P>|train=vl2
+vl6|<T>|PLAN_TRAIN|Main|Main|<P>|train=vl6,from=stB,to=stC
+vl6|<T>|TRAIN_STATE|vl6|Main|<P>|state=stB -> stC : vl6 generated
+vl6|<T>|VOTE_REQUEST|Main|stB|<P>|train=vl6,expected=<T>
+vl6|<T>|VOTE_REQUEST|Main|stC|<P>|train=vl6,expected=<T>
+vl6|<T>|VOTE_REQUEST|Main|stD|<P>|train=vl6,expected=<T>
+vl6|<T>|VOTE_REQUEST|Main|stE|<P>|train=vl6,expected=<T>
+vl6|<T>|VOTE_REQUEST|Main|stF|<P>|train=vl6,expected=<T>
+vl6|<T>|VOTE_REQUEST|Main|tr4|<P>|train=vl6,expected=<T>
+vl6|<T>|VOTE_REQUEST|Main|tr5|<P>|train=vl6,expected=<T>
+vl6|<T>|VOTE_REQUEST|Main|tr6|<P>|train=vl6,expected=<T>
+vl6|<T>|VOTE_REQUEST|Main|tr7|<P>|train=vl6,expected=<T>
+vl6|<T>|VOTE_RESULT|Main|stB|<P>|train=vl6,planned=<T>
+vl6|<T>|VOTE_RESULT|Main|stC|<P>|train=vl6,planned=<T>
+vl6|<T>|VOTE_RESULT|Main|stD|<P>|train=vl6,planned=<T>
+vl6|<T>|VOTE_RESULT|Main|stE|<P>|train=vl6,planned=<T>
+vl6|<T>|VOTE_RESULT|Main|stF|<P>|train=vl6,planned=<T>
+vl6|<T>|VOTE_RESULT|Main|tr4|<P>|train=vl6,planned=<T>
+vl6|<T>|VOTE_RESULT|Main|tr5|<P>|train=vl6,planned=<T>
+vl6|<T>|VOTE_RESULT|Main|tr6|<P>|train=vl6,planned=<T>
+vl6|<T>|VOTE_RESULT|Main|tr7|<P>|train=vl6,planned=<T>
+vl6|<T>|VOTE|stB|Main|<P>|voter=stB,train=vl6,diff=<T~0>
+vl6|<T>|VOTE|stC|Main|<P>|voter=stC,train=vl6,diff=<T~0>
+vl6|<T>|VOTE|stD|Main|<P>|voter=stD,train=vl6,diff=<T~0>
+vl6|<T>|VOTE|stE|Main|<P>|voter=stE,train=vl6,diff=<T~0>
+vl6|<T>|VOTE|stF|Main|<P>|voter=stF,train=vl6,diff=<T~0>
+vl6|<T>|VOTE|tr4|Main|<P>|voter=tr4,train=vl6,diff=<T~0>
+vl6|<T>|VOTE|tr5|Main|<P>|voter=tr5,train=vl6,diff=<T~0>
+vl6|<T>|VOTE|tr6|Main|<P>|voter=tr6,train=vl6,diff=<T~20000>
+vl6|<T>|VOTE|tr7|Main|<P>|voter=tr7,train=vl6,diff=<T~0>
+vl7|<T>|PLAN_TRAIN|Main|Main|<P>|train=vl7,from=stC,to=stB
+vl7|<T>|TRAIN_STATE|vl7|Main|<P>|state=stC -> stB : vl7 generated
+vl7|<T>|VOTE_REQUEST|Main|stB|<P>|train=vl7,expected=<T>
+vl7|<T>|VOTE_REQUEST|Main|stC|<P>|train=vl7,expected=<T>
+vl7|<T>|VOTE_REQUEST|Main|stD|<P>|train=vl7,expected=<T>
+vl7|<T>|VOTE_REQUEST|Main|stE|<P>|train=vl7,expected=<T>
+vl7|<T>|VOTE_REQUEST|Main|stF|<P>|train=vl7,expected=<T>
+vl7|<T>|VOTE_REQUEST|Main|tr4|<P>|train=vl7,expected=<T>
+vl7|<T>|VOTE_REQUEST|Main|tr5|<P>|train=vl7,expected=<T>
+vl7|<T>|VOTE_REQUEST|Main|tr6|<P>|train=vl7,expected=<T>
+vl7|<T>|VOTE_REQUEST|Main|tr7|<P>|train=vl7,expected=<T>
+vl7|<T>|VOTE_RESULT|Main|stB|<P>|train=vl7,planned=<T>
+vl7|<T>|VOTE_RESULT|Main|stC|<P>|train=vl7,planned=<T>
+vl7|<T>|VOTE_RESULT|Main|stD|<P>|train=vl7,planned=<T>
+vl7|<T>|VOTE_RESULT|Main|stE|<P>|train=vl7,planned=<T>
+vl7|<T>|VOTE_RESULT|Main|stF|<P>|train=vl7,planned=<T>
+vl7|<T>|VOTE_RESULT|Main|tr4|<P>|train=vl7,planned=<T>
+vl7|<T>|VOTE_RESULT|Main|tr5|<P>|train=vl7,planned=<T>
+vl7|<T>|VOTE_RESULT|Main|tr6|<P>|train=vl7,planned=<T>
+vl7|<T>|VOTE_RESULT|Main|tr7|<P>|train=vl7,planned=<T>
+vl7|<T>|VOTE|stB|Main|<P>|voter=stB,train=vl7,diff=<T~0>
+vl7|<T>|VOTE|stC|Main|<P>|voter=stC,train=vl7,diff=<T~0>
+vl7|<T>|VOTE|stD|Main|<P>|voter=stD,train=vl7,diff=<T~0>
+vl7|<T>|VOTE|stE|Main|<P>|voter=stE,train=vl7,diff=<T~0>
+vl7|<T>|VOTE|stF|Main|<P>|voter=stF,train=vl7,diff=<T~0>
+vl7|<T>|VOTE|tr4|Main|<P>|voter=tr4,train=vl7,diff=<T~0>
+vl7|<T>|VOTE|tr5|Main|<P>|voter=tr5,train=vl7,diff=<T~0>
+vl7|<T>|VOTE|tr6|Main|<P>|voter=tr6,train=vl7,diff=<T~26000>
+vl7|<T>|VOTE|tr7|Main|<P>|voter=tr7,train=vl7,diff=<T~32000>
+stE|<T>|PATH_FIND_REPLY|Main|stE|<P>|target=stB,direction=tr4
+stE|<T>|PATH_FIND|stE|Main|<P>|from=stE,to=stB
+stE|<T>|STATION_INFO|stE|Main|<P>|occupied=<N>,capacity=5
+stE|<T>|STATION_INFO|stE|Main|<P>|occupied=<N>,capacity=5
+tr3|<T>|ROAD_STATE|tr3|Main|<P>|state=<S>
+tr4|<T>|ROAD_STATE|tr4|Main|<P>|state=<S>
+vl3|<T>|ENTER_REPLY|stE|vl3|<P>|object=stE,next=tr4
+vl3|<T>|ENTER_REPLY|tr4|vl3|<P>|object=tr4,next=stD
+vl3|<T>|ENTER|vl3|stE|<P>|train=vl3,position=tr3,target=stB
+vl3|<T>|ENTER|vl3|tr4|<P>|train=vl3,position=stE,target=stB
+vl3|<T>|LEAVE|vl3|stE|<P>|train=vl3
+vl3|<T>|LEAVE|vl3|tr3|<P>|train=vl3
+vl3|<T>|TRAIN_STATE|vl3|Main|<P>|state=stA -> stB : entered to stE
+vl3|<T>|TRAIN_STATE|vl3|Main|<P>|state=stA -> stB : entered to tr4
+vl3|<T>|TRAVEL_END|tr3|vl3|<P>|road=tr3
+vl3|<T>|TRAVEL_START|vl3|tr4|<P>|train=vl3
+stF|<T>|PATH_FIND_REPLY|Main|stF|<P>|target=stA,direction=tr6
+stF|<T>|PATH_FIND|stF|Main|<P>|from=stF,to=stA
+stF|<T>|STATION_INFO|stF|Main|<P>|occupied=<N>,capacity=2
+stF|<T>|STATION_INFO|stF|Main|<P>|occupied=<N>,capacity=2
+tr6|<T>|ROAD_STATE|tr6|Main|<P>|state=<S>
+tr7|<T>|ROAD_STATE|tr7|Main|<P>|state=<S>
+vl2|<T>|ENTER_REPLY|stF|vl2|<P>|object=stF,next=tr6
+vl2|<T>|ENTER_REPLY|tr6|vl2|<P>|object=tr6,next=stE
+vl2|<T>|ENTER|vl2|stF|<P>|train=vl2,position=tr7,target=stA
+vl2|<T>|ENTER|vl2|tr6|<P>|train=vl2,position=stF,target=stA
+vl2|<T>|LEAVE|vl2|stF|<P>|train=vl2
+vl2|<T>|LEAVE|vl2|tr7|<P>|train=vl2
+vl2|<T>|TRAIN_STATE|vl2|Main|<P>|state=stC -> stA : entered to stF
+vl2|<T>|TRAIN_STATE|vl2|Main|<P>|state=stC -> stA : entered to tr6
+vl2|<T>|TRAVEL_END|tr7|vl2|<P>|road=tr7
+vl2|<T>|TRAVEL_START|vl2|tr6|<P>|train=vl2
+vl8|<T>|PLAN_TRAIN|Main|Main|<P>|train=vl8,from=stB,to=stA
+vl8|<T>|TRAIN_STATE|vl8|Main|<P>|state=stB -> stA : vl8 generated
+vl8|<T>|VOTE_REQUEST|Main|stA|<P>|train=vl8,expected=<T>
+vl8|<T>|VOTE_REQUEST|Main|stB|<P>|train=vl8,expected=<T>
+vl8|<T>|VOTE_REQUEST|Main|stD|<P>|train=vl8,expected=<T>
+vl8|<T>|VOTE_REQUEST|Main|stE|<P>|train=vl8,expected=<T>
+vl8|<T>|VOTE_REQUEST|Main|stG|<P>|train=vl8,expected=<T>
+vl8|<T>|VOTE_REQUEST|Main|stH|<P>|train=vl8,expected=<T>
+vl8|<T>|VOTE_REQUEST|Main|tr1|<P>|train=vl8,expected=<T>
+vl8|<T>|VOTE_REQUEST|Main|tr2|<P>|train=vl8,expected=<T>
+vl8|<T>|VOTE_REQUEST|Main|tr3|<P>|train=vl8,expected=<T>
+vl8|<T>|VOTE_REQUEST|Main|tr4|<P>|train=vl8,expected=<T>
+vl8|<T>|VOTE_REQUEST|Main|tr5|<P>|train=vl8,expected=<T>
+vl8|<T>|VOTE_RESULT|Main|stA|<P>|train=vl8,planned=<T>
+vl8|<T>|VOTE_RESULT|Main|stB|<P>|train=vl8,planned=<T>
+vl8|<T>|VOTE_RESULT|Main|stD|<P>|train=vl8,planned=<T>
+vl8|<T>|VOTE_RESULT|Main|stE|<P>|train=vl8,planned=<T>
+vl8|<T>|VOTE_RESULT|Main|stG|<P>|train=vl8,planned=<T>
+vl8|<T>|VOTE_RESULT|Main|stH|<P>|train=vl8,planned=<T>
+vl8|<T>|VOTE_RESULT|Main|tr1|<P>|train=vl8,planned=<T>
+vl8|<T>|VOTE_RESULT|Main|tr2|<P>|train=vl8,planned=<T>
+vl8|<T>|VOTE_RESULT|Main|tr3|<P>|train=vl8,planned=<T>
+vl8|<T>|VOTE_RESULT|Main|tr4|<P>|train=vl8,planned=<T>
+vl8|<T>|VOTE_RESULT|Main|tr5|<P>|train=vl8,planned=<T>
+vl8|<T>|VOTE|stA|Main|<P>|voter=stA,train=vl8,diff=<T~0>
+vl8|<T>|VOTE|stB|Main|<P>|voter=stB,train=vl8,diff=<T~0>
+vl8|<T>|VOTE|stD|Main|<P>|voter=stD,train=vl8,diff=<T~0>
+vl8|<T>|VOTE|stE|Main|<P>|voter=stE,train=vl8,diff=<T~0>
+vl8|<T>|VOTE|stG|Main|<P>|voter=stG,train=vl8,diff=<T~0>
+vl8|<T>|VOTE|stH|Main|<P>|voter=stH,train=vl8,diff=<T~3000>
+vl8|<T>|VOTE|tr1|Main|<P>|voter=tr1,train=vl8,diff=<T~4000>
+vl8|<T>|VOTE|tr2|Main|<P>|voter=tr2,train=vl8,diff=<T~0>
+vl8|<T>|VOTE|tr3|Main|<P>|voter=tr3,train=vl8,diff=<T~13000>
+vl8|<T>|VOTE|tr4|Main|<P>|voter=tr4,train=vl8,diff=<T~0>
+vl8|<T>|VOTE|tr5|Main|<P>|voter=tr5,train=vl8,diff=<T~41000>
+stD|<T>|PATH_FIND_REPLY|Main|stD|<P>|target=stB,direction=tr5
+stD|<T>|PATH_FIND|stD|Main|<P>|from=stD,to=stB
+stD|<T>|STATION_INFO|stD|Main|<P>|occupied=<N>,capacity=2
+stD|<T>|STATION_INFO|stD|Main|<P>|occupied=<N>,capacity=2
+tr4|<T>|ROAD_STATE|tr4|Main|<P>|state=<S>
+tr5|<T>|ROAD_STATE|tr5|Main|<P>|state=<S>
+vl3|<T>|ENTER_REPLY|stD|vl3|<P>|object=stD,next=tr5
+vl3|<T>|ENTER_REPLY|tr5|vl3|<P>|object=tr5,next=stB
+vl3|<T>|ENTER|vl3|stD|<P>|train=vl3,position=tr4,target=stB
+vl3|<T>|ENTER|vl3|tr5|<P>|train=vl3,position=stD,target=stB
+vl3|<T>|LEAVE|vl3|stD|<P>|train=vl3
+vl3|<T>|LEAVE|vl3|tr4|<P>|train=vl3
+vl3|<T>|TRAIN_STATE|vl3|Main|<P>|state=stA -> stB : entered to stD
+vl3|<T>|TRAIN_STATE|vl3|Main|<P>|state=stA -> stB : entered to tr5
+vl3|<T>|TRAVEL_END|tr4|vl3|<P>|road=tr4
+vl3|<T>|TRAVEL_START|vl3|tr5|<P>|train=vl3
+stC|<T>|STATION_INFO|stC|Main|<P>|occupied=<N>,capacity=2
+stC|<T>|STATION_INFO|stC|Main|<P>|occupied=<N>,capacity=2
+tr7|<T>|ROAD_STATE|tr7|Main|<P>|state=<S>
+vl4|<T>|ENTER_REPLY|stC|vl4|<P>|object=stC,next=tr7
+vl4|<T>|ENTER_REPLY|tr7|vl4|<P>|object=tr7,next=stF
+vl4|<T>|ENTER|vl4|stC|<P>|train=vl4,position=null,target=stA
+vl4|<T>|ENTER|vl4|tr7|<P>|train=vl4,position=stC,target=stA
+vl4|<T>|LEAVE|vl4|stC|<P>|train=vl4
+vl4|<T>|START|Main|vl4|<P>|station=stC
+vl4|<T>|TRAIN_STATE|vl4|Main|<P>|state=stC -> stA : entered to stC
+vl4|<T>|TRAIN_STATE|vl4|Main|<P>|state=stC -> stA : entered to tr7
+vl4|<T>|TRAVEL_START|vl4|tr7|<P>|train=vl4
+vl0 in stB at <T>
+vl1 in stA at <T>
+vl3 in stA at <T>
+vl2 in stC at <T>
+vl4 in stC at <T>
+vl0 started
+vl1 started
+vl2 started
+vl3 started
+vl4 started

@@ -28,12 +28,18 @@ import java.util.Random;
  *       anywhere in the stream;</li>
  *   <li>{@code wall-clock-timeout} / {@code stall} / {@code clock-dead} — exits 3, 4 and 5;</li>
  *   <li>{@code startup-error} — rejects its configuration before starting, exit 1;</li>
- *   <li>{@code hang} — never exits, for the harness' own timeout.</li>
+ *   <li>{@code hang} — never exits, for the harness' own timeout;</li>
+ *   <li>{@code flaky} — emits <em>one extra line</em> on every second invocation, counted in a
+ *       file outside the per-run scratch directory. The only mode that is not a pure function of
+ *       its inputs, and it exists for exactly one reason: the zero-flake gate (#21) has to be
+ *       shown to go red. A gate that has never been observed to fail is a lock that cannot
+ *       fail.</li>
  * </ul>
  *
- * <p>Output is a deterministic function of {@code sim.random.masterSeed}, so the trace is
- * reproducible without any of the residual nondeterminism the real implementations have. The
- * skeleton is not the place to fake those; #21 works against the real thing.
+ * <p>Output is a deterministic function of {@code sim.random.masterSeed} in every mode but
+ * {@code flaky}, so the trace is reproducible without any of the residual nondeterminism the real
+ * implementations have. The skeleton is not the place to fake those; #21 worked against the real
+ * thing.
  */
 public final class StubSimulation {
 
@@ -108,6 +114,28 @@ public final class StubSimulation {
             }
             if ("hang".equals(mode) && i == 2) {
                 Thread.sleep(Long.MAX_VALUE);
+            }
+        }
+
+        if ("flaky".equals(mode)) {
+            // Not seeded, not random: a counter OUTSIDE the scratch directory, which
+            // ParityLayout.scratchFor deletes before every run. Deterministic in the only sense
+            // that matters here — the second invocation is guaranteed to differ from the first, so
+            // a gate that failed to notice is a broken gate rather than an unlucky one.
+            java.nio.file.Path counter = java.nio.file.Path.of(System.getProperty("java.io.tmpdir"),
+                    "parity-stub-flaky-" + seed + ".count");
+            long n = 0L;
+            try {
+                if (java.nio.file.Files.isRegularFile(counter)) {
+                    n = Long.parseLong(java.nio.file.Files.readString(counter).trim());
+                }
+                java.nio.file.Files.writeString(counter, Long.toString(n + 1));
+            } catch (java.io.IOException | NumberFormatException ignored) {
+                // A stub that cannot count still has to run; it just stops being flaky.
+            }
+            if (n % 2 == 1) {
+                System.out.println("vl99 in stA at 9999");
+                System.out.println("vl99 started");
             }
         }
 

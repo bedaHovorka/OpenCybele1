@@ -93,6 +93,54 @@ val characterizationIT by tasks.registering(Test::class) {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// The zero-flake gate (#21, Phase1.md 1-PRE.2).
+//
+//   ./gradlew parityGate -Popencybele.dist=/abs/path/build/install/opencybele -Dparity.gate.runs=10
+//
+// A lane of its own rather than a flag on characterizationIT, because it is minutes rather than
+// seconds and because it must be invocable as ONE command -- "a repeatable command, not a manual
+// ritual" is the acceptance criterion. It runs exactly ParityGateIT; every other test stays out of
+// the way. -Dparity.gate.runs is forwarded like the other harness properties, and with it absent
+// the test SKIPS and prints the command, rather than passing vacuously.
+//
+// The ledger it appends to (build/parity-gate/<scenario>.tsv, or -Dparity.gate.ledger=...) is what
+// makes the cross-occasion half of the gate executable: a later invocation -- after a reboot, or
+// hours later, or on another machine pointed at the same directory -- compares against it. Do not
+// put it under a path a clean build deletes if you want that comparison to survive one.
+// ---------------------------------------------------------------------------------------------
+val parityGate by tasks.registering(Test::class) {
+    group = "verification"
+    description = "Zero-flake gate: N consecutive byte-identical runs per scenario (#21)."
+    testClassesDirs = characterizationITSourceSet.output.classesDirs
+    classpath = characterizationITSourceSet.runtimeClasspath
+    useJUnitPlatform()
+    filter { includeTestsMatching("cz.vutbr.fit.ags.parity.it.ParityGateIT") }
+    maxParallelForks = 1
+    forkEvery = 0
+    outputs.upToDateWhen { false }
+
+    systemProperty("parity.root", providers.systemProperty("parity.root").getOrElse("parity-tests"))
+    systemProperty("golden.record", "false")
+    for (name in listOf("parity.gate.runs", "parity.gate.ledger")) {
+        (providers.gradleProperty(name).orNull ?: providers.systemProperty(name).orNull)
+            ?.let { systemProperty(name, it) }
+    }
+    for (name in listOf("opencybele.dist", "opencybele.home")) {
+        (providers.gradleProperty(name).orNull ?: providers.systemProperty(name).orNull)
+            ?.let { systemProperty(name, file(it).absolutePath) }
+    }
+    (providers.gradleProperty("opencybele.java").orNull
+        ?: providers.systemProperty("opencybele.java").orNull)
+        ?.let { systemProperty("opencybele.java", it) }
+
+    testLogging {
+        events("passed", "failed", "skipped")
+        showStandardStreams = true
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
+}
+
 // `./gradlew build` compiles the harness but does not run it: TESTING.md §6 keeps
 // characterizationIT as its own lane, and it will later need a built implementation to point at.
 tasks.named("check") {

@@ -14,25 +14,44 @@ description: >
   an application default and nothing from a file on another branch.
 
 # ---------------------------------------------------------------------------------------------
-# WHY summary AND NOT strict OR causal
+# WHY summary AND NOT strict OR causal -- REVISED BY #21, AND THE REASON HAS CHANGED
 #
-# Measured, not assumed. Three runs of exactly this configuration, back to back at the pinned seed,
-# produce 623 normalized lines each and the same 5 departures -- and still differ from one another
-# from line 10 onwards (`stD|1096|STATION_INFO...` against `stD|1016|...`), because FIVE numeric
-# families in the trace derive from a clock that advances with the wall clock and are re-read on
-# every run: field 2 (`tick`) on every line, the `expected=` of VOTE_REQUEST, the `planned=` of
-# VOTE_RESULT, the `diff=` of VOTE, and the number in the application's own
-# "<train> in <station> at <n>" println. A sixth value, STATION_INFO's `occupied`, is a race that
-# no capture point removes. See docs/trace-format.md, "Five families that change on every run".
+# It is no longer the normalizer. #21 has landed (docs/trace-normalizer.md) and it projects all six
+# run-varying value families, sorts the startup block by agent name, canonicalises order inside a
+# burst, and splits the two application printlns into independent streams. Measured over 52
+# headless captures of this application: ZERO ordering differences remain. Before it, 13 captures
+# produced 13 distinct traces.
 #
-# Projecting those away is #21's job and it has not landed. Until it does:
+# What blocks `strict` here is ONE NUMBER IN THIS FILE, and it is `sim.stop.maxClockMs`.
 #
-#   * `strict` compares line for line -- impossible today, first divergence at line 10.
-#   * `causal` compares each entity's ordered projection EXACTLY, and compares the unattributed
-#     bucket (every STATION_INFO, ROAD_STATE, PATH_FIND line) exactly and with no tolerance at all.
-#     Also impossible today, and for the same reason.
-#   * `summary` compares how many distinct trains the run produced and one count per rule below.
-#     Those are stable at this size, so this is the strongest level that actually holds.
+# At this seed the trace's last event burst BEGINS at simulated 25072 -- 72 ms after the 25000
+# bound -- so those 16 lines are emitted while the run is already inside its shutdown window and
+# racing Cybele.terminate(). Measured over 38 runs at this bound: 26 produced the full 623 lines,
+# 1 produced 611, 3 produced 609 and 8 produced 607. A truncated tail is MISSING LINES, and no
+# normalisation invents a line a run never printed -- the same rule that makes DEF-02 unfixable
+# here. (One further run in the 38 was a DEF-02 drop, at 591 lines.)
+#
+#   * `strict` and `causal` both fail on that, at the same rate: 25 of 38. They fail identically
+#     because causal compares the unattributed bucket -- every STATION_INFO, ROAD_STATE and
+#     PATH_FIND line -- in order and with NO tolerance, and the truncated burst is full of them.
+#   * `summary` absorbs it: the loss is ~2 lines per family, which is what the tolerances below
+#     were measured against. So `summary` remains the strongest level that actually holds FOR THIS
+#     BOUND.
+#
+# THE FIX IS NOT MINE TO MAKE. Moving the bound to 24000 puts it inside the 1952 ms gap between the
+# burst ending at 23120 and the one beginning at 25072, and it is also 2776 simulated ms clear of
+# the last train creation -- i.e. FURTHER from the Cybele.terminate() NPE hazard this file sized
+# 25000 against, not nearer. Measured at 24000: 14 of 14 captures byte-identical, and the shipped
+# zero-flake gate is 10 for 10. That configuration is checked in as parity-tests/scenarios/
+# opencybele-strict.yaml with its own golden, because changing the bound HERE would mean
+# re-recording this golden and Phase1.md L7 makes that an expensive thing to do on someone else's
+# issue.
+#
+# #23: fold the two. They differ in exactly one number and this one is the weaker of the pair.
+#
+# NOTE ON THIS GOLDEN. It was NOT re-recorded. ScenarioRunner normalizes the golden with the same
+# normalizer before comparing, and CanonicalTraceNormalizer is idempotent, so the file recorded
+# under #12's placeholder still matches -- which is exactly what Phase1.md L7 requires.
 #
 # WHAT summary DOES AND DOES NOT BUY, SAID PLAINLY
 #
@@ -45,9 +64,8 @@ description: >
 # golden lines are now inside some rule.
 #
 # It is still a COUNT contract. A rule proves the family exists at the right cardinality, not that
-# any individual line's payload is right. Pinning content needs #21's projection and a `causal`
-# contract; the golden already holds the full normalized trace, so that is a one-word edit here and
-# NO re-recording -- which is what Phase1.md L7 requires.
+# any individual line's payload is right. Pinning content needs a bound that does not land in the
+# shutdown window; opencybele-strict.yaml has one.
 # ---------------------------------------------------------------------------------------------
 contract: summary
 golden: opencybele-smoke.txt
@@ -127,11 +145,22 @@ launcher:
                                           # Sized above the 6.1 s arrival gap (762 ms wall).
 
 run:
-  # Well above the child's own 60 s safety net, because this is the backstop for the case where the
-  # child's net did NOT fire: ~1 run in 45 hangs outright with a clean process and nothing in the
-  # stream (DEF-22), which sim.stop.stallMs structurally cannot catch -- it measures the gap
-  # between generated trains, and a hang after the last one leaves no gap to grow. Killing the
-  # child is reported as HARNESS_TIMEOUT and can never pass.
+  # A backstop for a child that genuinely NEVER EXITS. A kill is HARNESS_TIMEOUT and can never pass.
+  #
+  # It is NOT the net for DEF-22, and an earlier revision of this file said it was. docs/defect-triage.md
+  # measures the real shape: the latch wedges Planning, but Generator is fire-and-forget and the two
+  # activities do not head-of-line block each other, so generation continues, the simulated-time
+  # bound still fires, and THE PROCESS EXITS 0 -- with zero AssertionError and zero
+  # "Exception in thread" across 146 measurement runs. sim.stop.stallMs cannot catch it either: it
+  # measures the gap between GENERATED trains, and generation is the half that keeps working.
+  #
+  # What catches a wedge is the TRACE: the departure stream truncates, so a liveness floor fires if
+  # the wedge came early enough and the golden comparison fires otherwise. That is why the contract
+  # level is load-bearing here -- at `strict` a wedge is a certain failure, while at `summary` a late
+  # one can hide inside a tolerance.
+  #
+  # NOTE for #23: at this scenario's `summary` contract a late wedge CAN hide inside a tolerance.
+  # That is one more reason to fold this file into opencybele-strict.yaml.
   harnessTimeoutMs: 120000
   expect: bound-reached
 
@@ -225,7 +254,12 @@ summary:
     pattern: '^vl\d+ started$'
     tolerance: 1
   - label: departure-printlns        # 5 in 17/17 -- the other println, kept in the contract
-    pattern: '^vl\d+ in st[A-H] at \d+$'
+    # `at <T>`, not `at \d+`: summary patterns match NORMALIZED lines and #21 projects the
+    # departure instant away (docs/trace-normalizer.md, rule `departure`). Left as `\d+` this rule
+    # counted 0 on both sides and passed no matter what the run did -- a lock that cannot fail.
+    # ScenarioRunner now rejects a summary rule that counts 0 in the golden, so it cannot recur
+    # silently.
+    pattern: '^vl\d+ in st[A-H] at <T>$'
     tolerance: 1
   # --- the movement protocol --------------------------------------------------------------
   - label: enter-events              # 38 unloaded, 36-37 saturated

@@ -441,6 +441,37 @@ class HarnessSelfCheckIT {
     }
 
     @Test
+    @DisplayName("a summary rule that matches nothing in the golden fails, rather than reading green")
+    void summaryRuleMatchingNothingFails(@TempDir Path parityRoot) {
+        // The sibling of the entity-pattern check above, and it was found the hard way: summary and
+        // entity patterns match NORMALIZED lines while liveness patterns match RAW ones, so #21's
+        // projection turned a working `at \d+` rule into one that counted 0 against 0 and passed
+        // whatever the run did. Comparison is symmetric, so a zero-count rule is a lock that cannot
+        // fail — the shape this file exists to rule out.
+        ScenarioRunner runner = new ScenarioRunner(new ParityLayout(parityRoot));
+        String rules = """
+                entity:
+                  pattern: '^(vl\\d+) '
+                summary:
+                  - label: departures
+                    pattern: '^vl\\d+ started$'
+                    tolerance: 0
+                  - label: never-matches
+                    pattern: '^vl\\d+ in st[A-H] at \\d+$'
+                    tolerance: 0
+                """;
+        ScenarioSpec spec = spec("zero-count", "summary", "normal", 6, 6, rules);
+        withRecordMode(true, () -> runner.run(spec, new StubLauncher()));
+
+        ScenarioFailedException failure = assertThrows(ScenarioFailedException.class,
+                () -> withRecordMode(false, () -> runner.run(spec, new StubLauncher())));
+        assertTrue(failure.getMessage().contains("never-matches"), failure.getMessage());
+        assertTrue(failure.getMessage().contains("matches NOTHING in the golden"), failure.getMessage());
+        // And it must not fire on the rule that does match, or every summary scenario breaks.
+        assertFalse(failure.getMessage().contains("'departures' (/"), failure.getMessage());
+    }
+
+    @Test
     @DisplayName("a causal entity pattern that matches no normalized line fails loudly")
     void entityPatternMatchingNothingFails(@TempDir Path parityRoot) {
         ScenarioRunner runner = new ScenarioRunner(new ParityLayout(parityRoot));

@@ -8,11 +8,13 @@
 > [#24](https://github.com/bedaHovorka/OpenCybele1/issues/24) (recording the goldens), and later by
 > `JadeLauncher` (#36) and `JasonLauncher` (#43).
 >
-> **What exists today is the skeleton, plus adapter 1.** The SPI, the runner, the spec format, the
-> golden handling and the contract levels are complete and exercised end to end against a stub
-> implementation, and — since #13 — against the real OpenCybele application in a child JVM. The
-> normalizer is still a placeholder by design (#21), which is what caps `opencybele-smoke` at a
-> `summary` contract; see "Adapter 1: OpenCybeleLauncher" below.
+> **What exists today is the skeleton, adapter 1, and the normalizer.** The SPI, the runner, the
+> spec format, the golden handling and the contract levels are complete and exercised end to end
+> against a stub implementation and — since #13 — against the real OpenCybele application in a child
+> JVM. **#21 has landed**: `CanonicalTraceNormalizer` replaces the placeholder, and
+> `opencybele-strict` is a real scenario compared at `strict`. Its rules, its measurements and the
+> zero-flake gate are [`trace-normalizer.md`](trace-normalizer.md); what is written here about the
+> normalizer is only where it sits in the pipeline.
 
 ## Where things live
 
@@ -25,7 +27,7 @@ src/characterizationIT/java/cz/vutbr/fit/ags/parity/
   spi/                LauncherAdapter, LaunchSpec, RunDisposition, TraceNormalizer
   run/                ScenarioRunner, ErrorScanner, the failure types
   golden/             GoldenStore, TraceComparator
-  normalize/          the placeholder normalizers (#21 replaces these)
+  normalize/          DiagnosticFilter (per adapter) + CanonicalTraceNormalizer (#21)
   stub/               a stand-in implementation, so the SPI can be driven with no application present
   opencybele/         adapter 1 (#13): the real application, in a child JVM, reached by path
   it/                 the JUnit entry points
@@ -63,7 +65,7 @@ An adapter supplies four things, three of them with a working default:
 | `launch(spec, scratch)` | the command line. The only required method. |
 | `classifyExit(int)` | exit status → `RunDisposition`. Defaults to the measured table below. |
 | `diagnosticPrefixes()` | which captured lines are diagnostics rather than trace. |
-| `normalizer()` | what is recorded. Defaults to "drop the diagnostics"; #21 replaces it. |
+| `normalizer()` | what is recorded, and what the golden is read through. Defaults to `DiagnosticFilter(diagnosticPrefixes()).andThen(new CanonicalTraceNormalizer())`. |
 
 ## The scenario format
 
@@ -188,7 +190,7 @@ shorter or less dense scenario: per #23, any scenario proposed for `strict` shou
 times at a fixed seed with its entity-id sets diffed, and one that fails gets a **weaker contract
 level**, never a re-recorded golden.
 
-`causal` is also the level that survives the two interleaving residuals #21 has to handle. When two
+`causal` is also the level that survives the two interleaving residuals #21 handled. When two
 entities act in the same simulated millisecond their `println`s race — three orderings measured
 across six runs at one seed — so comparison has to be possible per entity id rather than per line
 position. Lines that carry no entity id form one bucket compared in order among themselves **and
@@ -197,6 +199,11 @@ to interleave the way it did on the day the golden was recorded. That exclusion 
 while the bucket counted as an entity, a replay that dropped the *entire* startup block passed at
 `tolerance.missing: 1`, because losing every unattributed line cost exactly one missing "entity" —
 and all of #21's startup-block work lands in that bucket.
+
+Since #21, the interleaving residuals are gone from *both* levels — the normalizer canonicalises
+order before either comparison sees it — so the choice between `strict` and `causal` is now purely
+about whether the scenario's entity *set* is stable. Where it is, prefer `strict`: `causal`'s
+tolerance budget applies only to which ids exist and buys nothing when none go missing.
 
 ## How a run is judged — and why in this order
 
@@ -315,14 +322,16 @@ The child's own stall detector (exit 4) is the same hazard caught from the insid
 independent halves and both are cheap.
 
 Liveness is evaluated on the **raw** lines rather than the normalized ones, so a rule authored today
-does not have to be re-authored when #21 lands.
+did not have to be re-authored when #21 landed — the liveness rules in `opencybele-smoke` still
+carry the numeric `tick` field that the normalizer now projects away, and still match.
 
 #### Which lines a pattern sees — an asymmetry worth knowing
 
 `liveness` and `allowErrorLines` match **raw** captured lines. `entity` and `summary` match
 **normalized** ones. That is deliberate — the first pair has to work before the normalizer runs,
 the second pair describes what a golden contains — but it means a pattern copied from one to the
-other can silently stop matching once #21 projects the `at <t>` field away. The harness fails a
+other silently stopped matching once #21 projected the `at <t>` field away — it did, in this
+repository, and the fix and its guard are under "`opencybele-smoke`" below. The harness fails a
 `causal` or `summary` run whose `entity.pattern` matches none of the normalized lines, rather than
 letting every line fall into the unattributed bucket and comparing nothing per entity.
 
@@ -465,15 +474,23 @@ remove all eleven of them.
 
 ### `opencybele-smoke`, and what it can honestly claim
 
-`summary`, not `strict` or `causal` — because #21 has not landed. Three back-to-back runs at the
-pinned seed produce 623 identical-length normalized traces that still differ from one another from
-**line 10** onwards (`stD|1096|STATION_INFO…` against `stD|1016|…`), since five clock-derived
-numeric families are re-read every run. (`trace-format.md`'s "differs at line 30" is that
-document's own run of `short-bounded`, not this scenario.) `causal` is no easier than `strict`
-here: it compares each entity's projection exactly and the unattributed bucket exactly and with no
-tolerance. When #21 lands this scenario tightens by editing one word, with **no re-recording** —
-recording writes the full normalized trace at every level, and `GoldenStore.record` does so
-unconditionally.
+`summary`, not `strict` or `causal` — and **since #21 landed the reason is no longer the
+normalizer.** The projection is sufficient: over 52 headless captures there is not one pair of runs
+with the same content in a different order, where before it 13 captures gave 13 distinct traces.
+What blocks this scenario is one number in its own file. At its seed the last event burst *begins*
+at simulated 25072, 72 ms past the `sim.stop.maxClockMs = 25000` bound, so it is emitted inside the
+shutdown window: 25 of 38 runs printed all 623 lines and matched, the rest printed 611, 609 or 607. Missing
+lines are not projectable, and `causal` is no easier than `strict` here — it compares each entity's
+projection exactly and the unattributed bucket exactly and with no tolerance, and the truncated
+burst is full of unattributed lines. Both fail at the same rate.
+
+`opencybele-strict` is the same configuration with the bound moved to 24000, inside the 1952 ms gap
+between bursts: 14 of 14 captures byte-identical, the gate 10 for 10, contract `strict`. #23 should
+fold the two. See [`trace-normalizer.md`](trace-normalizer.md) §5.
+
+**This golden was not re-recorded.** `ScenarioRunner` normalizes the golden with the same normalizer
+before comparing, and `CanonicalTraceNormalizer` is idempotent, so a golden recorded under the
+placeholder still matches — which is exactly what `Phase1.md` L7 requires.
 
 **The level is not the rule set, and the rule set is what a replay is actually held to.** The first
 version of this scenario declared six summary rules covering `PLAN_TRAIN`, `TRAIN_STATE`, `ENTER`,
@@ -493,8 +510,14 @@ promptly once the bound fires. Tolerances are 2 and 3 accordingly — the earlie
 had measured, and unmeasured slack is exactly what let a dropped property hide.
 
 It remains a **count** contract: a rule proves a family exists at the right cardinality, not that
-any line's payload is right. That is the honest ceiling of `summary`, and pinning content is #21
-plus a `causal` contract — a one-word edit here, no re-record.
+any line's payload is right. That is the honest ceiling of `summary`; `opencybele-strict` is where
+content is pinned.
+
+One trap #21 exposed and closed: **summary and entity patterns match NORMALIZED lines while
+liveness patterns match RAW ones**, so a pattern copied between them can stop matching the moment a
+field is projected away — `^vl\d+ in st[A-H] at \d+$` became `at <T>` and silently began counting
+0 against 0, passing whatever the run did. `TraceComparator` now **fails** a summary rule that
+matches nothing in the golden, rather than letting it read as green.
 
 Two claims about this scenario were also overstated in the first revision and are now true rather
 than softened. It declares **all twenty** `sim.*` keys, including the ten that sit at a current
@@ -517,17 +540,13 @@ throughout. **Moving that number is not a cosmetic edit.**
 
 ## Deliberately left to other issues
 
-* **#21 — the normalizer.** What ships here is `DiagnosticFilter`, which drops the declared
-  diagnostic prefixes and nothing else. Timestamps, the startup block's nondeterministic emission
-  order (`Cybele.createAgent` is asynchronous — six different orders measured in six runs, so the
-  block must be sorted by agent name and there is no tick boundary to sort within) and
-  equal-millisecond line interleaving are all untouched. The `TraceNormalizer` seam and its
-  position in the pipeline are what this issue fixes; the projection itself is #21's. Two things to
-  take with it: the startup block lands in `causal`'s **unattributed bucket**, which is compared
-  unconditionally and excluded from the tolerance budget, so sorting it is a normalizer job and not
-  something a tolerance can absorb; and `entity`/`summary` patterns match **normalized** lines while
-  `liveness`/`allowErrorLines` match raw ones, so projecting a field away can invalidate an
-  `entity.pattern` that was copied from a liveness rule.
+* **#21 — the normalizer. Landed.** `DiagnosticFilter` still drops the declared diagnostic
+  prefixes, and `CanonicalTraceNormalizer` now runs after it: eight value projections — seven
+  erased, `VOTE.diff` **quantised** so the election's arithmetic stays pinned at 1 s — a
+  startup-block sort by agent name, burst-local ordering, and the two application `println`s split
+  into independent streams. It is also applied to the **golden** before comparison, which is why no
+  golden was re-recorded. Rules, measurements, mutation results and the zero-flake gate are in
+  [`trace-normalizer.md`](trace-normalizer.md).
 * **#23 / #24 — scenarios and goldens.** There are two scenarios: `smoke-stub`, whose golden is a
   stub's output, and `opencybele-smoke`, which is a smoke test for adapter 1 rather than coverage
   of the application. Real coverage is recorded against the OpenCybele branch, and every scenario
