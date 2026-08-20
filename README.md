@@ -63,6 +63,14 @@ xhost -local:docker   # revoke access again once done
    ```
    The container defaults `DISPLAY` to `host.docker.internal:0`, routing X11 over TCP to VcXsrv on the Windows host.
 
+## Continuous integration
+
+`.github/workflows/characterization-opencybele.yml` runs the job **`characterizationIT@opencybele`** on every push to, and pull request against, `develop`/`jade-develop`, plus nightly. It checks out this branch (the parity harness) *and* `opencybele-baseline` (the frozen OpenCybele application), recovers and installs the vendored Cybele jars with `scripts/bootstrap-vendor-jars.sh`, builds the application with `installDist`, and runs the L3 golden-master suite against it via `-Popencybele.dist`. The run is headless and needs no display server.
+
+Two things about it are worth knowing before reading the YAML. Without `-Popencybele.dist` the end-to-end test is *skipped* and Gradle still exits 0, so the job asserts out of the JUnit XML that the scenario really ran rather than trusting the exit status. And the baseline carries a measured ~1-in-45 nondeterministic wedge (`DEF-22`) whose failure is indistinguishable from real behavioural drift except by re-running, so the end-to-end class — and only that class — gets one loudly announced retry.
+
+Full write-up, including how to reproduce the job locally: [`docs/ci.md`](docs/ci.md).
+
 ## Documentation
 
 `dokumentace.pdf` and `prezentace.pdf` (in Czech) are the original project documentation and presentation submitted for the course.
