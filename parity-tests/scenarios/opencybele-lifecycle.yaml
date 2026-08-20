@@ -1,0 +1,153 @@
+# Agent lifecycle, start to finish, on the smallest network the application can be given.
+#
+# The full-system scenario (opencybele-strict) runs eight stations, seven tracks and nine trains,
+# which is the right thing for a behavioural contract and the wrong thing for reading. This one
+# runs TWO stations, ONE track and TWO trains, and its golden is short enough that a human can
+# check every line of it by hand -- which is what makes it useful as the scenario a port is
+# brought up against FIRST (#36), before anything larger is attempted.
+#
+# It is also the issue's "startup/shutdown scenario -- agent lifecycle order and initial
+# messages", and it is the only scenario in the set where the whole of a train's life is visible
+# in one screenful:
+#
+#   PLAN_TRAIN -> VOTE_REQUEST x3 -> VOTE x3 -> VOTE_RESULT x3 -> START
+#   -> ENTER stA -> PATH_FIND -> PATH_FIND_REPLY -> ENTER_REPLY -> ENTER tr1 -> ENTER_REPLY
+#   -> LEAVE stA -> TRAVEL_START -> TRAVEL_END -> ENTER stB -> ENTER_REPLY(next=null)
+#   -> LEAVE tr1 -> LEAVE stB (from the destructor) -> TRAIN_STATE state=KILL
+#
+# THE LIFECYCLE ASYMMETRY THE ISSUE NAMES. Only `Train` ever dies (INVENTORY AG-04,
+# Train.java:92 `Agent.die()` -> `destroy()` at :123). `RailwayMainAgent`, the two `Station`s and
+# the `RoadAgent` are created once and never destroyed, so the trace has a birth block for them
+# (the opening STATION_INFO/ROAD_STATE burst, which docs/trace-normalizer.md sorts by agent name
+# because Cybele.createAgent is asynchronous) and NO death block at all. A port that tears its
+# static agents down at the bound produces extra lines here and fails.
+#
+# Format: docs/parity-harness.md. Trace format: docs/trace-format.md (on opencybele-baseline).
+
+id: opencybele-lifecycle
+description: >
+  Two stations, one track, two trains, 40 s (simulated) headless at a pinned seed. The smallest
+  run that still exercises all fifteen channels, both one-shot timer sites that fire in it, and a
+  train's whole life including Agent.die() and the destructor's LEAVE.
+
+# ---------------------------------------------------------------------------------------------
+# CONTRACT: strict. MEASURED, not assumed.
+#
+#   * within-session: 10/10 byte-identical normalized traces (parityGate, -Dparity.gate.runs=10)
+#   * cross-occasion: a second gate invocation, separated by hours, agreed on the departure-id set
+#     (ParityGate ledger, docs/trace-normalizer.md 6.3). Both halves are recorded in
+#     parity-tests/scenarios/COVERAGE.md with their dates.
+#
+# There is nothing here for DEF-02 to drop that would not fail loudly: with two trains, losing one
+# takes the run from 2 departures to 1 and the liveness floor below fires before the comparison
+# does.
+#
+# THE BOUND, AND THE MARGIN IT WAS CHOSEN FOR
+#
+# `Cybele.terminate()` races a `Train` constructor that is in flight at the stop instant and the
+# result is an NPE printed AFTER the stop banner with the exit status still 0 (see
+# opencybele-strict.yaml). The exposure is the wall-clock gap between the last train CREATION and
+# the bound.
+#
+# At this seed the two trains are created at simulated 1552 and 29536; the last event of the run
+# is at 32608. The bound of 40000 therefore sits
+#
+#     10464 simulated ms (1308 ms of wall clock at pace 8) after the last train creation, and
+#      7392 simulated ms  (924 ms of wall clock) after the last event of any kind.
+#
+# For comparison, the measurement that produced this rule: a bound 0-40 simulated ms after an
+# arrival failed 3 of 8 under load; a bound ~480 ms of wall clock clear failed 0 of 24. This one
+# has 2.7x that margin, and it is the widest in the scenario set.
+# ---------------------------------------------------------------------------------------------
+contract: strict
+golden: opencybele-lifecycle.txt
+
+launcher:
+  # No `config:` key, and all twenty sim.* keys written out, for the reason opencybele-strict
+  # gives: the golden must depend on the application binary and on nothing that lives in a file on
+  # another branch. ScenarioCatalogIT asserts the totality of this block rather than trusting it.
+  properties:
+    # --- arrivals -------------------------------------------------------------------------
+    # lambda far above the run length on purpose: this scenario is about ONE train at a time.
+    sim.arrival.lambdaMs: "20000"
+    sim.arrival.firstFireMs: "500"
+    sim.arrival.pairs: "stA>stB,stB>stA"
+    # --- topology, capacities, delays -----------------------------------------------------
+    # The smallest legal network: one edge. `Util.path` returns [stA, tr1, stB], so an election
+    # has exactly three voters and the golden's vote block is three lines per family.
+    sim.topology: "stA-stB:tr1"
+    sim.station.capacities: "stA=2,stB=2"
+    sim.road.delaysSec: "tr1=3"
+    sim.station.voteWindowMs: "20000"
+    # --- clock ----------------------------------------------------------------------------
+    sim.clock.startMs: "0"
+    sim.clock.pace: "8"
+    # --- GUI: inert under sim.headless=true, declared so nothing is implicit ---------------
+    sim.gui.paces: "Fast=8,Normal=1,Slow=0.3"
+    sim.gui.mainLine: "stA,stB"
+    sim.gui.branches: ""
+    # --- randomness -----------------------------------------------------------------------
+    sim.random.masterSeed: "20080415"
+    # --- run shape ------------------------------------------------------------------------
+    sim.headless: "true"
+    sim.trace.enabled: "true"
+    sim.trace.trainLookahead: "32"
+    sim.stop.maxTrains: "0"
+    sim.stop.maxClockMs: "40000"
+    sim.stop.wallClockMs: "60000"
+    # stallMs is WALL clock between GENERATED trains. The inter-arrival gap here is 27984
+    # simulated ms = 3498 ms of wall clock at pace 8, so anything under ~4 s would end the run as
+    # a stall (exit 4, never a pass). 20000 leaves 5.7x headroom and still catches a generator
+    # that has actually died.
+    sim.stop.stallMs: "20000"
+
+run:
+  harnessTimeoutMs: 120000
+  expect: bound-reached
+
+# Mandatory (docs/parity-harness.md), and every floor here is one BELOW the measured value, so
+# ordinary drift is not a failure while a dead or gutted run is. Liveness matches RAW lines, hence
+# the numeric tick that the normalizer later projects to <T>.
+#
+# `distinctGroup` where the point is DISTINCT trains: two lines from one train must not satisfy a
+# floor that is about two trains.
+liveness:
+  # Both trains were generated (TMR-01 once, TMR-02 once).
+  - pattern: '^(vl\d+)\|\d+\|PLAN_TRAIN\|'
+    distinctGroup: 1
+    atLeast: 2
+  # Both got through a complete election. This is the floor a port that restructures the
+  # CountDownLatch protocol (#34) has to keep satisfying.
+  - pattern: '^(vl\d+)\|\d+\|VOTE_RESULT\|'
+    distinctGroup: 1
+    atLeast: 2
+  # Both departed -- the application's own two printlns, which predate the probe.
+  - pattern: '^vl\d+ started$'
+    atLeast: 2
+  - pattern: '^(vl\d+) in st[A-H] at \d+$'
+    distinctGroup: 1
+    atLeast: 2
+  # Both ARRIVED and DIED. `state=KILL` is emitted from Train.destroy (EVT-21), the only
+  # lifecycle callback in the codebase that is not bound to a channel, so this floor is the one
+  # thing in the scenario set that fails if a port forgets takeDown().
+  - pattern: '^(vl\d+)\|\d+\|TRAIN_STATE\|[^|]*\|[^|]*\|[^|]*\|state=KILL$'
+    distinctGroup: 1
+    atLeast: 2
+  # The static objects reported state too, so a port that emits only train lines fails here.
+  - pattern: '^st[A-B]\|\d+\|STATION_INFO\|'
+    atLeast: 8
+  - pattern: '^tr1\|\d+\|ROAD_STATE\|'
+    atLeast: 4
+  # The lazy path-find round trip ran at least once (CH-15/CH-09, ACT-04). It runs ONCE per
+  # (station, target) pair for the life of the run because Station.pathDirs caches it, so this
+  # floor is 1 and not 2 -- the second train reuses stA's cached direction and emits nothing.
+  - pattern: '^st[A-B]\|\d+\|PATH_FIND_REPLY\|'
+    atLeast: 1
+
+# Not required at `strict` -- the comparison is positional -- but declared because ParityGate
+# reads departure-id sets through it when it compares occasions (docs/defect-triage.md 8.2).
+# Entity patterns match NORMALIZED lines. No `tolerance:` block: the parser rejects one under
+# `strict`, and rightly.
+entity:
+  pattern: '^(vl\d+)\|'
+  group: 1

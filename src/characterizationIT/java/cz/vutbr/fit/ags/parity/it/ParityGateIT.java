@@ -8,7 +8,11 @@ import cz.vutbr.fit.ags.parity.spec.ScenarioSpec;
 import cz.vutbr.fit.ags.parity.spec.ScenarioSpecParser;
 
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DynamicTest;
+import org.junit.jupiter.api.TestFactory;
+
+import java.util.List;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -36,35 +40,68 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  */
 class ParityGateIT {
 
-    private static final String SCENARIO = "opencybele-strict";
+    /**
+     * Gate every OpenCybele scenario, not just one.
+     *
+     * <p>Until #23 this was a single hard-coded id, because there was a single scenario worth
+     * gating. {@code Phase1.md} 1-PRE.2 says "zero flake across &ge;10 consecutive runs
+     * <strong>per scenario</strong>", and #23's own acceptance is that each scenario passes this
+     * gate <em>before</em> it is added to {@code COVERAGE.md} — so the set is read from the
+     * catalogue and a scenario added tomorrow is gated without anyone remembering to add it here.
+     *
+     * <p>One scenario can be selected with {@code -Dparity.gate.scenario=<id>}, which is what to
+     * use while tuning one; the default is all of them, which is what CI and the acceptance need.
+     */
+    static final String SCENARIO_PROPERTY = "parity.gate.scenario";
 
-    @Test
-    @DisplayName("N consecutive runs of the strict scenario are byte-identical (opt-in)")
-    void consecutiveRunsAreByteIdentical() {
+    @TestFactory
+    @DisplayName("N consecutive runs of each OpenCybele scenario are byte-identical (opt-in)")
+    Stream<DynamicTest> consecutiveRunsAreByteIdentical() {
         int runs = ParityGate.requestedRuns();
-        assumeTrue(runs > 0, "gate not requested; run it with:\n    " + ParityGate.invocation(SCENARIO));
-        assumeTrue(OpenCybeleLauncher.isAvailable(), OpenCybeleLauncher.unavailableMessage());
-        // Recording N times and then declaring the last one reproducible would be circular: each
-        // run would overwrite the golden it is about to be compared against.
-        assumeFalse(GoldenStore.recording(), "the gate compares; it never records");
-
         ParityLayout layout = ParityLayout.fromSystemProperties();
-        ScenarioSpec spec = ScenarioSpecParser.parse(layout.scenariosDir().resolve(SCENARIO + ".yaml"));
+        List<ScenarioSpec> specs = scenarios(layout);
 
-        ParityGate.Result result = new ParityGate(layout).run(spec, new OpenCybeleLauncher(), runs);
-        System.out.println(result.describe());
+        return specs.stream().map(spec -> DynamicTest.dynamicTest(spec.id(), () -> {
+            assumeTrue(runs > 0, "gate not requested; run it with:\n    "
+                    + ParityGate.invocation(spec.id()));
+            assumeTrue(OpenCybeleLauncher.isAvailable(), OpenCybeleLauncher.unavailableMessage());
+            // Recording N times and then declaring the last one reproducible would be circular:
+            // each run would overwrite the golden it is about to be compared against.
+            assumeFalse(GoldenStore.recording(), "the gate compares; it never records");
 
-        assertTrue(result.withinSessionStable(), "the gate throws before this, so reaching it means"
-                + " the runs agreed; the assertion is here so the claim is in the test and not only"
-                + " in the engine");
-        assertFalse(result.entry().entityIds().isEmpty(),
-                "the gate compared entity-id sets across occasions and there are no entity ids to"
-                        + " compare. That is a green light nobody earned: declare an `entity:` rule"
-                        + " on the scenario.");
-        assertTrue(result.crossOccasionDisagreements().isEmpty(),
-                "a run from another boot, or " + ParityGate.CROSS_OCCASION_HOURS + "+ hours ago,"
-                        + " produced a DIFFERENT entity-id set. Per docs/defect-triage.md §8.2 the"
-                        + " scenario is above the density at which DEF-02 is suppressed — retune it,"
-                        + " do not re-record the golden: " + result.crossOccasionDisagreements());
+            ParityGate.Result result = new ParityGate(layout)
+                    .run(spec, new OpenCybeleLauncher(), runs);
+            System.out.println(result.describe());
+
+            assertTrue(result.withinSessionStable(), "the gate throws before this, so reaching it"
+                    + " means the runs agreed; the assertion is here so the claim is in the test and"
+                    + " not only in the engine");
+            assertFalse(result.entry().entityIds().isEmpty(),
+                    "the gate compared entity-id sets across occasions and there are no entity ids"
+                            + " to compare. That is a green light nobody earned: declare an"
+                            + " `entity:` rule on the scenario.");
+            assertTrue(result.crossOccasionDisagreements().isEmpty(),
+                    "a run from another boot, or " + ParityGate.CROSS_OCCASION_HOURS + "+ hours ago,"
+                            + " produced a DIFFERENT entity-id set. Per docs/defect-triage.md §8.2"
+                            + " the scenario is above the density at which DEF-02 is suppressed —"
+                            + " retune it, do not re-record the golden: "
+                            + result.crossOccasionDisagreements());
+        }));
+    }
+
+    private static List<ScenarioSpec> scenarios(ParityLayout layout) {
+        String selected = System.getProperty(SCENARIO_PROPERTY, "").trim();
+        List<ScenarioSpec> all = ScenarioSpecParser.parseAll(layout.scenariosDir()).stream()
+                .filter(spec -> spec.id().startsWith("opencybele-"))
+                .toList();
+        if (selected.isEmpty()) {
+            return all;
+        }
+        List<ScenarioSpec> one = all.stream().filter(spec -> spec.id().equals(selected)).toList();
+        if (one.isEmpty()) {
+            throw new IllegalArgumentException("-D" + SCENARIO_PROPERTY + "=" + selected
+                    + " names no scenario. Available: " + all.stream().map(ScenarioSpec::id).toList());
+        }
+        return one;
     }
 }

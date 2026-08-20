@@ -1,0 +1,164 @@
+# The four one-shot timer sites, and the only scenario that makes DEF-16 happen on purpose.
+#
+# INVENTORY TMR-01..04 are four `Activity.setTimer` sites and ZERO repeating timers -- the
+# `repeating` overload is never used in the codebase (CNT-10). A port that reaches for JADE's
+# `TickerBehaviour` has already changed the design, so what a scenario has to pin is the FIRING
+# COUNT of each site over a bounded window, never a duration (TESTING.md 7, and the issue's own
+# wording). Counts are what this scenario is shaped around; the `strict` golden pins them
+# positionally and the liveness floors below pin them by name.
+#
+#   TMR-01  Generator.java:50   bootstrap, fires once at sim.arrival.firstFireMs
+#   TMR-02  Generator.java:65   self-re-arming Poisson, exp(sim.arrival.lambdaMs)
+#   TMR-03  Planning.java:111   one per planned train, delay max(0, departure - now)
+#   TMR-04  RoadAgent.java:102  one per road traversal, delay*1000 + 500*nextGaussian()
+#
+# firstFireMs (1500) is deliberately DIFFERENT from lambdaMs (4000): with the two equal, TMR-01
+# and TMR-02 are indistinguishable in the trace and a port that dropped the bootstrap timer and
+# armed the Poisson one immediately would produce the same golden. Here the first PLAN_TRAIN
+# lands at simulated 2560 and the next two at 8160 and 19624, so the bootstrap is visible as
+# itself.
+#
+# ------------------------------------------------------------------------------------------
+# WHY `sim.road.delaysSec: tr1=0` -- THIS IS THE POINT OF THE SCENARIO
+#
+# TMR-04's delay is `delay*1000 + (long)(500*nextGaussian())`, which goes NEGATIVE, and Cybele
+# fires a negative-delay timer IMMEDIATELY (INVENTORY SEM-06: -1500 ms -> callback in 1-5 ms).
+# That is DEF-16, and docs/defect-triage.md classes it (a) -- deterministic, "PIN -- do not
+# clamp", "a port that clamps to 0 produces a diff and THAT is the port bug".
+#
+# On the shipped topology the branch is taken on 2.2645 % of traversals (measured, 2e6 draws),
+# which is far too rare to put in a golden: it would appear or not appear depending on where a
+# train got dropped. At `delay = 0` the same expression is just `500*nextGaussian()`, so the
+# branch is taken on roughly HALF of them, and at a pinned seed on exactly the ones the golden
+# records. Measured over four captures of this configuration, tr1's three traversals took
+#
+#     vl0  8 ms       vl1  24-32 ms       vl2  296 ms
+#
+# from TRAVEL_START to TRAVEL_END. The first two are the fire-immediately branch; the third is an
+# ordinary positive draw. Both branches, in one three-train run, reproducibly.
+#
+# HOW A GOLDEN SEES IT, given that `tick` is projected to <T>. It sees it through BURST
+# STRUCTURE: CanonicalTraceNormalizer segments the trace at tick gaps > DEFAULT_SEGMENT_GAP_TICKS
+# (220 ms) and sorts within a segment. An instantaneous traversal keeps TRAVEL_END in the SAME
+# burst as its TRAVEL_START; a 296 ms one puts it in the NEXT burst. So the two branches are
+# different goldens, and a port that clamped the delay to zero would collapse vl2's pair into one
+# burst and fail.
+#
+# THE MARGIN, since that rule is the load-bearing one: the tightest distance to the 220 ms burst
+# boundary in this scenario is vl2's 296 ms -- 76 ms of headroom -- and on the other side vl1's
+# 24-32 ms, 188 ms of headroom. Both were stable across four captures, and the observed run-to-run
+# jitter on these gaps is 8 ms. This is recorded because a future retune that moves a traversal to
+# ~220 ms would make the golden flake for a reason that has nothing to do with timers.
+#
+# `sim.road.delaysSec` accepts 0 (ScenarioConfig requires >= 0 for delays; capacities are the key
+# that requires >= 1). A zero-delay road also takes RoadAgent.computeDifference's
+# `plannedTrains == 0` branch on every vote, since `subMap(t-0, t+0)` is empty by construction --
+# a second code path this scenario covers and no other does.
+# ------------------------------------------------------------------------------------------
+#
+# Format: docs/parity-harness.md. Trace format: docs/trace-format.md (on opencybele-baseline).
+
+id: opencybele-timers
+description: >
+  Three stations, two tracks -- one of them with a ZERO nominal delay -- three trains, 23.5 s
+  (simulated) headless at a pinned seed. Sized so that TMR-01 is distinguishable from TMR-02 and
+  so that TMR-04 takes its fire-immediately branch (DEF-16) twice and its ordinary branch once.
+
+# ---------------------------------------------------------------------------------------------
+# CONTRACT: strict. MEASURED: 10/10 byte-identical within a session and agreeing across
+# occasions; both halves are recorded with their dates in parity-tests/scenarios/COVERAGE.md.
+#
+# THE BOUND. At this seed the trains are created at simulated 2560, 8160 and 19624 and the last
+# event of the run is vl2's arrival at 21520; the next event of any kind is the fourth train's
+# PLAN_TRAIN at 25824. The bound of 23500 therefore sits
+#
+#     3876 simulated ms (485 ms of wall clock at pace 8) after the last train creation,
+#     1980 simulated ms (247 ms of wall clock) after the last event, and
+#     2324 simulated ms (291 ms of wall clock) before the next one.
+#
+# The measured rule it is sized against: a bound 0-40 simulated ms after an arrival failed 3 of 8
+# under load; ~480 ms of wall clock clear failed 0 of 24. The creation margin here is that
+# 480 ms figure, and the shutdown window contains no emission at all.
+# ---------------------------------------------------------------------------------------------
+contract: strict
+golden: opencybele-timers.txt
+
+launcher:
+  properties:
+    # --- arrivals: TMR-01 and TMR-02, deliberately different ------------------------------
+    sim.arrival.lambdaMs: "4000"
+    sim.arrival.firstFireMs: "1500"
+    sim.arrival.pairs: "stA>stC"
+    # --- topology, capacities, delays -----------------------------------------------------
+    sim.topology: "stA-stB:tr1,stB-stC:tr2"
+    # Generous, so nothing here queues: this scenario is about timers, and congestion belongs to
+    # opencybele-congestion. Verified: zero road-queue events and zero station-queue events in
+    # every capture.
+    sim.station.capacities: "stA=4,stB=4,stC=4"
+    sim.road.delaysSec: "tr1=0,tr2=2"
+    sim.station.voteWindowMs: "4000"
+    # --- clock ----------------------------------------------------------------------------
+    sim.clock.startMs: "0"
+    sim.clock.pace: "8"
+    # --- GUI: inert under sim.headless=true ------------------------------------------------
+    sim.gui.paces: "Fast=8,Normal=1,Slow=0.3"
+    sim.gui.mainLine: "stA,stB,stC"
+    sim.gui.branches: ""
+    # --- randomness -----------------------------------------------------------------------
+    sim.random.masterSeed: "20080415"
+    # --- run shape ------------------------------------------------------------------------
+    sim.headless: "true"
+    sim.trace.enabled: "true"
+    sim.trace.trainLookahead: "32"
+    sim.stop.maxTrains: "0"
+    sim.stop.maxClockMs: "23500"
+    sim.stop.wallClockMs: "60000"
+    # Wall clock between GENERATED trains. The widest gap here is 11464 simulated ms = 1433 ms of
+    # wall clock at pace 8, so 20000 leaves 14x headroom.
+    sim.stop.stallMs: "20000"
+
+run:
+  harnessTimeoutMs: 120000
+  expect: bound-reached
+
+# TICK COUNTS OVER A BOUNDED WINDOW, NOT DURATIONS -- the issue's rule and TESTING.md 7.
+# Each floor below counts the firings of one timer site over this scenario's bound. There is not
+# a wall-clock duration anywhere in this file's assertions; the only times that appear are the
+# stop bounds, which are inputs.
+#
+# Floors sit one below the measured value except where the measured value is the whole point.
+# Liveness matches RAW lines, hence the numeric tick.
+liveness:
+  # TMR-01 + TMR-02: three trains generated (one bootstrap firing, two Poisson re-arms).
+  - pattern: '^(vl\d+)\|\d+\|PLAN_TRAIN\|'
+    distinctGroup: 1
+    atLeast: 3
+  # TMR-03: one firing per planned train, each producing exactly one START.
+  - pattern: '^(vl\d+)\|\d+\|START\|'
+    distinctGroup: 1
+    atLeast: 3
+  # TMR-04: one firing per traversal. Three trains x two roads = six, and this floor is the one
+  # that fails if a port arms the travel timer once per train instead of once per road.
+  - pattern: '^vl\d+\|\d+\|TRAVEL_END\|'
+    atLeast: 6
+  # ... and the matching arm site, so that six TRAVEL_ENDs cannot come from three timers firing
+  # twice.
+  - pattern: '^vl\d+\|\d+\|TRAVEL_START\|'
+    atLeast: 6
+  # The trains actually got where they were going, so the counts above are not counting a run
+  # that spun timers over a stalled simulation.
+  - pattern: '^(vl\d+) in st[A-C] at \d+$'
+    distinctGroup: 1
+    atLeast: 3
+  - pattern: '^(vl\d+)\|\d+\|TRAIN_STATE\|[^|]*\|[^|]*\|[^|]*\|state=KILL$'
+    distinctGroup: 1
+    atLeast: 3
+  # The static objects reported state too.
+  - pattern: '^st[A-C]\|\d+\|STATION_INFO\|'
+    atLeast: 15
+  - pattern: '^tr[12]\|\d+\|ROAD_STATE\|'
+    atLeast: 10
+
+entity:
+  pattern: '^(vl\d+)\|'
+  group: 1

@@ -474,6 +474,15 @@ remove all eleven of them.
 
 ### `opencybele-smoke`, and what it can honestly claim
 
+> **UPDATE (#23): `opencybele-smoke.yaml` no longer exists.** It was folded into
+> `opencybele-strict.yaml`, which it duplicated in everything but `sim.stop.maxClockMs`, and the
+> adapter assertions below now run against that file
+> (`OpenCybeleSmokeIT`, `ScenarioAssertions`). The evidence for the fold is in
+> `docs/trace-normalizer.md` §5.1 and in `parity-tests/scenarios/COVERAGE.md` §1;
+> `ScenarioCatalogIT.smokeAndStrictStayFolded` fails if a near-duplicate is re-added. The section
+> below is kept because everything it says about the *adapter* is unchanged — only the scenario id
+> it was written against has gone.
+
 `summary`, not `strict` or `causal` — and **since #21 landed the reason is no longer the
 normalizer.** The projection is sufficient: over 52 headless captures there is not one pair of runs
 with the same content in a different order, where before it 13 captures gave 13 distinct traces.

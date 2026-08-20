@@ -27,11 +27,12 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * The acceptance test for <a href="https://github.com/bedaHovorka/OpenCybele1/issues/21">#21</a>:
  * a real implementation, run end to end, compared to its golden <strong>line for line</strong>.
  *
- * <p>{@code OpenCybeleSmokeIT} proves the adapter; this proves the projection. The difference that
- * matters is the contract level: {@code opencybele-smoke} is {@code summary}, so it compares
- * counts and would pass against a trace whose every payload was wrong;
- * {@code opencybele-strict} is {@code strict}, so every one of its 607 lines must be the line the
- * golden has, in the position the golden has it.
+ * <p>{@code OpenCybeleSmokeIT} proves the adapter against the same scenario; this proves the
+ * projection. The difference that mattered was the contract level: {@code opencybele-smoke} was
+ * {@code summary}, so it compared counts and would have passed against a trace whose every payload
+ * was wrong. #23 folded that file away (see {@code ScenarioCatalogIT.smokeAndStrictStayFolded}) and
+ * what is left is {@code strict}: every one of the golden's lines must be the line the golden has,
+ * in the position the golden has it.
  *
  * <p>Beyond running the scenario, this asserts the two properties that decide whether a passing
  * {@code strict} run means anything — both of them the "lock that cannot fail" shape this project

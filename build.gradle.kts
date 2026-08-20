@@ -104,6 +104,10 @@ val characterizationIT by tasks.registering(Test::class) {
 // the way. -Dparity.gate.runs is forwarded like the other harness properties, and with it absent
 // the test SKIPS and prints the command, rather than passing vacuously.
 //
+// Since #23 it gates EVERY opencybele-* scenario in the catalogue -- Phase1.md 1-PRE.2 says "per
+// scenario" and #23's acceptance is that each one passes the gate before it enters COVERAGE.md.
+// While tuning a single scenario, add -Dparity.gate.scenario=<id>.
+//
 // The ledger it appends to (build/parity-gate/<scenario>.tsv, or -Dparity.gate.ledger=...) is what
 // makes the cross-occasion half of the gate executable: a later invocation -- after a reboot, or
 // hours later, or on another machine pointed at the same directory -- compares against it. Do not
@@ -122,7 +126,7 @@ val parityGate by tasks.registering(Test::class) {
 
     systemProperty("parity.root", providers.systemProperty("parity.root").getOrElse("parity-tests"))
     systemProperty("golden.record", "false")
-    for (name in listOf("parity.gate.runs", "parity.gate.ledger")) {
+    for (name in listOf("parity.gate.runs", "parity.gate.ledger", "parity.gate.scenario")) {
         (providers.gradleProperty(name).orNull ?: providers.systemProperty(name).orNull)
             ?.let { systemProperty(name, it) }
     }

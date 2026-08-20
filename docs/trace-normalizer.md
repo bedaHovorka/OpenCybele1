@@ -45,7 +45,10 @@ Everything below is in
 recorded under #12's placeholder — raw ticks, an unsorted startup block, interleaved `println`s — is
 projected into exactly the form a fresh run reaches, and the file on disk never changes.
 `Phase1.md` L7 forbids re-recording for anything but a harness defect; this design means landing the
-normalizer does not even raise the question. `parity-tests/golden/opencybele-smoke.txt` and
+normalizer does not even raise the question. (**#23 folded `opencybele-smoke` into
+`opencybele-strict`** and deleted its golden — see `parity-tests/scenarios/COVERAGE.md` §1. The
+argument below stands for the goldens that remain; §5.1's own recommendation is what was acted on.)
+`parity-tests/golden/opencybele-smoke.txt` and
 `smoke-stub.txt` are untouched by this work and still match.
 
 **One golden here *is* recorded, and it is this issue's own:**
