@@ -10,20 +10,26 @@
 package cz.vutbr.fit.ags.xhovor07;
 
 import java.io.Serializable;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.PriorityQueue;
 import java.util.Random;
-import java.util.SortedMap;
-import java.util.TreeMap;
 
 import cybele.kernel.Activity;
 import cybele.kernel.Cybele;
 import cybele.kernel.CybeleEvent;
+import cz.vutbr.fit.ags.railway.domain.RoadQueue;
+import cz.vutbr.fit.ags.railway.domain.RoadQueueItem;
+import cz.vutbr.fit.ags.railway.domain.RoadSchedule;
+import cz.vutbr.fit.ags.railway.domain.TravelDelay;
 
 
 /**
- * 
+ * Agent representing one single-track segment.
+ * <p>
+ * Since #28 the timetable and voting rule live in {@link RoadSchedule}, the waiting queue
+ * and its ordering in {@link RoadQueue}, and the travel-time expression in
+ * {@link TravelDelay} — all framework-free. What is left here is the Cybele glue: the
+ * channels, the timer, the direction state the GUI observes, and the clock pause/resume
+ * that brackets every queue operation.
+ *
  * @author Bedrich Hovorka
  *
  */
@@ -36,11 +42,10 @@ public class RoadAgent extends StaticRailwayObject {
     private final String rightStation;
     private final String leftStation;
     private final long delay;
-    private PriorityQueue<OueueItem> queue = new PriorityQueue<OueueItem>();
+    private final RoadSchedule schedule;
+    private final RoadQueue queue;
     private State state;
     private String traveledTrain;
-    private Map<String, Long> invertedTimetable = new HashMap<String, Long>();
-    private final SortedMap<Long, String> timetable = new TreeMap<Long, String>();
     /**
      * This road's own stream, keyed by its own name — every road agent draws its travel
      * jitter from a different sequence, so a road's draws no longer depend on how many
@@ -87,6 +92,8 @@ public class RoadAgent extends StaticRailwayObject {
      */
     public RoadAgent(long delay, String leftStation, String rightStation) {
 	this.delay = delay;
+	this.schedule = new RoadSchedule(delay*1000);
+	this.queue = new RoadQueue(schedule);
 	this.leftStation = leftStation;
 	this.rightStation = rightStation;
 	this.state = State.FREE;
@@ -112,7 +119,9 @@ public class RoadAgent extends StaticRailwayObject {
 	final Serializable[] message = ev.getMessage();
 	traveledTrain = (String) message[0];
 	// Adding or reordering a draw on this stream re-aligns every later value of it.
-	final long delay2 = delayInSeconds() + (long)(500*random.nextGaussian());
+	// The draw stays here; what is done with it is TravelDelay.travelMs (#28), which
+	// carries the DEF-16 note on why the result is deliberately not clamped at 0.
+	final long delay2 = TravelDelay.travelMs(delayInSeconds(), random.nextGaussian());
 	Activity.setTimer(RailwayMainAgent.CLOCK_ID, delay2, this, "travelEnd");
     }
 
@@ -142,9 +151,15 @@ public class RoadAgent extends StaticRailwayObject {
 	sendState();
     }
 
+    /**
+     * The clock stays paused across the whole heap operation, exactly as before #28. That
+     * is also what makes the single {@code getTime} read below equivalent to the per-
+     * comparison read {@code OueueItem.compareTo} used to do: the clock cannot advance
+     * between them. See {@link RoadQueue} for why the value cancels out anyway.
+     */
     private void push(final String train, final String trainPosition) {
 	Cybele.pauseClock(RailwayMainAgent.CLOCK_ID);
-	queue.offer(new OueueItem(train, trainPosition));
+	queue.offer(train, trainPosition, Cybele.getTime(RailwayMainAgent.CLOCK_ID));
 	Cybele.resumeClock(RailwayMainAgent.CLOCK_ID);
     }
     
@@ -169,72 +184,27 @@ public class RoadAgent extends StaticRailwayObject {
 	if (queue.size() == 0) {
 	    state = State.FREE;
 	} else  {
-	    final OueueItem poll = pop();
-	    acceptTrain(poll.train, poll.position);
+	    final RoadQueueItem poll = pop();
+	    acceptTrain(poll.getTrain(), poll.getPosition());
 	}
-	timetable.values().remove(train);
-	invertedTimetable.remove(train);
+	schedule.removeTrain(train);
 	sendState();
     }
 
-    private OueueItem pop() {
+    private RoadQueueItem pop() {
 	Cybele.pauseClock(RailwayMainAgent.CLOCK_ID);
-	final OueueItem poll = queue.poll();
+	final RoadQueueItem poll = queue.poll(Cybele.getTime(RailwayMainAgent.CLOCK_ID));
 	Cybele.resumeClock(RailwayMainAgent.CLOCK_ID);
 	return poll;
     }
     
-    @SuppressWarnings("boxing")
     @Override
     protected synchronized long computeDifference(String train, long time) {
-	final int plannedTrains = timetable.subMap(time-delayInSeconds(), time+delayInSeconds()).size();
-        if (plannedTrains > 0) {
-            return timetable.lastKey()+delayInSeconds()-time;
-        }
- 	return 0;
+	return schedule.computeDifference(train, time);
     }
     
-    @SuppressWarnings("boxing")
     @Override
     protected synchronized void addToPlan(String train, long time) {
-	timetable.put(time, train);
-        invertedTimetable.put(train, time);
-    }
-    
-    class OueueItem implements Comparable<OueueItem>, Serializable {
-	private static final long serialVersionUID = 1L;
-	String train;
-	String position;
-	
-	private OueueItem(String train, String position) {
-	    super();
-	    this.train = train;
-	    this.position = position;
-	}
-	
-	//rozdil od planu (jizdniho radu)
-	@SuppressWarnings("boxing")
-	private long diff(long time) {
-	    return invertedTimetable.get(train) - time;
-	}
- 
-	@Override
-	public int compareTo(OueueItem o) {
-	    if (o == null) return -1;
-	    final long time = Cybele.getTime(RailwayMainAgent.CLOCK_ID);
-	    int d = (int) (diff(time)-o.diff(time));//napred podle planu
-	    if (d != 0) return d;
-	    return frequency(queue, o.position) - frequency(queue, position);//potom podle poctu pozadavku z daneho smeru
-	}
-	
-	
-    }
-    
-    static int frequency(PriorityQueue<OueueItem> q, String position) {
-	int f = 0;
-	for (OueueItem i : q) {
-	    if (i != null && i.equals(position)) f++;
-	}
-	return f;
+	schedule.addToPlan(train, time);
     }
 }

@@ -135,6 +135,18 @@ class PriceUpdateBehaviourTest {
 }
 ```
 
+> **Done for this project, ahead of the port — see [#28](https://github.com/bedaHovorka/OpenCybele1/issues/28).**
+> The extraction below is not a plan any more: the railway rules live in the `domain` source
+> set (`src/domain/java`, package root `cz.vutbr.fit.ags.railway.domain`) with an **empty**
+> dependency configuration, and `src/test/java` already carries their L1 suite. It was done
+> *before* the port precisely so the goldens could witness that the extraction alone changed
+> nothing. The JADE behaviours — and later the Jason internal actions ([#46](https://github.com/bedaHovorka/OpenCybele1/issues/46)) —
+> delegate to the same classes; what stays framework-side is the message plumbing.
+>
+> The one thing to carry over: those classes **reproduce the 2008 defects deliberately**
+> (`docs/defect-triage.md` §3.1.1 maps each pin to the test that locks it). An L1 test that
+> "fails" there is reporting a behaviour change, not a bug found.
+
 Guidelines:
 - **Extract domain logic out of behaviours** into plain classes (`Catalog`, `PricingPolicy`, …) — those get classic unit tests with zero JADE imports. Keep behaviours as thin glue.
 - `OneShotBehaviour`/`CyclicBehaviour`: call `action()` yourself. `TickerBehaviour`: either call the protected `onTick()` via a test subclass that exposes it, or test the class you delegate to.

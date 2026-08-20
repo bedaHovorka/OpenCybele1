@@ -24,8 +24,8 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.Map.Entry;
 
-import cz.vutbr.fit.ags.xhovor07.util.HashMapGraph;
-import cz.vutbr.fit.ags.xhovor07.util.UnorientedGraph;
+import cz.vutbr.fit.ags.railway.domain.util.HashMapGraph;
+import cz.vutbr.fit.ags.railway.domain.util.UnorientedGraph;
 
 /**
  * All simulation parameters that used to be hardcoded literals, in one place.

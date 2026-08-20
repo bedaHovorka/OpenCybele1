@@ -14,7 +14,7 @@ import java.io.Serializable;
 import cybele.kernel.Activity;
 import cybele.kernel.CybeleEvent;
 import cybele.kernel.Handler;
-import cz.vutbr.fit.ags.xhovor07.util.UnorientedGraph;
+import cz.vutbr.fit.ags.railway.domain.util.UnorientedGraph;
 
 /**
  * This is one activity of main agent.
