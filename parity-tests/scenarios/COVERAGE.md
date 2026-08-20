@@ -105,6 +105,36 @@ hand as well as by the ledger. **Whoever records the frozen goldens for #24 must
 a separate occasion and append the result here.** Until they do, the honest claim is
 "byte-reproducible within a session", not "reproducible".
 
+#### 2.1.1 The #24 re-run — appended as this section asked, and it does **not** close the gap
+
+[#24](https://github.com/bedaHovorka/OpenCybele1/issues/24) re-ran the identical command against the
+identical `opencybele-baseline` build (`f4c233c`) and against the committed goldens:
+
+| scenario | runs | distinct normalized traces | trace digest (first 16) | vs §2.1 | entity ids |
+|---|---|---|---|---|---|
+| `opencybele-strict` | 10 | **1** | `0410d72d933bbddb` | **identical** | vl0…vl8 |
+| `opencybele-lifecycle` | 10 | **1** | `acc212d84c66d69b` | **identical** | vl0, vl1 |
+| `opencybele-timers` | 10 | **1** | `7d79066aad6f62a4` | **identical** | vl0…vl2 |
+| `opencybele-congestion` | 10 | **1** | `48fbb42cc6da692c` | **identical** | vl0…vl3 |
+| `opencybele-capacity` | 10 | **1** | `1e056ae970eb4b27` | **identical** | vl0…vl8 |
+
+50 runs, 2026-08-20 09:40–09:43 UTC, headless, boot `862aa4f8-9952-4132-9567-f3371a898849`. Each run
+was compared against its committed golden at `strict` as well as against its siblings, so this is
+also the verification that **no golden had drifted**.
+
+**It is still one boot.** The machine has not rebooted since 2026-08-13, and #23's own gate ran on the
+same boot minutes before #24's, so the separation is neither "across a reboot" nor the four hours
+`ParityGate.CROSS_OCCASION_HOURS` asks for — the gate itself reported *"no qualifying earlier run in
+the ledger"*, #23's ledger having been written under `build/` in a worktree that no longer exists.
+The digest agreement above is a **hand comparison of the kind this section provided for**, and it is a
+second sample of the same session mode, not cross-occasion evidence.
+
+What #24 did change is that the ledger now lives outside any build directory
+(`/home/beda/work/parity-gate-ledger/`, and its five lines are reproduced verbatim in
+[`../golden/MANIFEST.md`](../golden/MANIFEST.md) §11), so the next invocation — after a reboot, in
+4+ hours, or on another machine — compares automatically instead of by eye. **The cross-occasion half
+remains open**, and `MANIFEST.md` §11 states it as such rather than counting the re-run as closure.
+
 ### 2.2 Mutation results
 
 **Golden mutants — 68 tried, 68 killed.** Independently in review: 15 event-family deletions across

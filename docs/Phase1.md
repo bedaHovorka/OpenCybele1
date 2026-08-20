@@ -52,8 +52,25 @@ Extend scenarios until every row of the Stage-0 inventory is exercised at least 
 > far is from one boot on one day, and reproducibility here has a measured session-level component.
 > Re-running `parityGate` on a separate occasion and appending the result to COVERAGE.md §2.1 is
 > part of this sub-phase, not an optional extra.
-- [ ] Record goldens with `-Dgolden.record=true` against `develop`; commit.
-- [ ] Tag the repo (`pre-migration-baseline`) — the exact commit goldens were recorded from.
+- [x] Record goldens **against `opencybele-baseline`** — *not* `develop`, which the issue text and
+  an earlier revision of this line both said. `develop` is the untouched 2008 original and carries
+  none of #15/#16/#17/#18/#19/#20; the recordable application is `opencybele-baseline`, driven from
+  the harness on `jade-develop` via `-Popencybele.dist=`. The five goldens were recorded
+  incrementally by #13, #21 and #23 as each scenario was gated; #24 **verified** that every one of
+  them is exactly what the current baseline produces (50 gate runs, 5 × 10, all `strict`, zero
+  divergence) rather than re-recording them, which L7 would have forbidden.
+- [x] Tag the repo (`pre-migration-baseline`) — at **`f4c233c` on `opencybele-baseline`**, the
+  application commit the goldens are a measurement of. The goldens themselves live on `jade-develop`,
+  so the tag alone identifies only one half of the pair; the other half is recorded in the manifest.
+  *(Created and verified locally by #24; pushing it is the maintainer's call.)*
+- [x] **Recording environment captured**: [`parity-tests/golden/MANIFEST.md`](../parity-tests/golden/MANIFEST.md)
+  — seed, JDK build, Gradle version, the full resolved twenty-key `sim.*` configuration per scenario,
+  the #16 Cybele event-queue and thread-pool settings, the `-ea` decision from #22 (**on**, with an
+  `AssertionError` aborting the recording), each golden's line count, digest, departure/entity-id
+  set, expected final tick, and the recording occasion (boot id and timestamp).
+- [ ] **Cross-occasion re-run: still open.** #24 re-ran `parityGate` (COVERAGE.md §2.1.1) and all five
+  digests matched, but on the same boot minutes after #23's run — so it does not qualify as a separate
+  occasion. `MANIFEST.md` §11 records what would, and the ledger now survives a clean build.
 - [ ] CI job `characterizationIT@opencybele` runs the full suite on `develop` on every push; must stay green for the rest of the project (guards against accidental behavior drift in the "frozen" baseline).
 
 **Exit criteria 1-PRE:** all scenarios green and flake-free on `develop`; coverage checklist complete; harness consumable from another branch/module.
