@@ -487,6 +487,124 @@ instant either.
 mappable at all. `OpenCybeleCapacityIT.assertVoteWindowSurvivesTheQuantum` fails if a future retune
 drops the station votes back under the quantum.
 
+### 10.11 `ROAD_STATE.state` — erased, and the TRAVEL_LEFT/TRAVEL_RIGHT label is pinned by nothing
+
+Recorded for [#72](https://github.com/bedaHovorka/OpenCybele1/issues/72), which asked for the gap to
+be written down before #39 leans on this suite. `CanonicalTraceNormalizer`'s `road-state` projection
+erases the field outright:
+
+```
+$ grep -c "TRAVEL_LEFT\|TRAVEL_RIGHT" parity-tests/golden/*.txt
+opencybele-capacity.txt:0   opencybele-congestion.txt:0   opencybele-lifecycle.txt:0
+opencybele-strict.txt:0     opencybele-timers.txt:0       smoke-stub.txt:0
+$ grep -m1 ROAD_STATE parity-tests/golden/opencybele-congestion.txt
+tr2|<T>|ROAD_STATE|tr2|Main|<P>|state=<S>
+```
+
+**Do not read that as "the goldens are blind to direction". They are not, and #72's opening
+statement of the problem overstated it.** Direction of travel is pinned independently, by
+`ENTER_REPLY.next`, which no rule touches and which every golden carries verbatim — 36 lines in
+`opencybele-strict`, 13 in `-congestion`, 9 in `-capacity`, 15 in `-timers`, 6 in `-lifecycle`:
+
+```
+vl2|<T>|ENTER_REPLY|tr2|vl2|<P>|object=tr2,next=stB
+```
+
+`vl2` entered `tr2` from `stC`, so `next=stB` *is* the leftward traversal. A port that hands a train
+to the wrong end of a track changes line **content**, diffs at `strict`, and is caught in all five
+scenarios. Since #72 it is also checked directly, per hop and per train, by
+`OpenCybeleLifecycleIT`, which compares every `ENTER_REPLY.next` against the route the train's own
+`ENTER.position` payloads describe.
+
+**What is genuinely unpinned is the LEFT/RIGHT *label*, and it is unpinnable by any golden.**
+Derived from the source rather than measured, because the derivation is exact —
+`RoadAgent.acceptTrain`:
+
+```java
+if (position.equals(leftStation)) { state = State.TRAVEL_RIGHT; sendEnterReply(train, rightStation); }
+else { assert position.equals(rightStation); state = State.TRAVEL_LEFT; sendEnterReply(train, leftStation); }
+```
+
+Both arms reply with **the other end**. So a port that assigns the two endpoints the other way round
+takes the *other* branch, sets the *other* `State` constant, and sends **the same `next`**. Only
+`state` differs, and `state` is erased.
+
+That is not hypothetical. `docs/iteration-order.md` claim 3 establishes that `leftStation` /
+`rightStation` follow `sim.topology` **declaration order** (via `HashMapGraph.put`'s argument order
+and `DoubletonIterator`'s `FIRST → SECOND` walk), deterministically on every JVM — and that
+*"imposing a lexicographic rule would flip 5 of the 7 roads … and invert the `TRAVEL_LEFT` /
+`TRAVEL_RIGHT` symbol published on `ROAD.STATE`, **which appears in every trace**"*. The last clause
+is true of the RAW trace and **false of every golden** since #21 added the `road-state` rule; the two
+documents are reconciled here rather than left to disagree. A port that sorts its endpoint pairs —
+the most natural thing a reimplementation does — flips 5 of 7 roads on the default topology and
+produces byte-identical goldens. The only thing that pins it today is `docs/probes/OrderLock.java`,
+which is a probe run by hand, not part of the suite.
+
+That is not a hole in coverage so much as a fact about the baseline: `TRAVEL_LEFT` and
+`TRAVEL_RIGHT` are never compared to each other anywhere in the application. Exhaustive grep: the
+enum is tested only against `FREE` (`RoadAgent.java:137`, `:165`, `RailwayCanvas.java:102`), and the
+sole consumer of the distinction is `RailwayCanvas.paintRoad` drawing `state.getSymbol()` — `"<"` or
+`">"` — on a canvas every scenario runs headless. The label is a GUI annotation, and an
+endpoint-swapped port is behaviourally identical on everything a trace can see.
+
+**Consequences a future scenario author must not get wrong:**
+
+* the goldens **do** pin which way each train travels (`ENTER_REPLY.next`);
+* the goldens **do not** pin which endpoint is called left, and no scenario can be tuned to make
+  them. If #27/#36 want that pinned, it is an L1 test on the extracted graph/road classes (#28)
+  asserting the endpoint assignment against `sim.topology` — the same verdict §10.9 reaches for
+  DEF-16;
+* the *relative* direction claim — that a train was queued behind one heading the **other** way,
+  which is `acceptTrain`'s else-arm reached from a queue — is carried by **exactly one property
+  assertion**, `OpenCybeleCongestionIT`, and by **no golden**. It is not re-checked by `parityGate`.
+  A retune of `opencybele-congestion` that stops producing the opposing-direction queue loses that
+  coverage entirely, and only that assertion will say so.
+
+### 10.12 DEF-07 — correctly classified (a), and observable in exactly one scenario
+
+The first revision of §11's DEF-07 row said the ordering "is in every golden, and
+`OpenCybeleLifecycleIT` asserts it directly". **Both halves were wrong**, and #72 measured it.
+
+*Not in every golden.* `burst-order` sorts within a burst, and on an uncontended hop the reply comes
+back in the same tick, so DEF-07's two lines are in one burst and the sort decides their order —
+alphabetically, not causally. `parity-tests/golden/opencybele-lifecycle.txt` ends `vl0`'s life:
+
+```
+41  vl0|<T>|ENTER_REPLY|stB|vl0|<P>|object=stB,next=null
+42  vl0|<T>|ENTER|vl0|stB|<P>|train=vl0,position=tr1,target=stB
+43  vl0|<T>|LEAVE|vl0|stB|<P>|train=vl0     <- the DESTRUCTOR's leave
+44  vl0|<T>|LEAVE|vl0|tr1|<P>|train=vl0     <- the HOP leave, emitted FIRST
+```
+
+The golden lists them in the opposite order to the one the application emitted them in. What looks
+like "`ENTER_REPLY` before `LEAVE`" is `_` (0x5F) sorting before `|` (0x7C).
+
+*Not assertable from the raw stream either.* The probe records its **handling** order
+(`docs/trace-format.md`), and over 60 captures of `opencybele-lifecycle` 2 print an `ENTER_REPLY`
+before the very `ENTER` it answers. The old checker walked the stream building a pairing queue, so
+one inverted line put it permanently out of step and produced two "violations" from it. Full
+measurement: [`docs/raw-assertion-audit.md`](../../docs/raw-assertion-audit.md) §2.
+
+*The classification is right and stays.* DEF-07 is a claim about the **send** order inside
+`Train.entered`, which is deterministic and which a port really can get wrong. It is the
+*observable* that was wrong.
+
+*Where it survives the projection.* On a **queued** hop the wait separates the two lines into
+different bursts, and the golden then carries the ordering positionally.
+`parity-tests/golden/opencybele-congestion.txt`, `vl2` queued on `tr2` behind `vl1`:
+
+```
+111 vl2|<T>|ENTER_REPLY|stC|vl2|<P>|object=stC,next=tr2
+112 vl2|<T>|ENTER|vl2|tr2|<P>|train=vl2,position=stC,target=stB
+      ... 13 lines and a burst boundary ...
+126 vl2|<T>|ENTER_REPLY|tr2|vl2|<P>|object=tr2,next=stB
+127 vl2|<T>|LEAVE|vl2|stC|<P>|train=vl2                <- released only AFTER admission
+```
+
+A port that released `stC` before asking `tr2` to admit it would emit line 127 up at 112's burst and
+diff. `OpenCybeleCongestionIT.assertDef07SurvivesTheProjection` asserts that separation directly, so
+a retune that closes the queue window fails loudly instead of quietly un-pinning DEF-07.
+
 ---
 
 ## 11. Defects (DEF-01 … DEF-24)
@@ -498,7 +616,7 @@ Mapping follows [`docs/defect-triage.md`](../../docs/defect-triage.md) §3. Clas
 |---|---|---|---|
 | DEF-03 | (a) | **unmapped — L1 (#28)** | Inverts at 2³¹ ms = 24.9 simulated days; unreachable at scenario scale by the triage's own words. The comparator now at least *runs*, in K — §10.2. |
 | DEF-04 | (a) | **unmapped — L1 (#28)** | Dead tie-break, always 0. Same. |
-| DEF-07 | (a) | all five | The ordering — `ENTER_REPLY` from the new object before `LEAVE` to the old — is in every golden, and `OpenCybeleLifecycleIT` asserts it directly, **special-casing the first hop** exactly as the triage cell warns. |
+| DEF-07 | (a) | **C only — see §10.12** | The ordering is **not** in every golden: `burst-order` sorts the two lines together on an uncontended hop, and `opencybele-lifecycle.txt` in fact lists them reversed. It survives only on a QUEUED hop, where the wait crosses a burst boundary — `opencybele-congestion`, asserted by `OpenCybeleCongestionIT.assertDef07SurvivesTheProjection`. Class (a) is correct and unchanged; `OpenCybeleLifecycleIT` now asserts the hop PAIRING (route, `ENTER_REPLY.next`, one release per visited object) instead of an emission order the trace does not record. |
 | DEF-08 | de-claimed | all five | Not a defect. What is pinned is the *shape*: the destructor's `LEAVE` to the destination station, which balances its `occupied++`. |
 | DEF-11 | (a) | **unmapped — unmappable** | `==` on interned `String`s behaves identically to `.equals`; a port using either produces a byte-identical trace. |
 | DEF-14 | (a) | all five | Pinned as the invariant "no road carries two trains at once" — ST-20. |

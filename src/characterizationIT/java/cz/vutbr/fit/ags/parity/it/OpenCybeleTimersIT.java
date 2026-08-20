@@ -141,6 +141,35 @@ class OpenCybeleTimersIT {
      * the normalizer's burst boundary" — a statement about the projected trace's ordering, and the
      * only form in which this behaviour reaches a golden at all. No wall-clock duration is read
      * anywhere in this file.
+     *
+     * <h2>#72: this is a raw-tick read, and here is why it is a safe one</h2>
+     *
+     * <p>{@code docs/raw-assertion-audit.md} enumerates every assertion in this package that reads
+     * the RAW stream for a quantity {@code CanonicalTraceNormalizer} erases or reorders. This is one
+     * of them — field 2, which the {@code tick} rule erases outright — and it is left as it is
+     * rather than rewritten, for three reasons that a future edit must not quietly break:
+     *
+     * <ol>
+     *   <li>It is already <strong>causal pairing</strong>, not line order: the two ticks belong to
+     *       one {@code (train, road)} traversal, matched by key. Shuffling the capture changes
+     *       nothing. That is the property the three rewritten assertions in #72 had to be given.</li>
+     *   <li>The tick it reads is the probe's <em>handling</em> time, so each end carries a few ms of
+     *       dispatch latency — but the quantity compared is a <strong>difference</strong> of two such
+     *       reads, and both errors are of that size. Measured over 25 captures of this scenario,
+     *       149 matched traversals (6 per run, one unfinished at a bound): the same-burst arm read
+     *       0–40 ms and the next-burst arm 288–2456 ms, with <strong>nothing between 40 and
+     *       288</strong>. The 220 ms boundary sits in that empty band, 180 ms from one arm and
+     *       68 ms from the other.</li>
+     *   <li>The 68 ms side is the tighter one, and it is <strong>schedule-derived</strong> rather
+     *       than latency-derived: it is {@code tr1}'s +294 ms Gaussian draw at a nominal delay of 0.
+     *       Per {@code COVERAGE.md} §12.2 a schedule-derived gap is a simulated-time quantity and
+     *       does not grow under CPU load, which is exactly what would make a 68 ms margin
+     *       unsafe.</li>
+     * </ol>
+     *
+     * <p>If {@code tr1}'s nominal delay ever stops being 0, or the seed moves, re-measure that band
+     * before trusting the boundary — the assertion at the top of this test guards the first of those
+     * and nothing guards the second.
      */
     private static void assertTheNoiseDecidesBurstMembership(List<String> raw) {
         long gap = CanonicalTraceNormalizer.DEFAULT_SEGMENT_GAP_TICKS;
