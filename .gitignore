@@ -26,3 +26,4 @@ Thumbs.db
 
 # scratch output of docs/probes/run.sh
 docs/probes/.work/
+.gate-ledger/

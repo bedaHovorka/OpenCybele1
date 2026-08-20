@@ -1,0 +1,194 @@
+# A station at capacity, and the queue behind it. Added in revision, because the first version of
+# this issue said this branch was UNREACHABLE and that was wrong.
+#
+# ------------------------------------------------------------------------------------------
+# THE RETRACTION, KEPT HERE BECAUSE THE MISTAKE IS INSTRUCTIVE
+#
+# COVERAGE.md originally recorded `Station.enter`'s `queue.offer` branch as unreachable, with a
+# table of configurations that failed to reach it and the claim that "the mechanism is structural,
+# not a matter of finding the right knob". Both halves were wrong, and the reason is worth
+# recording: the detector used to produce that table looked for an `ENTER` whose `ENTER_REPLY`
+# arrived LATE. A queued train usually gets **no reply at all** -- it sits in `Station.queue` until
+# something leaves, which in a bounded run is often never -- so the detector scored the branch as
+# absent every time it fired. Two of the "0" rows in that table were really 12 and 19.
+#
+# THE LEVER IS THE OD-PAIR SET, not density, not capacity and not `voteWindowMs`. A capacity-1
+# station that only ever sees THROUGH traffic is protected by its own election: every train that
+# passes it is in its timetable, so `computeDifference` spaces them. Make the same station an
+# ORIGIN and a DESTINATION as well -- here `stB>stC` and `stB>stA` alongside `stA>stC` and
+# `stC>stA` -- and the protection breaks, because those trains' road sets differ and the election
+# has nothing that lines them up.
+#
+# WHAT ACTUALLY HAPPENS AT THIS SEED, AND IT CASCADES
+#
+#   ~20400  vl1 arrives at stB from tr2 and is admitted; stB is now full (occupied=1, capacity=1)
+#   ~20400  vl1 requests tr1 -- which is still occupied, so it is QUEUED ON THE ROAD, and therefore
+#           it never leaves stB
+#    21100  vl2 arrives at stB from tr1 and finds it FULL
+#           -> Station.enter takes the `info.occupied == info.capacity` branch -> queue.offer
+#           -> sendInfo() publishes the UNCHANGED occupancy, and NO ENTER_REPLY is sent
+#           -> vl2 therefore never sends LEAVE to tr1 either, so tr1 stays occupied too
+#    24796  vl3 requests tr1 and is queued BEHIND vl1
+#           -> PriorityQueue.offer on a NON-EMPTY queue, which is the first and only time in the
+#              scenario set that `OueueItem.compareTo` is called at all
+#
+# So one station-capacity event blocks a road, which blocks the station behind it. That is the
+# baseline's real congestion behaviour and no other scenario reaches any of it.
+#
+# WHAT THE GOLDEN SEES. `STATION_INFO.occupied` is projected to `<N>` (DEF-13), so the witness is
+# NOT the number: it is that vl2's `ENTER` on stB has **no matching `ENTER_REPLY`** anywhere in the
+# trace, and that vl2 never leaves tr1. Measured, every capture: 7 station `ENTER`s against 6
+# station `ENTER_REPLY`s. A port that admitted the train instead would emit the reply, move the
+# train on, free tr1, and change dozens of lines. OpenCybeleCapacityIT asserts the imbalance and
+# the road-queue depth directly.
+#
+# WHAT ELSE ONLY THIS SCENARIO COVERS
+#   * `sim.station.voteWindowMs` (6000) DIFFERENT FROM `sim.arrival.lambdaMs` (2000). #18 split one
+#     constant into two; every other scenario in the set sets them equal, so a port that never
+#     split them produces byte-identical goldens. Here `voteWindow` is visible in the trace:
+#     `Station.computeDifference`'s under-capacity branch returns `plannedTrains*voteWindow/6`,
+#     which is 1000 for one planned train and 2000 for two -- values that clear the normalizer's
+#     1000 ms `diff` quantum and are therefore PINNED, where the 583 and 666 of the other
+#     scenarios were sub-quantum and rendered as `diff=<T~0>`.
+#   * The over-capacity branch with values that also survive: 18072, 23776, 34088, 38784.
+# ------------------------------------------------------------------------------------------
+#
+# Format: docs/parity-harness.md. Trace format: docs/trace-format.md (on opencybele-baseline).
+
+id: opencybele-capacity
+description: >
+  Three stations in a line whose middle station has capacity ONE and is both a through station and
+  an origin, two tracks, nine trains planned and four departed, 27.7 s (simulated) headless at a
+  pinned seed. Sized so that one train is refused entry to a full station and queued, one road
+  queue reaches depth two, and every station vote clears the diff quantum.
+
+# ---------------------------------------------------------------------------------------------
+# CONTRACT: strict. MEASURED: see parity-tests/scenarios/COVERAGE.md §2.
+#
+# THE BOUND. Trains are created at simulated 3788, 6584, 12320, 15432, 18400, 20016, 20716, 21004
+# and 23700; the last event of the run is at 24796 and the next event of any kind is the tenth
+# train's PLAN_TRAIN, ~2500 ms later. A bound of 27700 sits
+#
+#     4000 simulated ms (1000 ms of wall clock at pace 4) after the last train creation,
+#     2904 simulated ms  (726 ms of wall clock) after the last event, and
+#    ~2500 simulated ms  (625 ms of wall clock) before the next one.
+#
+# The reference measurements for the Cybele.terminate() NPE race: 3 failures in 8 under load at
+# ~5 ms of wall clock, 0 in 24 at ~480 ms. 1000 ms is the widest creation margin of the four
+# bounded scenarios that carry congestion.
+#
+# ------------------------------------------------------------------------------------------
+# WHY THIS SCENARIO RUNS AT PACE 4 AND EVERY OTHER ONE RUNS AT PACE 8
+#
+# COVERAGE.md 12.1 records that a consecutive-tick gap NEAR the normalizer's 220 ms segmentation
+# boundary is a coin toss. What that section did not say, and what tuning this scenario
+# established, is WHICH gaps move:
+#
+#   * A gap that comes from the SIMULATED schedule -- an exp() inter-arrival draw, a road delay,
+#     the Gaussian travel noise -- is a simulated-time quantity. It is the same number at any pace
+#     and it does not grow under CPU load.
+#   * A gap that comes from MESSAGE LATENCY -- one agent reacting to another -- is a WALL-CLOCK
+#     quantity converted into simulated time by the pace. At pace 8, ~25 ms of wall clock becomes
+#     ~200 simulated ms, which is exactly the wrong number; and under load the wall figure grows,
+#     so the gap grows with it.
+#
+# Measured on this scenario, 6 captures each under an 8-way CPU load:
+#
+#     pace 8:  the reaction gap around simulated 12 400 read 184, 192, 208, 208, 216 and 232 ms
+#              -- i.e. it CROSSED 220 inside one sweep. That is a flake, not a margin.
+#     pace 4:  the same gap read 156-168 ms, 52 ms clear of the boundary, and the next-nearest gap
+#              was 280 ms, 60 ms clear on the other side.
+#
+# Halving the pace halves every latency-derived gap and leaves every schedule-derived one alone,
+# which is precisely the separation this scenario needs. It costs 7.0 s of wall clock per run
+# instead of 3.5 s. The other four scenarios stay at pace 8 because their measured margins are
+# already 44 ms or better and their goldens are recorded and gated; re-pacing them would mean
+# re-recording, which Phase1.md L7 forbids for anything but a harness defect.
+# ------------------------------------------------------------------------------------------
+#
+# A NOTE ON THE FOUR DEPARTURES OUT OF NINE PLANS. This is not a DEF-22 wedge: all nine trains
+# complete an election (nine distinct PLAN_TRAIN, nine distinct VOTE_RESULT), and the five that do
+# not depart are deferred by the election itself -- stB's over-capacity branch returns delays of
+# 18-39 s, so their planned departure is past the bound. That is the baseline behaving correctly
+# under congestion, and the liveness floors below are set against it rather than around it.
+# ---------------------------------------------------------------------------------------------
+contract: strict
+golden: opencybele-capacity.txt
+
+launcher:
+  properties:
+    # --- arrivals: stB is an ORIGIN as well as a through station. That is the lever. ---------
+    sim.arrival.lambdaMs: "2000"
+    sim.arrival.firstFireMs: "3200"     # phase; see the burst-boundary note below
+    sim.arrival.pairs: "stC>stA,stB>stC,stB>stA,stA>stC"
+    # --- topology, capacities, delays -----------------------------------------------------
+    sim.topology: "stA-stB:tr1,stB-stC:tr2"
+    sim.station.capacities: "stA=5,stB=1,stC=5"   # stB=1 is the whole point
+    sim.road.delaysSec: "tr1=5,tr2=8"
+    # DIFFERENT from sim.arrival.lambdaMs, and the only place in the scenario set where it is.
+    # #18 split one constant into these two; at 6000 the under-capacity vote arithmetic returns
+    # 1000 and 2000, which clear the normalizer's 1000 ms diff quantum and are therefore pinned.
+    sim.station.voteWindowMs: "6000"
+    # --- clock ----------------------------------------------------------------------------
+    sim.clock.startMs: "0"
+    # PACE 4, NOT 8 -- and this is the one number in the set that is not 8. See the
+    # burst-boundary block above: a message-latency gap is a WALL-CLOCK quantity, so at pace 8 it
+    # lands on ~200 simulated ms, which is on the segmentation boundary. Halving the pace halves
+    # it. Costs 7.0 s of wall clock per run instead of 3.5.
+    sim.clock.pace: "4"
+    # --- GUI: inert under sim.headless=true ------------------------------------------------
+    sim.gui.paces: "Fast=8,Normal=1,Slow=0.3"
+    sim.gui.mainLine: "stA,stB,stC"
+    sim.gui.branches: ""
+    # --- randomness -----------------------------------------------------------------------
+    sim.random.masterSeed: "20080415"
+    # --- run shape ------------------------------------------------------------------------
+    sim.headless: "true"
+    sim.trace.enabled: "true"
+    sim.trace.trainLookahead: "32"
+    sim.stop.maxTrains: "0"
+    sim.stop.maxClockMs: "27700"
+    sim.stop.wallClockMs: "60000"
+    # Wall clock between GENERATED trains. The widest gap here is 5736 simulated ms = 1434 ms of
+    # wall clock at pace 4.
+    sim.stop.stallMs: "20000"
+
+run:
+  harnessTimeoutMs: 120000
+  expect: bound-reached
+
+# Floors sit below the measured values (in parentheses) so ordinary drift is not a failure while a
+# dead or gutted run is. Liveness matches RAW lines, hence the numeric tick.
+liveness:
+  - pattern: '^(vl\d+)\|\d+\|PLAN_TRAIN\|'                 # 9
+    distinctGroup: 1
+    atLeast: 7
+  # Every planned train completes an election even under congestion -- this is the floor that
+  # separates "the election deferred them" from "DEF-22 wedged Planning".
+  - pattern: '^(vl\d+)\|\d+\|VOTE_RESULT\|'                # 9 distinct
+    distinctGroup: 1
+    atLeast: 7
+  - pattern: '^vl\d+ started$'                             # 4
+    atLeast: 3
+  - pattern: '^(vl\d+) in st[A-C] at \d+$'                 # 4
+    distinctGroup: 1
+    atLeast: 3
+  # THE STATION-CAPACITY BRANCH. A liveness rule counts matches and cannot correlate them, so what
+  # is pinned here is the number of station entries; OpenCybeleCapacityIT asserts the ENTER /
+  # ENTER_REPLY IMBALANCE that is the branch's actual signature.
+  - pattern: '^vl\d+\|\d+\|ENTER\|[^|]*\|st[A-C]\|'        # 7
+    atLeast: 6
+  # A station vote whose delay clears the diff quantum -- i.e. sim.station.voteWindowMs is being
+  # read and is not equal to sim.arrival.lambdaMs. Four digits or more.
+  - pattern: '^vl\d+\|\d+\|VOTE\|st[A-C]\|[^|]*\|[^|]*\|voter=st[A-C],train=vl\d+,diff=\d{4,}$'   # 10
+    atLeast: 6
+  - pattern: '^st[A-C]\|\d+\|STATION_INFO\|'               # 14
+    atLeast: 10
+  - pattern: '^tr[12]\|\d+\|ROAD_STATE\|'                  # 9
+    atLeast: 6
+  - pattern: '^st[A-C]\|\d+\|PATH_FIND_REPLY\|'            # 4
+    atLeast: 3
+
+entity:
+  pattern: '^(vl\d+)\|'
+  group: 1

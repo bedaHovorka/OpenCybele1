@@ -45,7 +45,10 @@ Everything below is in
 recorded under #12's placeholder — raw ticks, an unsorted startup block, interleaved `println`s — is
 projected into exactly the form a fresh run reaches, and the file on disk never changes.
 `Phase1.md` L7 forbids re-recording for anything but a harness defect; this design means landing the
-normalizer does not even raise the question. `parity-tests/golden/opencybele-smoke.txt` and
+normalizer does not even raise the question. (**#23 folded `opencybele-smoke` into
+`opencybele-strict`** and deleted its golden — see `parity-tests/scenarios/COVERAGE.md` §1. The
+argument below stands for the goldens that remain; §5.1's own recommendation is what was acted on.)
+`parity-tests/golden/opencybele-smoke.txt` and
 `smoke-stub.txt` are untouched by this work and still match.
 
 **One golden here *is* recorded, and it is this issue's own:**
@@ -324,7 +327,7 @@ creation (so it is *further* from the `Cybele.terminate()` NPE hazard than 25000
 
 Result: **14 of 14 captures byte-identical**, and the shipped gate is 10 for 10.
 
-`opencybele-smoke` is left exactly as #13 recorded it — same golden, same `summary` contract, same
+`opencybele-smoke` is left exactly as #13 recorded it (**#23 has since folded that scenario into `opencybele-strict` and deleted its golden; nothing was re-recorded — see `parity-tests/scenarios/COVERAGE.md` §1**) — same golden, same `summary` contract, same
 bound — because tightening it means re-recording its golden, and that is a decision for the issue
 that owns the scenario. **The recommendation to #23 is to fold the two by moving the smoke bound to
 24000**; the two files are otherwise identical and carrying both is a cost, not a design.

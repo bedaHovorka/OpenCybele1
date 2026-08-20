@@ -1,14 +1,17 @@
 # The scenario that proves #21's projection is SUFFICIENT, not merely helpful.
 #
-# opencybele-smoke.yaml is #13's adapter smoke test and stays where it is. This one exists for one
-# purpose: to run a real implementation end to end at the STRICT contract -- the normalized trace
+# opencybele-smoke.yaml WAS #13's adapter smoke test. #23 folded it into this file -- the two
+# differed in one number, sim.stop.maxClockMs, and 25000 was the weaker of the pair (12 runs in 38
+# truncated); OpenCybeleSmokeIT now drives this scenario. Nothing here changed: this file's
+# properties and its golden are exactly as #21 recorded them, which is what Phase1.md L7 requires.
+# This scenario exists for one purpose: to run a real implementation end to end at the STRICT contract -- the normalized trace
 # compared to the golden line for line, no tolerance of any kind -- and to be the target the
 # zero-flake gate (ParityGate) repeats. Scenario COVERAGE is still #23; this is one scenario, and
 # it deliberately duplicates opencybele-smoke's configuration in everything but one number.
 #
-# #23 should fold the two. The only reason they are separate today is that folding them means
-# re-recording opencybele-smoke's golden, and Phase1.md L7 makes that an expensive move to make on
-# someone else's issue. The evidence for folding is in docs/trace-normalizer.md.
+# #23 folded the two, keeping this one. The evidence is in docs/trace-normalizer.md 5.1 and in
+# parity-tests/scenarios/COVERAGE.md 1; ScenarioCatalogIT.smokeAndStrictStayFolded fails if a
+# near-duplicate is re-added.
 #
 # Format: docs/parity-harness.md. Trace format: docs/trace-format.md (on opencybele-baseline).
 

@@ -1,0 +1,182 @@
+# The scenario that makes a road hand a QUEUED train over -- the one code path #21 measured and
+# could not pin.
+#
+# docs/trace-normalizer.md 2.4 is the reason this file exists. It found that `ROAD_STATE.state` is
+# the trace's only witness to "did the road go idle and then accept, or hand a queued train over
+# directly?", that the queued path runs genuinely different code -- `push()` -> `queue.offer` ->
+# `OueueItem.compareTo` -> `pop()` -> `acceptTrain` -- and that it had to project the field away
+# because on the shipped topology the path is taken in 1 run of 8 at the recorded seed. Its
+# guidance to #39 ends:
+#
+#     "A port whose ENTER_REPLY never follows a LEAVE on a contended track has lost the queue
+#      path, and that is a port bug this projection cannot see."
+#
+# No scenario in the set forced that path. This one does, on schedule, and it does it in the
+# OPPOSING-DIRECTION form, which is the second of the three edge behaviours the issue names
+# (RoadAgent.java:123-127).
+#
+# ------------------------------------------------------------------------------------------
+# HOW THE QUEUE IS FORCED, AND WHY IT IS NOT LUCK
+#
+# `Planning` estimates each voter's arrival time by accumulating NOMINAL road delays
+# (Planning.java:79-86), and `RoadAgent.computeDifference` spaces entries on one road by that
+# road's nominal delay. Both are direction-blind: a road knows only WHEN it is wanted, never from
+# which end. A three-station line fed from BOTH ends therefore produces a train scheduled onto a
+# track from one end while a train from the other end is still traversing it -- which is exactly
+# what the election cannot prevent.
+#
+# Measured, at this configuration and seed, in every capture:
+#
+#     vl1 enters tr2 at stB heading right (ENTER_REPLY next=stC, state TRAVEL_RIGHT)
+#     vl2 enters tr2 at stC heading LEFT while vl1 is still on it
+#         -> RoadAgent.enter takes the `state != FREE` branch -> push()
+#         -> ROAD_STATE publishes the UNCHANGED TRAVEL_RIGHT, and NO ENTER_REPLY is sent
+#     424-440 simulated ms later vl1 leaves tr2
+#         -> RoadAgent.leave takes the `queue.size() != 0` branch -> pop() -> acceptTrain(vl2)
+#         -> vl2's ENTER_REPLY is sent FROM INSIDE leave(), with next=stB (TRAVEL_LEFT)
+#
+# So the golden contains vl2's `ENTER` on tr2 in one burst and vl2's `ENTER_REPLY` in a LATER
+# burst, alongside vl1's `LEAVE`. That ordering is the fingerprint, it survives the projection,
+# and a port that never queues cannot produce it: without the queue, `ENTER` and `ENTER_REPLY`
+# are adjacent in the same burst. OpenCybeleCongestionIT asserts both halves directly.
+#
+# WHAT THIS SCENARIO ALSO COVERS AND NOTHING ELSE IN THE SET DOES
+#   * `acceptTrain`'s else-branch -- a train travelling right-to-left on a track (TRAVEL_LEFT,
+#     ENTER_REPLY next=<leftStation>), reached here by the stC>stB pair.
+#   * TMR-03 with a LARGE delay. In opencybele-lifecycle and opencybele-timers every voter
+#     returns `diff=0`, so `Planning.java:111` arms its timer with 0 and START follows VOTE_RESULT
+#     in the same burst. Here vl1 is planned at simulated 7464 and departs at 15584 -- a deferral
+#     of 8120 ms, in a burst of its own -- and vl2 is deferred by 3072 ms.
+#   * The election arithmetic actually deciding something: `RoadAgent.computeDifference` returns
+#     8112 and 3072 for tr2, and `Station.computeDifference`'s under-capacity branch returns
+#     `plannedTrains*voteWindow/6` = 583. Those are the numbers the `diff` quantum of
+#     docs/trace-normalizer.md 2.2 exists to keep, and until #23 no scenario had a non-zero one
+#     outside opencybele-strict.
+#
+# WHAT IT DOES NOT COVER: the STATION-side queue (`Station.enter`'s `queue.offer` branch,
+# EVT-12/ST-16) and a road queue of depth two. Both are covered by opencybele-capacity, which was
+# added in revision after the claim that the station branch was unreachable was falsified -- see
+# parity-tests/scenarios/COVERAGE.md 10.1, which keeps the retraction rather than editing it out.
+# ------------------------------------------------------------------------------------------
+#
+# Format: docs/parity-harness.md. Trace format: docs/trace-format.md (on opencybele-baseline).
+
+id: opencybele-congestion
+description: >
+  Three stations in a line fed from both ends, two tracks, four departures, 26.9 s (simulated)
+  headless at a pinned seed. Placed so that exactly one train is queued on a contended track in
+  the opposing direction and handed over by RoadAgent.leave, and so that two departures are
+  deferred by seconds rather than by nothing.
+
+# ---------------------------------------------------------------------------------------------
+# CONTRACT: strict. MEASURED: within-session and cross-occasion status, with dates, are in
+# parity-tests/scenarios/COVERAGE.md.
+#
+# THE BOUND, AND THE TWO MARGINS IT IS SIZED AGAINST
+#
+# (1) The Cybele.terminate() race. A `Train` constructor in flight at the stop instant reaches
+# `Activity.openChannel` after `commReceiver` has been nulled and the kernel prints an NPE AFTER
+# the stop banner, with the exit status still 0. A train is created at PLAN time, so the exposure
+# is the gap between the last train creation and the bound. At this seed trains are created at
+# simulated 2560, 7456, 17496 and 22936, so a bound of 26900 sits 3964 simulated ms -- 496 ms of
+# wall clock at pace 8 -- clear of the last one. The reference measurements: 3 failures in 8 at
+# ~5 ms of wall clock, 0 in 24 at ~480 ms. This margin is at the safe end of that scale, and it
+# is the reason the bound is not in the (also quiet) 22952..25608 window, where the same margin
+# would be 158 ms.
+#
+# (2) THE BURST-BOUNDARY MARGIN, which is what an earlier revision of this file got wrong and is
+# recorded here so the next person does not.
+#
+# CanonicalTraceNormalizer segments the trace at tick gaps > DEFAULT_SEGMENT_GAP_TICKS (220 ms)
+# and sorts within a segment. A gap that sits NEAR 220 is therefore a coin toss: the same
+# structural gap was measured reading 192 ms in one capture and 224 ms in another -- a 32 ms
+# spread from tick-read jitter -- and when it crosses, two bursts merge, the sort re-orders them
+# and a `strict` golden fails. An earlier configuration of this scenario (lambda 3000,
+# firstFireMs 200, bound 29000) had exactly such a gap at simulated ~27040 and FAILED the
+# zero-flake gate on its second run, with a diff at line 208 that looked like a content change
+# and was not.
+#
+# So the configuration below was chosen by scanning every consecutive-tick gap in the run and
+# requiring that NONE of them fall in 150..380 ms. Measured over three captures at this bound:
+# zero gaps in that band, in all three. The nearest structural gap of any kind is 448 ms (the
+# queue wait itself, 228 ms clear of the boundary on the high side) and the next is 72 ms.
+#
+# `sim.arrival.firstFireMs` is 1500 rather than 200 for this reason and no other: at 200 the
+# first PLAN_TRAIN lands ~200 ms after the opening STATION_INFO/ROAD_STATE block, which is a
+# boundary sitting on the threshold in every configuration tried.
+# ---------------------------------------------------------------------------------------------
+contract: strict
+golden: opencybele-congestion.txt
+
+launcher:
+  properties:
+    # --- arrivals: fed from BOTH ends, which is what the election cannot space ------------
+    sim.arrival.lambdaMs: "3500"
+    sim.arrival.firstFireMs: "1500"     # see "burst-boundary margin" above; not cosmetic
+    sim.arrival.pairs: "stA>stC,stB>stC,stC>stB"
+    # --- topology, capacities, delays -----------------------------------------------------
+    # tr1 is long (8 s) relative to tr2 (5 s) so that an stA>stC train reaches tr2 out of phase
+    # with the stB>stC and stC>stB trains that share it.
+    sim.topology: "stA-stB:tr1,stB-stC:tr2"
+    sim.station.capacities: "stA=3,stB=2,stC=3"
+    sim.road.delaysSec: "tr1=8,tr2=5"
+    sim.station.voteWindowMs: "3500"
+    # --- clock ----------------------------------------------------------------------------
+    sim.clock.startMs: "0"
+    sim.clock.pace: "8"
+    # --- GUI: inert under sim.headless=true ------------------------------------------------
+    sim.gui.paces: "Fast=8,Normal=1,Slow=0.3"
+    sim.gui.mainLine: "stA,stB,stC"
+    sim.gui.branches: ""
+    # --- randomness -----------------------------------------------------------------------
+    sim.random.masterSeed: "20080415"
+    # --- run shape ------------------------------------------------------------------------
+    sim.headless: "true"
+    sim.trace.enabled: "true"
+    sim.trace.trainLookahead: "32"
+    sim.stop.maxTrains: "0"
+    sim.stop.maxClockMs: "26900"
+    sim.stop.wallClockMs: "60000"
+    # Wall clock between GENERATED trains. The widest gap here is 10040 simulated ms = 1255 ms of
+    # wall clock at pace 8, so 20000 leaves 16x headroom and still catches a dead generator.
+    sim.stop.stallMs: "20000"
+
+run:
+  harnessTimeoutMs: 120000
+  expect: bound-reached
+
+# Floors sit below the measured values so ordinary drift is not a failure while a dead or gutted
+# run is. Liveness matches RAW lines, hence the numeric tick. Measured values in parentheses.
+liveness:
+  - pattern: '^(vl\d+)\|\d+\|PLAN_TRAIN\|'      # 4
+    distinctGroup: 1
+    atLeast: 3
+  - pattern: '^(vl\d+)\|\d+\|VOTE_RESULT\|'     # 4 distinct trains
+    distinctGroup: 1
+    atLeast: 3
+  - pattern: '^(vl\d+) in st[A-C] at \d+$'      # 4
+    distinctGroup: 1
+    atLeast: 3
+  - pattern: '^vl\d+ started$'                  # 4
+    atLeast: 3
+  # THE QUEUE PATH. A liveness rule counts matches, it does not correlate them, so what is pinned
+  # here is the number of track entries -- which the golden then pins positionally, and which
+  # OpenCybeleCongestionIT correlates directly by asserting ENTER_REPLY's position relative to the
+  # matching LEAVE, exactly as docs/trace-normalizer.md 2.4 tells #39 to do.
+  - pattern: '^vl\d+\|\d+\|ENTER\|[^|]*\|tr[12]\|'   # 5
+    atLeast: 4
+  # Both directions of travel were used: a train entered tr2 from stC, i.e. right to left.
+  - pattern: '^vl\d+\|\d+\|ENTER\|[^|]*\|tr2\|[^|]*\|train=vl\d+,position=stC,'   # 1
+    atLeast: 1
+  - pattern: '^st[A-C]\|\d+\|STATION_INFO\|'    # 19
+    atLeast: 14
+  - pattern: '^tr[12]\|\d+\|ROAD_STATE\|'       # 11
+    atLeast: 8
+  # The lazy path-find round trip ran for more than one (station, target) pair -- stA and stB
+  # resolve towards stC, stC resolves towards stB.
+  - pattern: '^st[A-C]\|\d+\|PATH_FIND_REPLY\|' # 3
+    atLeast: 2
+
+entity:
+  pattern: '^(vl\d+)\|'
+  group: 1
