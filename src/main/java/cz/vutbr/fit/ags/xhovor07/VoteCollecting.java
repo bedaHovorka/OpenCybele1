@@ -18,7 +18,10 @@ import cz.vutbr.fit.ags.xhovor07.util.UnorientedGraph;
 
 /**
  * This is one activity of main agent.
- * Each LAMBDA seconds with exponencial distribution of probability generate new train
+ * Collects the votes cast by the stations and roads on a train's path and releases
+ * Planning's CountDownLatch once every member of the path has replied.
+ * (The previous summary here was a copy-paste of Generator's and described train
+ * generation, which this class does not do.)
  * 
  * @author Bedrich Hovorka
  */

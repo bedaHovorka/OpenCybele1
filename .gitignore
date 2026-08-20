@@ -24,6 +24,8 @@ Thumbs.db
 # Logs
 *.log
 
-# scratch output of docs/probes/run.sh
+# Probe scratch directory (docs/probes/run.sh), as docs/probes/README.md says
 docs/probes/.work/
+
+# Parity gate ledger
 .gate-ledger/

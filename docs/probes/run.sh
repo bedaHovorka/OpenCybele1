@@ -8,7 +8,10 @@
 #   docs/probes/run.sh                 # compile everything, run nothing
 #   docs/probes/run.sh ExpA            # compile, then run one probe
 #   docs/probes/run.sh ExpA2 --control # run ExpA2 with the event-queue control config
+#   docs/probes/run.sh ExpG            # self-verdicting: terminate()/exit-code/clock-command facts
+#   docs/probes/run.sh ExpH            # subscription order, message clock stamps (#20's probe)
 #   docs/probes/run.sh Order           # the util-only, no-Cybele iteration-order probe
+#   docs/probes/run.sh OrderLock       # self-verdicting: asserts those orders (#19)
 #   docs/probes/run.sh --all           # run every probe in turn
 #
 # Exit codes: 0 success, 1 failure (always with an actionable message).
@@ -69,15 +72,19 @@ cp -f "$REPO/cybelle/ICS.prop" "$WORK/ctrl/"
 
 # --- compile ------------------------------------------------------------------
 javac -nowarn -cp "$API" -d "$WORK/classes" "$HERE"/Exp*.java
+# Order/OrderLock need the app's util classes; OrderLock additionally needs
+# ScenarioConfig (the real topology source since #18). Neither pulls in Cybele.
 javac -nowarn -d "$WORK/classes" \
-      "$REPO"/src/main/java/cz/vutbr/fit/ags/xhovor07/util/*.java "$HERE"/Order.java
+      "$REPO"/src/main/java/cz/vutbr/fit/ags/xhovor07/util/*.java \
+      "$REPO"/src/main/java/cz/vutbr/fit/ags/xhovor07/ScenarioConfig.java \
+      "$HERE"/Order.java "$HERE"/OrderLock.java
 echo "compiled -> $WORK/classes"
 
 run_probe() {
     local probe="$1" conf="$2"
     echo "=== $probe (patch-module: $conf) ==="
-    if [ "$probe" = "Order" ]; then
-        java -cp "$WORK/classes" Order          # no Cybele, no kernel config
+    if [ "$probe" = "Order" ] || [ "$probe" = "OrderLock" ]; then
+        java -ea -cp "$WORK/classes" "$probe"   # no Cybele, no kernel config
     else
         ( cd "$WORK" && java --patch-module "java.base=$conf" -cp "$CP" "$probe" )
     fi
@@ -85,7 +92,7 @@ run_probe() {
 
 case "${1:-}" in
     "")        exit 0 ;;
-    --all)     for p in ExpA ExpA2 ExpB ExpB2 ExpB3 ExpB4 ExpC ExpE ExpF Order; do
+    --all)     for p in ExpA ExpA2 ExpB ExpB2 ExpB3 ExpB4 ExpC ExpE ExpF ExpG ExpH Order OrderLock; do
                    run_probe "$p" cybelle || echo "  (probe $p exited non-zero)"
                done ;;
     *)         if [ "${2:-}" = "--control" ]; then run_probe "$1" ctrl; else run_probe "$1" cybelle; fi ;;

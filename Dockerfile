@@ -1,22 +1,22 @@
 FROM eclipse-temurin:21-jdk-noble AS builder
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends maven \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 COPY gradlew ./
 COPY gradle ./gradle
 COPY settings.gradle.kts build.gradle.kts ./
+COPY scripts ./scripts
 COPY src ./src
 COPY cybelle ./cybelle
 
-RUN test -f cybelle/Cybele.jar && test -f cybelle/CybeleImpl.jar \
-    || (echo "cybelle/Cybele.jar and/or cybelle/CybeleImpl.jar are missing from the build context." \
-        "Run 'git checkout withoutGradle -- cybelle/Cybele.jar cybelle/CybeleImpl.jar' before building (see README.md)." >&2; exit 1)
-
-RUN mvn install:install-file -Dfile=cybelle/Cybele.jar     -DgroupId=com.iai -DartifactId=cybele-api  -Dversion=1.0 -Dpackaging=jar -q \
-    && mvn install:install-file -Dfile=cybelle/CybeleImpl.jar -DgroupId=com.iai -DartifactId=cybele-impl -Dversion=1.0 -Dpackaging=jar -q \
+# Install the vendored Cybele jars into the image's local Maven repository.
+# The build context has no .git (see .dockerignore), so the script's
+# recovery-from-tag path cannot run here — the jars must already be present in
+# cybelle/. Run scripts/bootstrap-vendor-jars.sh on the host first; the script
+# fails with exactly that instruction if they are absent.
+#
+# No Maven install is needed: with no `mvn` on PATH the script falls back to
+# populating the local repository layout directly.
+RUN ./scripts/bootstrap-vendor-jars.sh \
     && ./gradlew installDist --no-daemon
 
 FROM eclipse-temurin:21-jre-noble
@@ -44,6 +44,9 @@ RUN groupadd -g ${RUNTIME_GID} app \
 WORKDIR /app
 COPY --chown=app:app --from=builder /app/build/install/opencybele/ ./
 COPY --chown=app:app cybelle/cybele.prop cybelle/ICS.prop ./cybelle/
+# Ready-made scenario files, so `-Dsim.config=scenarios/short.properties` works in
+# the container exactly as it does on the host. See docs/scenario-config.md.
+COPY --chown=app:app scenarios ./scenarios
 
 ENV DISPLAY=:0
 USER app

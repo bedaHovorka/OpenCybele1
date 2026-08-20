@@ -4,22 +4,50 @@ A Swing GUI simulation of trains moving through a small railway network, built a
 
 Stations and single-track road segments are simulated as agents that negotiate train departure times through a distributed voting protocol, then move trains along the network while respecting station capacity and track occupancy. A Swing canvas visualizes station occupancy and track state live, alongside a table of in-flight trains.
 
+## Baseline environment
+
+This is the reference environment the baseline is built and run in. Anything else is untested.
+
+| | |
+|---|---|
+| **Build tool** | Gradle **8.10.2**, via the checked-in wrapper (`./gradlew`, `gradlew.bat`) — do not substitute a system Gradle |
+| **Java** | Gradle **toolchain 21** (`build.gradle.kts`); verified on Temurin/OpenJDK 21 |
+| **Required JVM flag** | `--patch-module java.base=cybelle` — mandatory, see [Why `--patch-module`](#why---patch-module) |
+| **Required Cybele config** | `cybele.srv.comm.app.param.iai = Local;NoSerialization` in `cybelle/cybele.prop` — mandatory, see [Why `Local;NoSerialization`](#why-localnoserialization) |
+| **Assertions** | `-ea` is on for `run`, and baked into the `installDist` start script and the Docker image — see [Assertions (`-ea`)](#assertions--ea) and [`docs/assertion-triage.md`](docs/assertion-triage.md) |
+| **Vendor jars** | `com.iai:cybele-api:1.0`, `com.iai:cybele-impl:1.0` in the local Maven repository — see [One-time setup](#one-time-setup-install-the-vendor-jars) |
+| **Scenario config** | `sim.*` system properties, defaults identical to the historical literals — see [Scenario configuration](#scenario-configuration-sim) and [`docs/scenario-config.md`](docs/scenario-config.md) |
+| **Randomness** | per-agent streams from one master seed, `-Dsim.random.masterSeed`, defaulting to a drawn (printed) seed — see [Reproducing a run](#reproducing-a-run-simrandommasterseed) and [`docs/seeded-rng.md`](docs/seeded-rng.md) |
+| **Parity trace** | off by default; `-Dsim.trace.enabled=true` adds one passive probe agent that prints `agent\|tick\|event\|from\|to\|performative\|payload` for all 15 channels — see [Parity trace](#parity-trace-simtraceenabled) and [`docs/trace-format.md`](docs/trace-format.md) |
+| **Tests** | no test suite; verification is manual through the Swing GUI, plus `./gradlew rngProof` for the RNG determinism check |
+
 ## Requirements
 
 - JDK 21 and Gradle (a wrapper is included: `./gradlew`/`gradlew.bat`)
 - The Cybele kernel jars, vendored in `cybelle/` (`Cybele.jar`, `CybeleImpl.jar`, plus its `ICS.prop`/`cybele.prop` runtime config) — not tracked in git (see below), installed to your local Maven repository (`~/.m2`) instead
-- Maven (`mvn`), only for the one-time jar install step below
+- Maven (`mvn`) is **optional** — the bootstrap script below uses it when present and falls back to installing the jars itself when it isn't
+- A running X server for the Swing GUI
 
 ## One-time setup: install the vendor jars
 
-`Cybele.jar`/`CybeleImpl.jar` are 2008-era binaries from IAI with no public Maven repo, so they aren't committed to git. They're still recoverable from the `withoutGradle` tag and get installed into your local Maven repository (`~/.m2`), which Gradle then resolves them from like any other dependency:
+`Cybele.jar`/`CybeleImpl.jar` are 2008-era binaries from IAI with no public Maven repo, so they aren't committed to git. They're still recoverable from the `withoutGradle` tag and get installed into your local Maven repository (`~/.m2`), which Gradle then resolves them from like any other dependency.
+
+That whole procedure is scripted:
 
 ```bash
-git checkout withoutGradle -- cybelle/Cybele.jar cybelle/CybeleImpl.jar
-
-mvn install:install-file -Dfile=cybelle/Cybele.jar     -DgroupId=com.iai -DartifactId=cybele-api  -Dversion=1.0 -Dpackaging=jar
-mvn install:install-file -Dfile=cybelle/CybeleImpl.jar -DgroupId=com.iai -DartifactId=cybele-impl -Dversion=1.0 -Dpackaging=jar
+scripts/bootstrap-vendor-jars.sh
 ```
+
+The script:
+
+- restores `cybelle/Cybele.jar` and `cybelle/CybeleImpl.jar` from the `withoutGradle` tag if they're not already in the working tree (and leaves them untracked, as `.gitignore` intends);
+- installs them as `com.iai:cybele-api:1.0` and `com.iai:cybele-impl:1.0` into the local Maven repository;
+- **does not require `mvn` on `PATH`.** If Maven is available it shells out to `mvn install:install-file`; if not, it writes the repository layout (jar + a minimal generated POM) directly. Both paths produce the same on-disk result, which `mavenLocal()` resolves identically;
+- is **idempotent** — re-running it is a no-op once both artifacts are installed and match. `--force` reinstalls anyway; `--verify-only` checks that both artifacts are installed and exits, writing nothing and leaving the working tree untouched (it will *not* restore missing jars — the two flags are mutually exclusive);
+- resolves the target repository from `MAVEN_REPO_LOCAL`, else `<localRepository>` in `~/.m2/settings.xml` (XML comments stripped first — Maven's own shipped `settings.xml` carries a commented-out `/path/to/local/repo` example that a naive grep picks up), else `~/.m2/repository`, and logs which one it chose. **`MAVEN_REPO_LOCAL` is a script-side override only**: Gradle's `mavenLocal()` does not read it, so if you point it somewhere non-default you must also pass a matching `-Dmaven.repo.local` to Gradle or the build will not find what was just installed;
+- fails with an actionable message rather than a stack trace when the tag is missing, the clone has no `.git`, or the destination isn't writable.
+
+It is also the entry point used by the [`Dockerfile`](Dockerfile) builder stage — no separate Maven install step is needed anywhere. It is designed to be the single call CI makes to prepare a build, but **no CI workflow exists in this repository yet**; wiring one up is [#25](https://github.com/bedaHovorka/OpenCybele1/issues/25).
 
 ## Build
 
@@ -33,9 +61,199 @@ mvn install:install-file -Dfile=cybelle/CybeleImpl.jar -DgroupId=com.iai -Dartif
 ./gradlew run
 ```
 
-This launches `cz.vutbr.fit.ags.xhovor07.Main` with the two jars above on the classpath (resolved from `~/.m2`) plus the JVM flag `--patch-module java.base=cybelle`, configured as `applicationDefaultJvmArgs` in `build.gradle.kts`; Cybele reads its `ICS.prop`/`cybele.prop` config from `cybelle/` via that flag. A Swing window opens on launch showing the railway network, live station/track state, and a table of trains currently in transit. There is no automated test suite — verification is manual, through the GUI.
+This launches `cz.vutbr.fit.ags.xhovor07.Main` with the two jars above on the classpath (resolved from `~/.m2`) plus the JVM flags `-ea` and `--patch-module java.base=cybelle`, configured as `applicationDefaultJvmArgs` in `build.gradle.kts`; Cybele reads its `ICS.prop`/`cybele.prop` config from `cybelle/` via that flag. A Swing window opens on launch showing the railway network, live station/track state, and a table of trains currently in transit. There is no automated test suite — verification is manual, through the GUI.
 
-`cybelle/cybele.prop` sets `cybele.srv.comm.app.param.iai = Local;NoSerialization` so Cybele's comm service runs in local-only mode; without it, startup hangs/aborts trying to reach an external `IAIDaemon`/license host that isn't part of this vendored setup.
+### Headless and bounded runs
+
+By default the run is exactly as it always was: a window opens and it never stops on its own.
+Three additions, all opt-in:
+
+```bash
+# no window, no display needed
+OPENCYBELE_OPTS="-Djava.awt.headless=true -Dsim.headless=true -Dsim.stop.maxClockMs=115000" \
+  build/install/opencybele/bin/opencybele ; echo $?
+
+# a ready-made bounded, headless, seed-pinned scenario -- no `timeout` in front of it
+OPENCYBELE_OPTS=-Dsim.config=scenarios/short-bounded.properties \
+  build/install/opencybele/bin/opencybele ; echo $?
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `sim.headless` | `false` | skip the Swing window |
+| `sim.stop.maxTrains` | `0` (off) | **bound** — stop after this many trains generated (exact) |
+| `sim.stop.maxClockMs` | `0` (off) | **bound** — stop this far past `sim.clock.startMs`, in simulated ms |
+| `sim.stop.wallClockMs` | `0` (off) | **failure** — wall-clock safety net |
+| `sim.stop.stallMs` | `0` (off) | **failure** — no train generated for this long |
+
+Exit codes: `0` a declared bound was reached (or the window of an *unbounded* run was closed),
+`1` configuration/startup error, `2` the window was closed while a bound was armed and unreached,
+`3` the wall-clock safety net fired, `4` train generation stalled, `5` the simulation clock does
+not answer its command channel. Plus `255`, which is not this mechanism's: a throwable escaping
+`RailwayMainAgent`'s constructor exits the JVM with it, loudly, before any banner. **A run that
+did not finish never exits 0** — it must not look like a pass.
+
+`sim.stop.maxTrains` is exact; `sim.stop.maxClockMs` stops at or just past its bound; **neither is
+a trace-length bound** — trains already planned but not yet departed simply never print. Details,
+the exit-code mechanics (`Cybele.terminate()` exits 0 and never returns, so the status is forced
+from a shutdown hook) and the clock-registration race that headless mode exposes:
+[`docs/headless-and-stop.md`](docs/headless-and-stop.md).
+
+Without any `sim.stop.*` key the process still runs until it is killed, so wrapping it works as
+before:
+
+```bash
+timeout 300 ./gradlew run --console=plain
+```
+
+### Parity trace (`sim.trace.enabled`)
+
+The application itself prints two lines — `"<train> in <station> at <n>"` and
+`"<train> started"`. Everything else it does reaches the Swing canvas through
+`Observable`/`Observer` and never touches a stream, so none of it can be compared against a
+port. `-Dsim.trace.enabled=true` adds **one passive agent** that subscribes to all fifteen
+application channels and appends one canonical line per message to stdout:
+
+```
+agent|tick|event|from|to|performative|payload
+```
+
+```bash
+OPENCYBELE_OPTS="-Djava.awt.headless=true \
+  -Dsim.config=scenarios/short-bounded.properties \
+  -Dsim.trace.enabled=true" build/install/opencybele/bin/opencybele
+```
+
+```
+vl3|13064|START|Main|vl3|-|station=stA
+vl3|13072|ENTER|vl3|stA|-|train=vl3,position=null,target=stB
+vl3|13080|ENTER_REPLY|stA|vl3|-|object=stA,next=tr1
+```
+
+It is additive — it sends nothing, sets no timer and touches no application state — and it is
+**off by default**, so `./gradlew run` is unchanged. `tick` is the simulated clock, never wall
+time. `performative` is the literal `-` on this branch and stays that way: the baseline has no
+performatives at all, and the channel-to-`ACLMessage` mapping belongs to the JADE port.
+
+```bash
+./gradlew traceCheck     # run a short bounded simulation and verdict the trace it produced
+```
+
+verifies that all fifteen channels appear, that the round-trips balance, and — the part that
+matters — that the trace is **complete**: train ids contiguous, every announced train with its
+`generated` line, every station and track with its opening state.
+
+**A golden cannot be recorded from this trace verbatim.** Five numeric families derive from a
+wall-clock-driven simulated clock and change on every run; they are named in the doc, for
+[#21](https://github.com/bedaHovorka/OpenCybele1/issues/21) to project away.
+
+The format is a **contract**: it is re-emitted by the JADE and Jason ports and has to produce
+byte-identical lines for equivalent behaviour. Field semantics, the per-channel table, the
+`Station.Info` aliasing hazard and the probe-on/probe-off perturbation measurement:
+[`docs/trace-format.md`](docs/trace-format.md).
+
+### Scenario configuration (`sim.*`)
+
+Every simulation parameter that used to be a hardcoded literal — arrival rate, station
+capacities, track delays, network topology, clock start and pace, the GUI's pace buttons — is
+read from a `sim.*` Java system property whose **default is that literal**. A run with nothing
+set behaves exactly as it did before. Full key table, rationale and evidence:
+[`docs/scenario-config.md`](docs/scenario-config.md).
+
+```bash
+./gradlew run -Dsim.arrival.lambdaMs=2000                     # one knob
+./gradlew run -Dsim.config=scenarios/short.properties         # a scenario file
+./gradlew run -Dsim.config=scenarios/short.properties -Dsim.clock.pace=1   # file + override
+```
+
+Precedence is `-D` > scenario file > built-in default; `./gradlew run` forwards `-Dsim.*` into
+the forked application JVM. Ready-made scenarios are in [`scenarios/`](scenarios).
+`build/install/opencybele/bin/opencybele` takes the same flags through `OPENCYBELE_OPTS`, and
+so does `docker compose up app`.
+
+The configuration is parsed and validated in `Main.main` **before the kernel starts**, so a bad
+value is an ordinary uncaught exception with **exit status 1** — the one failure mode in this
+codebase where the exit status can be trusted (contrast the assertion behaviour below). The
+resolved configuration is printed to **stderr** at startup, marking anything non-default;
+stdout stays byte-for-byte as it was, because that is where the trace a golden diffs lives.
+
+Two couplings are worth knowing about before changing anything:
+
+- **`LAMBDA` had two jobs** — the generator's mean inter-arrival time *and* the voting window
+  and penalty quantum of `Station.computeDifference`. They are now
+  `sim.arrival.lambdaMs` and `sim.station.voteWindowMs`, independent, both defaulting to 8500 ms.
+  Shortening a scenario no longer silently retunes the station scheduling policy — but changing
+  the window on purpose still does, so both belong in the [#24](https://github.com/bedaHovorka/OpenCybele1/issues/24)
+  manifest.
+- **The canvas states the topology a second time** and can only draw one straight main line plus
+  branch stubs. That drift is documented rather than fixed (the GUI is outside the behavioural
+  contract), but a configured topology the canvas cannot represent produces a loud stderr banner
+  at startup and a red mismatch list plus red `??` gaps on the canvas — never a plausible-looking
+  wrong picture.
+
+### Reproducing a run (`sim.random.masterSeed`)
+
+Every random draw comes from a per-agent stream derived from one master seed. The default is
+to **draw** a seed, so an ordinary run keeps varying — but the drawn seed is printed to stderr
+with the command to replay it:
+
+```
+--- no sim.random.masterSeed given; drew 5605042205657107861. Replay this run's random streams with:
+---   -Dsim.random.masterSeed=5605042205657107861
+```
+
+```bash
+./gradlew run -Dsim.random.masterSeed=20080415        # pin the streams
+./gradlew rngProof                                    # determinism check, ~1 s (also runs in `build`)
+./gradlew rngProof -Prng.full                         # the exhaustive sweep, ~15 s
+./gradlew rngProof --args="plan 20080415 20"          # predict that seed's trains, offline
+```
+
+Startup also prints a **stream table** to stderr — every stream name with the seed it will
+run on — so a captured run carries a complete manifest of its randomness.
+
+> `build/install/opencybele/bin/opencybele -Dsim.random.masterSeed=…` **does not work and does
+> not complain**: the generated start script passes `$@` to the program, not to the JVM, so the
+> run draws a fresh seed while looking pinned. Use `OPENCYBELE_OPTS=-Dsim.random.masterSeed=…`.
+> `./gradlew run -D…` is fine.
+
+Same seed ⇒ same per-agent draw sequences, on any thread interleaving. It does **not** yet
+mean the same stdout: departure timestamps come from a real-time clock, event ordering is
+still unpinned ([#16](https://github.com/bedaHovorka/OpenCybele1/issues/16)), and above a
+measured arrival-density ceiling the same seed departs a different *subset* of the same
+generated trains — the pre-existing `START` race, not the RNG. What a fixed seed does and
+does not pin, and how to keep a scenario below that ceiling, is measured in
+[`docs/seeded-rng.md`](docs/seeded-rng.md).
+
+### Assertions (`-ea`)
+
+`run` enables assertions (`-ea` in `applicationDefaultJvmArgs`). The 32 `assert` statements in `src/` are the codebase's only invariant checks, and they encode real preconditions — every path member having voted, a train arriving where it was routed, a path direction being resolvable. With assertions off, a violated invariant is silent corruption; with them on, it is a logged failure.
+
+Note how Cybele treats one. An exception thrown out of an agent event handler is caught by `com.iai.cybele.thmgmt.IAIAgentThread` — but its catch list is five named types, *not* `Throwable`. An `AssertionError` survives only because `Method.invoke` wraps it in an `InvocationTargetException`, which is on that list. It is then printed by `com.iai.cybele.exception.IAIExceptionHandler` **to `System.err`** (twice per failure), and the simulation continues. So a firing assertion does *not* abort the process or change the exit status.
+
+Three practical consequences, all measured: output diffing must **capture stderr** (nothing appears on stdout); the exit status is worthless as a pass/fail signal; and a throwable inside a timer handler such as `Generator.generateTrain` stops train generation **permanently and silently**, because the method re-arms its own timer as its last statement. Full mechanism, evidence and the rules a scenario runner must follow are in [`docs/assertion-triage.md`](docs/assertion-triage.md) § Result 3.
+
+Full triage of all 32 assertion sites — which fire, which are merely never reached, and how many times each is evaluated in a normal run — is in [`docs/assertion-triage.md`](docs/assertion-triage.md). Summary: **none fires**; 24 sites are exercised and hold, 8 are never reached (2 of those deliberately). The triage was recorded against 33 sites before [#18](https://github.com/bedaHovorka/OpenCybele1/issues/18) removed `RailwayCanvas`'s `assert road != null`; see that document's amendment, which also gives the corrected `grep` exclusion list — a naive `grep -c 'assert '` now yields 33, not 32.
+
+`applicationDefaultJvmArgs` is baked into the generated start script too (`build/install/opencybele/bin/opencybele`), so the Docker image runs with assertions on as well. That script appends `JAVA_OPTS` and `OPENCYBELE_OPTS` *after* `DEFAULT_JVM_OPTS`, so assertions can be turned off there without touching the build:
+
+```bash
+OPENCYBELE_OPTS=-da build/install/opencybele/bin/opencybele
+```
+
+`./gradlew run` has **no** such escape hatch — disabling assertions on that path requires editing `build.gradle.kts`. #22 should be aware of the asymmetry: it is exactly the sort of thing that produces a golden recorded under different assertion settings than the label claims.
+
+**Enabling `-ea` is itself a behaviour change.** A path that previously continued silently past a broken invariant now throws instead. That is the desired trade for local development and CI, but it means the assertions-on/assertions-off setting is a property of the *scenario being recorded*, not a free-standing preference.
+
+> **Scope boundary — deliberately not decided here.** This project enables `-ea` for `run`. It does **not** decide whether golden recordings are captured with assertions on or off. That decision belongs to [#22](https://github.com/bedaHovorka/OpenCybele1/issues/22) and must be written down in the [#24](https://github.com/bedaHovorka/OpenCybele1/issues/24) manifest alongside the other run parameters, so a recording can never be compared against a replay made under a different assertion setting.
+
+### Why `Local;NoSerialization`
+
+`cybelle/cybele.prop` sets `cybele.srv.comm.app.param.iai = Local;NoSerialization` so Cybele's comm service runs in local-only mode. Commented out — which is how the vendored file shipped — `IAICommService` builds an `IAINetClient` that spawns an external `IAIDaemon`, and startup aborts with `Could not connect with IAIDaemon -- Execution aborted!` and exit status 1 (verified under [#16](https://github.com/bedaHovorka/OpenCybele1/issues/16)). The setting is mandatory, not a tuning knob.
+
+> `cybelle/ICS.prop` used to declare **two** `ICSBrowser` keys — an external IAI host (`63.122.105.110`) followed by `127.0.0.1`. Last-one-wins made it harmless, but reordering them would have pointed the spawned daemon at an external host. The external entry was removed under [#16](https://github.com/bedaHovorka/OpenCybele1/issues/16); one live key remains.
+
+The other two kernel knobs — the event-queue sort/compare strategy and the thread pool — were measured and deliberately left at their existing behaviour under #16; `cybelle/cybele.prop` now says so at each line, and [`docs/kernel-config.md`](docs/kernel-config.md) has the numbers.
 
 ### Why `--patch-module`
 
@@ -43,7 +261,9 @@ Cybele's kernel jar loads `cybele.prop` via `props.getClass().getResourceAsStrea
 
 ## Run with Docker
 
-A `Dockerfile`/`docker-compose.yml` (on the `develop` branch) build and run the app in a container, forwarding the Swing GUI to an X server on the host. The image is a multi-stage build: a JDK 21 + Maven + Gradle builder stage (installs the vendor jars and runs `./gradlew installDist`), then a slim JRE 21 runtime stage — Docker here is a convenience/reproducibility option, not a requirement for a working JVM. Since the vendor jars aren't in git, run the `git checkout withoutGradle -- ...` step above before building the image, so they're present in the build context for the builder stage to install.
+A `Dockerfile`/`docker-compose.yml` build and run the app in a container, forwarding the Swing GUI to an X server on the host. The image is a multi-stage build: a JDK 21 builder stage (runs `scripts/bootstrap-vendor-jars.sh`, then `./gradlew installDist`), then a slim JRE 21 runtime stage — Docker here is a convenience/reproducibility option, not a requirement for a working JVM.
+
+Run `scripts/bootstrap-vendor-jars.sh` **on the host before building the image**. The build context excludes `.git` (see `.dockerignore`), so the script's recover-from-tag step cannot run inside the builder — the jars have to already be sitting in `cybelle/`. The builder still calls the same script (to install them into the image's local Maven repository), and it fails with exactly that instruction if they're absent.
 
 **Prerequisites**: Docker + Docker Compose, and an X server (native on Linux; [XQuartz](https://www.xquartz.org/) on macOS; [VcXsrv](https://sourceforge.net/projects/vcxsrv/) or Xming on Windows).
 
@@ -72,6 +292,12 @@ Two things about it are worth knowing before reading the YAML. Without `-Popency
 Full write-up, including how to reproduce the job locally: [`docs/ci.md`](docs/ci.md).
 
 ## Documentation
+
+- [`docs/scenario-config.md`](docs/scenario-config.md) — the `sim.*` parameter surface, the `LAMBDA` split, the canvas drift, and the short-scenario evidence
+- [`docs/assertion-triage.md`](docs/assertion-triage.md) — all assertion sites, and what Cybele does when one fires
+- [`docs/seeded-rng.md`](docs/seeded-rng.md) — the per-agent seeded RNG, the interleaving-independence proof, and what still blocks whole-run determinism
+- [`docs/headless-and-stop.md`](docs/headless-and-stop.md) — headless mode, the bounded stop condition, the exit-code table, and the kernel clock-registration race that removing the GUI exposes
+- [`docs/trace-format.md`](docs/trace-format.md) — the canonical parity trace: the line format as a cross-framework contract, the fifteen channels, the aliased-payload hazard, and the probe-on/probe-off perturbation measurement
 
 `dokumentace.pdf` and `prezentace.pdf` (in Czech) are the original project documentation and presentation submitted for the course.
 
