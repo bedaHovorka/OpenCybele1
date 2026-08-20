@@ -62,13 +62,37 @@ attr() {
 
 suite_name() { attr "$1" name; }
 
-# Sum one attribute over every report in the directory.
+# Is this a non-negative integer? Every count read out of a report goes through
+# here before it is compared.
+#
+# WHY, given that Gradle's XML writer always emits integers: without it, every
+# check in `assert-ran` failed OPEN. The checks have the shape
+# `if <comparison>; then rc=1; fi`, and `[ one -lt 1 ]` does not evaluate false
+# -- it errors and returns 2, so the branch is not taken and an assertion that
+# could not be evaluated read as "the assertion holds". Measured: a report with
+# tests="one" skipped="zero" printed four `integer expected` errors to stderr
+# and still exited 0 with the OK line. This script exists to be a lock that
+# fails CLOSED, so an unreadable count is now a failure, not a pass.
+num() {
+    case "${1:-}" in
+        '' | *[!0-9]*) return 1 ;;
+        *)             return 0 ;;
+    esac
+}
+
+# Sum one attribute over every report in the directory. Returns non-zero and
+# prints nothing on the first unreadable value, for the reason above -- callers
+# must treat "could not total" as a failure rather than as zero.
 total() {
     local name="$1" sum=0 file value
     for file in "$RESULTS_DIR"/TEST-*.xml; do
         [ -f "$file" ] || continue
         value="$(attr "$file" "$name")"
-        sum=$(( sum + ${value:-0} ))
+        if ! num "$value"; then
+            echo "FAIL: $(basename "$file") carries a non-numeric ${name}=\"${value}\"." >&2
+            return 1
+        fi
+        sum=$(( sum + value ))
     done
     echo "$sum"
 }
@@ -92,7 +116,10 @@ case "$MODE" in
         [ -n "$file" ] || exit 1
         failures="$(attr "$file" failures)"
         errors="$(attr "$file" errors)"
-        [ $(( ${failures:-0} + ${errors:-0} )) -gt 0 ]
+        # Fail closed: an unreadable report is not evidence that the end-to-end
+        # scenario flaked, so it does not earn a retry.
+        num "$failures" && num "$errors" || exit 1
+        [ $(( failures + errors )) -gt 0 ]
         ;;
 
     # -------------------------------------------------------------------
@@ -134,20 +161,38 @@ case "$MODE" in
             skipped="$(attr "$file" skipped)"
             failures="$(attr "$file" failures)"
             errors="$(attr "$file" errors)"
-            if [ "${tests:-0}" -lt 1 ]; then
-                echo "FAIL: $SMOKE_CLASS reports tests=\"${tests:-}\"." >&2
-                rc=1
-            fi
-            if [ "${skipped:-0}" -ne 0 ]; then
-                echo "FAIL: $SMOKE_CLASS was SKIPPED (skipped=\"$skipped\"), so the application" \
-                     "was never started and this run proves nothing about the baseline." \
-                     "The cause is almost always that -Popencybele.dist did not point at a" \
-                     "'./gradlew installDist' output containing lib/*.jar." >&2
-                rc=1
-            fi
-            if [ $(( ${failures:-0} + ${errors:-0} )) -ne 0 ]; then
-                echo "FAIL: $SMOKE_CLASS reports failures=\"$failures\" errors=\"$errors\"." >&2
-                rc=1
+
+            # Every count is validated BEFORE it is compared; see num(). A
+            # report whose numbers cannot be read is a failed assertion.
+            readable=1
+            for attribute in "tests:$tests" "skipped:$skipped" \
+                             "failures:$failures" "errors:$errors"; do
+                if ! num "${attribute#*:}"; then
+                    echo "FAIL: $SMOKE_CLASS reports a non-numeric" \
+                         "${attribute%%:*}=\"${attribute#*:}\". That is not the shape Gradle's" \
+                         "XML writer produces, and an assertion that cannot be evaluated is a" \
+                         "failed assertion, never a passed one." >&2
+                    readable=0
+                    rc=1
+                fi
+            done
+
+            if [ "$readable" -eq 1 ]; then
+                if [ "$tests" -lt 1 ]; then
+                    echo "FAIL: $SMOKE_CLASS reports tests=\"$tests\"." >&2
+                    rc=1
+                fi
+                if [ "$skipped" -ne 0 ]; then
+                    echo "FAIL: $SMOKE_CLASS was SKIPPED (skipped=\"$skipped\"), so the" \
+                         "application was never started and this run proves nothing about the" \
+                         "baseline. The cause is almost always that -Popencybele.dist did not" \
+                         "point at a './gradlew installDist' output containing lib/*.jar." >&2
+                    rc=1
+                fi
+                if [ $(( failures + errors )) -ne 0 ]; then
+                    echo "FAIL: $SMOKE_CLASS reports failures=\"$failures\" errors=\"$errors\"." >&2
+                    rc=1
+                fi
             fi
         fi
 
@@ -155,26 +200,43 @@ case "$MODE" in
         # 0dd6ab6 with a dist supplied: 31 tests, 0 skipped, across 5 classes.
         # Asserting the total keeps a future `assumeTrue` from hiding in a
         # class this script does not name.
-        skipped_total="$(total skipped)"
-        if [ "$skipped_total" -ne 0 ]; then
-            echo "FAIL: $skipped_total test(s) were skipped across the suite. In this job every" \
-                 "precondition is supposed to be satisfied, so a skip is a silently missing" \
-                 "check, not a neutral outcome." >&2
+        if skipped_total="$(total skipped)"; then
+            if [ "$skipped_total" -ne 0 ]; then
+                echo "FAIL: $skipped_total test(s) were skipped across the suite. In this job" \
+                     "every precondition is supposed to be satisfied, so a skip is a silently" \
+                     "missing check, not a neutral outcome." >&2
+                rc=1
+            fi
+        else
+            echo "FAIL: the suite's skipped counts could not be read (see above)." >&2
             rc=1
         fi
 
         # 3 -- and nothing anywhere in the suite failed. Gradle's exit status has normally said
         # this already; asserting it here as well means this script's OK line is a statement
         # about the reports it just read rather than about one class in them.
-        bad_total=$(( $(total failures) + $(total errors) ))
-        if [ "$bad_total" -ne 0 ]; then
-            echo "FAIL: $bad_total failure(s)/error(s) across the suite." >&2
+        if failures_total="$(total failures)" && errors_total="$(total errors)"; then
+            bad_total=$(( failures_total + errors_total ))
+            if [ "$bad_total" -ne 0 ]; then
+                echo "FAIL: $bad_total failure(s)/error(s) across the suite." >&2
+                rc=1
+            fi
+        else
+            echo "FAIL: the suite's failure/error counts could not be read (see above)." >&2
             rc=1
         fi
 
         if [ "$rc" -eq 0 ]; then
-            echo "OK: $(total tests) test(s), 0 skipped, 0 failed -- and $SMOKE_CLASS RAN" \
-                 "(the application was started as a child JVM and compared against its golden)."
+            # Guarded like everything else: the OK line must not be printable off
+            # a number this script could not read.
+            if tests_total="$(total tests)"; then
+                echo "OK: $tests_total test(s), 0 skipped, 0 failed -- and $SMOKE_CLASS RAN" \
+                     "(the application was started as a child JVM and compared against its" \
+                     "golden)."
+            else
+                echo "FAIL: the suite's test counts could not be read (see above)." >&2
+                rc=1
+            fi
         fi
         exit "$rc"
         ;;

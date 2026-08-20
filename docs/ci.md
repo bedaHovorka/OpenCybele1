@@ -21,11 +21,11 @@ the frozen application still behave the way the goldens say it does?*
 | # | Step | Why it is not obvious |
 |---|---|---|
 | 1 | Check out the harness (the pushed ref) into `harness/` | |
-| 2 | Check out `opencybele-baseline` into `opencybele/`, `fetch-depth: 0` | The vendor jars are recovered from a **git tag**; a shallow single-branch clone has neither the tag nor the commit |
+| 2 | Check out `opencybele-baseline` into `opencybele/`, `fetch-depth: 0` | The vendor jars are recovered from a **git tag**, which the default shallow single-branch fetch does not bring. See §2 for what this does and does not buy |
 | 3 | JDK 21 (Temurin) + `gradle/actions/setup-gradle` | 21 is what `build.gradle.kts` pins on both branches; providing it keeps Gradle from auto-provisioning a toolchain over the network |
 | 4 | Restore `~/.m2/repository/com/iai` from the Actions cache | Only the two vendored artifacts live there; everything else Gradle resolves is in the Gradle caches |
 | 5 | `opencybele/scripts/bootstrap-vendor-jars.sh` | The **single call** — no `mvn install:install-file` lines are duplicated in the workflow |
-| 6 | `scripts/bootstrap-vendor-jars.sh --verify-only` | Separates "installed" from "present and matching"; catches a stale cache entry |
+| 6 | `scripts/bootstrap-vendor-jars.sh --verify-only` | A post-condition assertion and a log separator — **not** the stale-cache defence; see §2 |
 | 7 | `opencybele/./gradlew installDist` | `installDist`, not `build` — `build/install/opencybele/lib/*.jar` is the layout `OpenCybeleLauncher` drives |
 | 8 | Print the two commits, the dist contents, `DISPLAY`, and the three leaky `*JAVA*OPTIONS` variables | Cheap evidence that this was a headless run of the artefacts it claims |
 | 9 | `harness/./gradlew characterizationIT -Popencybele.dist=…` (with one narrow retry) | §4 |
@@ -70,6 +70,25 @@ That script lives on **`opencybele-baseline`**, not on `jade-develop` — which 
 job has that branch checked out anyway and the jars are only needed to build the application. The
 workflow calls it in the `opencybele/` checkout and duplicates none of its commands.
 
+**What `fetch-depth: 0` is actually for.** Not for making the recovery possible: measured against
+`actions/checkout`'s exact default fetch (shallow, single-branch, one object, empty tag list), the
+script's own `git fetch --tags` fallback deepened the clone, recovered the tag and restored both
+jars, rc 0, on git 2.55.0. It is set because it makes recovery *deterministic* and moves the fetch
+into the checkout step, off the critical path of a build step — not because the default would fail.
+
+**What catches a stale or poisoned `~/.m2` cache.** Step 5, not step 6. The script always restores
+`cybelle/*.jar` from the tag first and then `cmp`s the installed artifact against them, so a
+poisoned cache entry is detected and reinstalled during the *install* step; `--verify-only`
+afterwards then passes, because the defence has already fired. Measured. What `--verify-only` does
+catch on its own is an installed artifact whose generated `.pom` is missing, and it makes the log
+distinguish "installed" from "present and matching".
+
+**Do not reorder steps 5 and 6.** `--verify-only` fails *open* when `cybelle/*.jar` are absent from
+the working tree — it treats "no source jar to compare against" as not-a-failure, so with a
+corrupted installed artifact and no jars in the tree it exits 0. That is harmless in this ordering,
+because step 5 always restores first, and a latent trap for anyone running the script standalone or
+swapping the two steps around.
+
 ---
 
 ## 3. Why a green Gradle run is not enough
@@ -101,6 +120,18 @@ than no workflow*. So the job does not believe the run until
 
 The step prints the per-class table before its verdict, so a red step carries the numbers that
 produced it.
+
+**It fails closed, including on numbers it cannot read.** Every count goes through a `num()` guard
+before it is compared. Without it the script's own shape betrayed it: the checks read
+`if <comparison>; then rc=1; fi`, and `[ one -lt 1 ]` does not evaluate false — it errors and
+returns 2, so the branch is not taken and an assertion that *could not be evaluated* read as "the
+assertion holds". Measured: a report with `tests="one" skipped="zero"` printed four
+`integer expected` errors to stderr and still exited 0 with the `OK:` line. `total()` had the same
+hole one level down, silently yielding an empty string. Both are now failures. The behaviour is
+exercised against crafted reports: happy path 0, and exit 1 for a skipped smoke test, an absent
+smoke report, `tests="0"`, a *different* class skipped, a harness class failing while smoke passes,
+an empty directory, a missing directory, malformed XML, truncated XML, and non-numeric attributes in
+either the smoke report or another class's.
 
 ---
 
@@ -135,6 +166,33 @@ Note that the scenario's own `run.harnessTimeoutMs: 120000` is a separate backst
 where the child hangs and its 60 s wall-clock net does not fire; a kill is reported as
 `HARNESS_TIMEOUT` and can never be read as a pass.
 
+### What the retry does NOT protect against, and how to triage the first red run
+
+The scenario's tolerances were measured on a workstation. Emulating a 2-vCPU runner with `taskset`:
+
+| | lines | ENTER | ENTER_REPLY | LEAVE | TRAVEL_START | TRAVEL_END | PATH_FIND |
+|---|---|---|---|---|---|---|---|
+| unloaded, 3/3 runs | 623 | 38 | 38 | 35 | 18 | 15 | 15 |
+| **saturated, 3/3 runs** | 607 | **36** | **36** | **33** | **17** | **14** | **14** |
+
+Two things follow, and the second is the one that matters.
+
+* An **idle** hosted runner should reproduce the golden exactly.
+* The saturated deficit is **reproducible, not random** — identical in every run. So a runner
+  systematically slower than that produces a *deterministic* count deficit that fails **both**
+  attempts. The retry gives no protection against this, and it will look exactly like drift. Five
+  of the thirteen summary rules are already down to a margin of one line at the saturated floor.
+
+The election families (`VOTE_REQUEST`/`VOTE`/`VOTE_RESULT`/`PLAN_TRAIN`/`START` = 93/93/93/9/5) are
+rock-stable under saturation. Only the movement families move.
+
+**So triage the first red run on the hosted runner this way:** read the counts out of the failure
+report and compare them against the saturated floor **36 / 36 / 33 / 17 / 14 / 14**. Counts at or
+near that floor are the runner being slow, not the baseline drifting — re-measure the tolerances on
+the runner and widen them from the measurement, per the scenario file's own rule that tolerances are
+measurements rather than slack. Counts *below* the floor, or any movement in the election families,
+is a real signal.
+
 ---
 
 ## 5. Evidence
@@ -151,11 +209,15 @@ attempt-<n>/test-results/       that attempt's JUnit XML
 attempt-<n>/reports/            that attempt's HTML report
 parity-tests/golden/            the goldens the run was compared against
 parity-tests/scenarios/         the scenario definitions it ran
-parity-scratch/                 the directory the child JVM actually ran in
+parity-scratch/                 the directory the child JVM ran in (staged cybelle/*.prop only)
 ```
 
 Each attempt's reports are copied out **before** the next attempt overwrites them, so a
 retry-then-pass run still ships the failing attempt.
+
+`parity-scratch/` is smaller than it sounds: the captured child output lives in the failure report,
+not on disk, so what is there is the staged kernel configuration. It answers "did the child get the
+`cybelle/*.prop` it needed?" and nothing more.
 
 ---
 
@@ -194,14 +256,40 @@ push-triggered workflow is read from the tree of the ref that was pushed, and th
 no `.github/` and no harness, so listing it would change nothing. A push straight to the baseline,
 the exact event this job exists to catch, does not trigger it. The nightly `schedule` is the cover.
 
-**And a caveat on the cover.** GitHub only ever runs `schedule` and `workflow_dispatch` from the
-workflow file as it exists on the **default branch**. Until this file is merged to `develop`, both
-of those triggers are inert and `push`/`pull_request` are doing all the work. Nothing needs changing
-when that merge happens — they simply start firing. Until then, the practical guard on a baseline
-change is that it reaches `jade-develop`/`develop` through a pull request.
+**And two caveats on the cover.**
 
-`concurrency` is keyed on the workflow and the ref with `cancel-in-progress: true`, so a new push
-to a branch cancels the superseded run and two branches never cancel each other.
+*The default-branch rule.* GitHub reads `schedule` from the workflow file as it exists on the
+**default branch** only, so until this file is on `develop` the nightly does not fire at all.
+`workflow_dispatch` is subtly different and the distinction is worth getting right: the *trigger*
+must be defined on the default branch for the workflow to be dispatchable, but the run then executes
+the file **from the ref you dispatch against**. Until the merge, `push`/`pull_request` are doing all
+the work; nothing needs changing when it happens — the other two simply start firing.
+
+*Cherry-picking this file alone would not help.* `origin/develop` today carries no `.github/`, no
+`parity-tests/` and no `src/characterizationIT/`, and a scheduled run checks out the triggering ref
+(no `ref:` on the first checkout). Dropping just this workflow onto `develop` would therefore
+produce a nightly that dies at `characterizationIT` with nothing to run. The nightly becomes
+meaningful only when the harness reaches `develop` wholesale.
+
+**The alternatives were checked and are worse.** A `pull_request` trigger targeting
+`opencybele-baseline` does not help: for `pull_request` GitHub resolves workflows from the merge
+ref, so with a base carrying no `.github/` only a head branch carrying the workflow would trigger
+anything. A job on `jade-develop` that inspects the baseline's head SHA still needs a trigger to
+run on, which reduces to this same nightly, and would additionally have to persist state to notice
+a *change* rather than a state.
+
+**The recommended companion is a repo setting, not a workflow change:** branch protection on
+`opencybele-baseline`, which *prevents* the unreviewed push rather than detecting it up to 24 h
+later. That is the real fix for this gap; the nightly is the detector of last resort.
+
+`concurrency` is keyed on the workflow, **the event** and the ref, with `cancel-in-progress: true`.
+The event is in the group deliberately: without it a scheduled run and a push run on `develop` share
+`refs/heads/develop`, so a 03:17 push would cancel the nightly — the one run that is the sole cover
+for the gap above. Note that `cancel-in-progress: ${{ github.event_name != 'schedule' }}` does *not*
+fix this, although it reads as though it should: GitHub evaluates that property on the run being
+*queued*, so the push (whose own value is `true`) would still cancel the running nightly. Separating
+the groups is what keeps them from contending. Within pushes, a newer commit still cancels the
+superseded run, and two branches still never cancel each other.
 
 ---
 
@@ -217,6 +305,13 @@ to a branch cancels the superseded run and two branches never cancel each other.
 * `cache-read-only` is set explicitly to `github.event_name == 'pull_request'`. The action's own
   default is "read-only unless this is the default branch", which on `jade-develop` would mean the
   cache is never written and every run is cold.
+* The `~/.m2` `actions/cache` step deliberately carries **no** matching pull-request read-only
+  guard, which is an inconsistency with the line above rather than a hole. Two reasons: GitHub's own
+  cache scoping already stops a pull-request branch's entry from being read by the base branch, and
+  more importantly the content is re-verified on every run — the bootstrap restores the jars from
+  the `withoutGradle` tag and `cmp`s them against whatever the cache produced, so a poisoned entry
+  is overwritten rather than used (§2). A guard here would buy nothing that the content check does
+  not already buy.
 
 ---
 
@@ -240,7 +335,10 @@ The workflow is a wrapper around five commands. From two checkouts side by side:
 ```
 
 Measured on a cold clone with an empty local Maven repository and `DISPLAY` unset: bootstrap
-instant, `installDist` ~5 s, the suite ~19 s, 31 tests, 0 skipped.
+instant, `installDist` ~5–6 s, the suite ~19 s, 31 tests, 0 skipped, `OpenCybeleSmokeIT` passed.
+Both installer paths inside the bootstrap were exercised — with Maven on `PATH` (3.9.16, the
+`mvn install:install-file` route the hosted runner takes) and without it (the built-in copy route) —
+and the full suite is green after either.
 
 ---
 
