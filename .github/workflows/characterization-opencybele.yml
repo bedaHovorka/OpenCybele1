@@ -1,0 +1,330 @@
+# characterizationIT@opencybele -- the L3 golden-master parity suite, run against the frozen
+# OpenCybele baseline (issue #25, Phase1.md 1-PRE.4).
+#
+# This is the repository's FIRST workflow. What it guards is narrow and specific: the baseline is
+# declared frozen for the whole migration, and every golden the port is later measured against was
+# recorded from it. If the baseline drifts, the goldens stop describing anything and the drift is
+# discovered as a mysterious diff during the port. This job makes that drift a red build instead.
+#
+# THREE THINGS ABOUT THIS PROJECT THAT A NAIVE WORKFLOW GETS WRONG. All three are measured; see
+# docs/ci.md for the full write-up.
+#
+#   1. The harness and the application live on DIFFERENT BRANCHES (decision #11). The parity
+#      harness is on `jade-develop`; the OpenCybele implementation is on `opencybele-baseline`, and
+#      `OpenCybeleLauncher` (#13) reaches it BY PATH as a child JVM, with no compile dependency.
+#      So this job checks out both, builds the application on one, and runs the suite on the other
+#      pointed at it with `-Popencybele.dist`.
+#
+#   2. The vendor jars are not in git. `Cybele.jar`/`CybeleImpl.jar` are 2008-era IAI binaries with
+#      no public Maven repo, excluded by .gitignore and reachable only through the `withoutGradle`
+#      tag. `scripts/bootstrap-vendor-jars.sh` (#14, on the baseline branch) recovers and installs
+#      them, and works with no `mvn` on PATH. It is the single call this workflow makes; the
+#      install commands are NOT duplicated here.
+#
+#   3. A green Gradle exit does not mean a good run. Without `-Popencybele.dist` the end-to-end
+#      test is SKIPPED by `assumeTrue` and Gradle still reports BUILD SUCCESSFUL -- measured on
+#      this repo. So the run is not believed until `.github/scripts/parity-junit.sh assert-ran`
+#      has read the JUnit XML and confirmed the scenario executed.
+#
+# No secrets, no tokens, no network beyond the Gradle/JDK downloads the actions do themselves.
+
+name: characterizationIT
+
+on:
+  push:
+    # `develop` is the default branch and the one Phase1.md 1-PRE.4 names; `jade-develop` is where
+    # the harness actually lives today and where this file lands first. Feature branches are NOT
+    # listed on purpose -- they get this job through their pull request instead, which halves the
+    # number of runs for the same coverage.
+    #
+    # NOT LISTED, AND IT MATTERS: `opencybele-baseline`. A push-triggered workflow is read from the
+    # tree of the ref that was pushed, and that branch carries no `.github/` and no harness, so
+    # listing it would change nothing. A push to the baseline -- the exact event this job exists to
+    # catch -- therefore does not trigger it. The `schedule` below is the cover for that; see the
+    # caveat on it.
+    branches:
+      - develop
+      - jade-develop
+  pull_request:
+    branches:
+      - develop
+      - jade-develop
+
+  # Nightly, to cover the case above: a change to `opencybele-baseline` that no pull request into
+  # `develop`/`jade-develop` ever touched.
+  #
+  # CAVEAT, stated rather than hidden: GitHub only ever runs `schedule` and `workflow_dispatch` from
+  # the workflow file as it exists on the DEFAULT branch. Until this file is merged to `develop`,
+  # both of these triggers are inert -- `push`/`pull_request` are the ones doing the work. Nothing
+  # here needs changing when that merge happens; they simply start firing.
+  schedule:
+    - cron: '17 3 * * *'
+
+  workflow_dispatch:
+    inputs:
+      opencybele-ref:
+        description: 'Branch, tag or SHA of the OpenCybele application to run the suite against.'
+        required: false
+        default: 'opencybele-baseline'
+
+# A superseded push is not worth a runner. Keyed on the ref, so two branches never cancel each
+# other, and in-progress runs of the same branch are cancelled when a newer commit lands.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only. This job reads two branches and writes nothing back; it needs no token beyond the one
+# `actions/checkout` uses to clone.
+permissions:
+  contents: read
+
+env:
+  # Where each of the two checkouts lands, relative to the workspace.
+  HARNESS_DIR: harness
+  OPENCYBELE_DIR: opencybele
+  # Everything a failed run should be able to show afterwards is collected here.
+  EVIDENCE_DIR: ci-evidence
+  # See "the retry, and why there is one" on the run step. 1 disables retrying.
+  MAX_ATTEMPTS: '2'
+
+jobs:
+  characterization-it:
+    # The name the milestone refers to, and the shape #40 (@jade) and #52 (@jason) will clone:
+    # same steps, a different implementation checkout and a different `-P<impl>.dist`.
+    name: characterizationIT@opencybele
+    runs-on: ubuntu-24.04
+    # Measured end to end locally at ~30 s of Gradle work (6 s to build the application, 20 s for
+    # the suite). 20 minutes is a runaway guard, not a budget: the scenario's own harness timeout is
+    # 120 s per attempt and the child's wall-clock net is 60 s, so anything approaching this ceiling
+    # is a stuck runner rather than a slow suite.
+    timeout-minutes: 20
+
+    steps:
+      # ---------------------------------------------------------------------------------------
+      # 1 -- the two checkouts.
+      # ---------------------------------------------------------------------------------------
+      - name: Check out the parity harness (this ref)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: ${{ env.HARNESS_DIR }}
+
+      - name: Check out the OpenCybele application
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.opencybele-ref || 'opencybele-baseline' }}
+          path: ${{ env.OPENCYBELE_DIR }}
+          # REQUIRED, and this is the one place the default is wrong. The vendor jars are recovered
+          # by `git checkout withoutGradle -- cybelle/*.jar`, so this clone needs the tag and the
+          # commit it points at. The default shallow, single-branch fetch has neither, and the
+          # bootstrap script's own `git fetch --tags` fallback cannot repair a shallow clone.
+          fetch-depth: 0
+
+      # ---------------------------------------------------------------------------------------
+      # 2 -- the toolchain. JDK 21 is what `build.gradle.kts` pins on both branches; providing it
+      #      here keeps Gradle's toolchain resolution local (no auto-provisioning download).
+      # ---------------------------------------------------------------------------------------
+      - name: Set up JDK 21
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          # Caches the wrapper distribution and the dependency caches, and validates every
+          # `gradle-wrapper.jar` in the workspace against Gradle's published checksums -- worth
+          # having in a repository that ships two committed wrapper jars and has never had CI.
+          validate-wrappers: true
+          # The open-source GitHub Actions cache rather than the default commercial service: this
+          # job must not depend on a third party or on any credential.
+          cache-provider: basic
+          # The action's own default is "read-only unless this is the default branch", which on
+          # `jade-develop` would mean the cache is never written and every run is a cold one.
+          # Write from a push, read from a pull request (a PR cannot be allowed to poison the
+          # cache other branches read).
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      # ---------------------------------------------------------------------------------------
+      # 3 -- the vendor jars.
+      # ---------------------------------------------------------------------------------------
+      - name: Restore the local Maven repository
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          # Narrow on purpose. Only the two vendored artifacts are installed here; everything else
+          # Gradle resolves goes to the Gradle caches the step above manages.
+          path: ~/.m2/repository/com/iai
+          key: m2-com-iai-${{ runner.os }}-${{ hashFiles(format('{0}/scripts/bootstrap-vendor-jars.sh', env.OPENCYBELE_DIR)) }}
+          restore-keys: |
+            m2-com-iai-${{ runner.os }}-
+
+      - name: Bootstrap the vendored Cybele jars
+        working-directory: ${{ env.OPENCYBELE_DIR }}
+        # ONE call. The script recovers cybelle/*.jar from the `withoutGradle` tag if they are not
+        # in the working tree (they never are -- .gitignore excludes them), then installs them as
+        # com.iai:cybele-api:1.0 / com.iai:cybele-impl:1.0. It uses `mvn install:install-file` when
+        # Maven is on PATH (it is, on ubuntu-24.04) and writes the repository layout directly when
+        # it is not; both paths produce the same on-disk result. It is idempotent, so a cache hit
+        # above turns this into a verified no-op rather than a skipped step.
+        run: scripts/bootstrap-vendor-jars.sh
+
+      - name: Verify the local Maven repository
+        working-directory: ${{ env.OPENCYBELE_DIR }}
+        # Separate from the install so the log distinguishes "installed" from "present and
+        # matching" -- the failure this catches is a stale cache entry that no longer matches the
+        # jars in the tag.
+        run: scripts/bootstrap-vendor-jars.sh --verify-only
+
+      # ---------------------------------------------------------------------------------------
+      # 4 -- build the application. `installDist` (not `build`) because that is the layout
+      #      OpenCybeleLauncher drives: build/install/opencybele/lib/*.jar, with the two vendor
+      #      jars copied in beside the application jar.
+      # ---------------------------------------------------------------------------------------
+      - name: Build the OpenCybele application (installDist)
+        working-directory: ${{ env.OPENCYBELE_DIR }}
+        run: ./gradlew --no-daemon --console=plain --stacktrace installDist
+
+      - name: Show what will be driven
+        run: |
+          set -euo pipefail
+          dist="$GITHUB_WORKSPACE/$OPENCYBELE_DIR/build/install/opencybele"
+          echo "application commit : $(git -C "$OPENCYBELE_DIR" rev-parse HEAD)"
+          echo "harness commit     : $(git -C "$HARNESS_DIR" rev-parse HEAD)"
+          echo "dist               : $dist"
+          ls -l "$dist/lib"
+          # Evidence that this is a headless run and needs no display. The application is a Swing
+          # app; the scenario passes sim.headless=true, and with no DISPLAY the JVM is headless of
+          # its own accord. Deliberately NO Xvfb: a virtual display is not the supported path here
+          # (#17), and standing one up "to be safe" would hide a regression in headless mode and
+          # contaminate the timing variance the goldens were measured against.
+          printf '%-19s: %s\n' DISPLAY "${DISPLAY:-<unset>}"
+          if [ -n "${DISPLAY:-}" ]; then
+            echo "::warning::DISPLAY is set on this runner. The suite is supposed to run with no display."
+          fi
+          # OpenCybeleLauncher refuses to launch when any of these is set, because the JVM would
+          # append flags nobody declared and announce it on stderr -- straight into the trace.
+          for leaky in JAVA_TOOL_OPTIONS _JAVA_OPTIONS JDK_JAVA_OPTIONS; do
+            printf '%-19s: %s\n' "$leaky" "${!leaky:-<unset>}"
+          done
+
+      # ---------------------------------------------------------------------------------------
+      # 5 -- the suite.
+      # ---------------------------------------------------------------------------------------
+      - name: Run characterizationIT against the OpenCybele baseline
+        working-directory: ${{ env.HARNESS_DIR }}
+        # THE RETRY, AND WHY THERE IS ONE.
+        #
+        # The baseline carries a measured, un-fixable-in-Phase-1 nondeterminism: DEF-22, an
+        # unbounded `latch.await()` in `Planning`, wedges the election at roughly 1 run in 45 at the
+        # stock configuration (docs/defect-triage.md). A wedged run still exits 0 -- generation
+        # keeps going, the clock bound still fires -- so it surfaces as a liveness or count failure
+        # that looks exactly like real behavioural drift. There is no fingerprint that separates
+        # the two. Re-running is the only test that does: drift is deterministic and fails again,
+        # a wedge is a race and almost certainly does not.
+        #
+        # So: at most MAX_ATTEMPTS attempts, and the retry is DELIBERATELY NARROW.
+        #   * Only the end-to-end class is retried. A failure in HarnessSelfCheckIT,
+        #     ScenarioCatalogIT or SmokeScenarioIT is in-process and deterministic; those fail once
+        #     and stay failed.
+        #   * A retry is never silent. It raises a ::warning, writes a line into the job summary,
+        #     and keeps the failed attempt's log and reports as an artifact. A green run that
+        #     needed two attempts is a run somebody has to look at.
+        #   * Two consecutive failures of the same scenario is a p ~ 5e-4 coincidence at the
+        #     measured rate. That is a regression, and it goes red.
+        run: |
+          # GitHub runs `run:` blocks as `bash -e {0}`, and this step has to survive a failing
+          # command in order to decide what to do about it. errexit off, deliberately; every
+          # status is checked by hand below.
+          set +e
+          set -uo pipefail
+          evidence="$GITHUB_WORKSPACE/$EVIDENCE_DIR"
+          results="build/test-results/characterizationIT"
+          junit="$GITHUB_WORKSPACE/$HARNESS_DIR/.github/scripts/parity-junit.sh"
+          chmod +x "$junit"
+          mkdir -p "$evidence"
+
+          status=1
+          attempts=0
+          for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
+            attempts="$attempt"
+            log="$evidence/attempt-$attempt.log"
+            echo "::group::characterizationIT -- attempt $attempt of $MAX_ATTEMPTS"
+            ./gradlew --no-daemon --console=plain --stacktrace characterizationIT \
+                -Popencybele.dist="$GITHUB_WORKSPACE/$OPENCYBELE_DIR/build/install/opencybele" \
+                2>&1 | tee "$log"
+            status="${PIPESTATUS[0]}"
+            echo "::endgroup::"
+
+            # Preserve this attempt's reports before the next one overwrites them.
+            mkdir -p "$evidence/attempt-$attempt"
+            [ -d "$results" ] && cp -r "$results" "$evidence/attempt-$attempt/test-results"
+            [ -d build/reports/tests ] && cp -r build/reports/tests "$evidence/attempt-$attempt/reports"
+
+            if [ "$status" -eq 0 ]; then
+              break
+            fi
+            if [ "$attempt" -ge "$MAX_ATTEMPTS" ]; then
+              echo "::error::characterizationIT failed on all $MAX_ATTEMPTS attempt(s)."
+              break
+            fi
+            if ! "$junit" smoke-failed "$results"; then
+              echo "::error::characterizationIT failed, and the failure is NOT in the end-to-end" \
+                   "scenario. Harness tests are deterministic and are not retried."
+              break
+            fi
+            echo "::warning::The end-to-end scenario failed on attempt $attempt. Retrying once:" \
+                 "the baseline wedges at ~1 run in 45 (DEF-22) with a failure that is" \
+                 "indistinguishable from real drift except by re-running. See docs/ci.md."
+            echo "PARITY_RETRIED=true" >> "$GITHUB_ENV"
+          done
+
+          {
+            echo "### characterizationIT@opencybele"
+            echo
+            echo "* attempts: **$attempts** of $MAX_ATTEMPTS"
+            echo "* final Gradle status: \`$status\`"
+            if [ "$attempts" -gt 1 ]; then
+              echo "* :warning: **This run needed a retry.** The first attempt's log and reports are"
+              echo "  in the \`characterizationIT-opencybele-evidence\` artifact. Confirm it was the"
+              echo "  DEF-22 wedge and not a real regression before ignoring it."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$status"
+
+      # ---------------------------------------------------------------------------------------
+      # 6 -- the assertion the exit status cannot make.
+      # ---------------------------------------------------------------------------------------
+      - name: Assert the end-to-end scenario RAN (and was not skipped)
+        working-directory: ${{ env.HARNESS_DIR }}
+        run: |
+          set -euo pipefail
+          chmod +x .github/scripts/parity-junit.sh
+          .github/scripts/parity-junit.sh assert-ran build/test-results/characterizationIT
+
+      # ---------------------------------------------------------------------------------------
+      # 7 -- evidence. This suite's failures are trace diffs and count mismatches; a red run with
+      #      nothing to read is nearly useless. The failure report the harness raises carries the
+      #      diff, the exit disposition, the exact child command line and the last 20 captured
+      #      lines, and it reaches all three of the captured log, the JUnit XML and the HTML report.
+      # ---------------------------------------------------------------------------------------
+      - name: Collect the golden and the scenario alongside the failure
+        if: ${{ failure() || env.PARITY_RETRIED == 'true' }}
+        run: |
+          set -uo pipefail
+          evidence="$GITHUB_WORKSPACE/$EVIDENCE_DIR"
+          mkdir -p "$evidence/parity-tests"
+          cp -r "$HARNESS_DIR/parity-tests/golden" "$evidence/parity-tests/" 2>/dev/null || true
+          cp -r "$HARNESS_DIR/parity-tests/scenarios" "$evidence/parity-tests/" 2>/dev/null || true
+          # The scratch directory the child ran in: staged cybelle/*.prop, and whatever the run
+          # left behind. Small, and the first thing to look at when the child would not start.
+          cp -r "$HARNESS_DIR/build/parity-scratch" "$evidence/" 2>/dev/null || true
+
+      - name: Upload the run evidence
+        if: ${{ failure() || env.PARITY_RETRIED == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: characterizationIT-opencybele-evidence
+          path: ${{ env.EVIDENCE_DIR }}
+          if-no-files-found: warn
+          retention-days: 14
