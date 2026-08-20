@@ -79,6 +79,17 @@ class OpenCybeleCharacterizationIT {
 }
 ```
 
+> **Assertion failures land inside this captured trace.** `redirectErrorStream(true)`
+> above merges stderr into `raw`, and with `-ea` on (the OpenCybele baseline default) a
+> firing assertion prints its stack trace there — so `TraceNormalizer` will happily
+> normalize a broken invariant into invisibility, or `golden.record` will bake it into a
+> golden as expected output. **The runner must fail fast on `AssertionError` /
+> `Exception in thread "` in `raw`, before calling `normalize()`.** Note also that the
+> process exit status never reflects any of this, that one handler failure prints
+> `AssertionError` twice, and that a throwable in a timer handler stops the simulation
+> permanently while still looking healthy. Full mechanism and evidence:
+> [`assertion-triage.md`](assertion-triage.md) § Result 3.
+
 `TraceNormalizer` is the critical piece — it must strip everything nondeterministic:
 - timestamps → `<TS>`; thread names/ids → `<THREAD>`; message ids/UUIDs → `<ID>`; absolute paths, ports, hostnames;
 - optionally **sort or bucket interleaved lines** (e.g. group by agent name, or sort within a tick) because concurrent agents interleave output differently per run. A robust trick: have each log line carry `agent|tick|event|payload`, then sort lines with equal tick.
@@ -87,6 +98,8 @@ Libraries that help: **ApprovalTests-java** (golden-file management with diff-on
 
 ### 3.3 If pure log capture isn't enough: probe agent inside the Cybele community
 If the interesting behavior is *messages between agents* and it isn't logged, add one **observer/probe agent** to the Cybele configuration (a minimal agent whose only activity is: on every message it receives — or every broadcast/topic it can subscribe to — append a canonical line `from|to|performative|content` to a trace file). This is a small, additive change to the legacy system (new agent + config entry, no edits to existing agents), and the same probe concept ports 1:1 to JADE and Jason later, so traces stay comparable across stages.
+
+> **Done, on `opencybele-baseline`** ([#20](https://github.com/bedaHovorka/OpenCybele1/issues/20)): `TraceProbe`, enabled with `sim.trace.enabled=true` and off by default. It taps all fifteen channels (`docs/INVENTORY.md` CH-01…CH-15), not just the ones with an obvious reply leg, and emits `agent|tick|event|from|to|performative|payload` — one field wider than the sketch above, because `agent` (the entity the line is *about*) is what makes the harness' `causal` per-entity projection work, and `performative` has to exist-but-be-empty on this branch or every line diffs once JADE populates it. The format, and the three hazards it exists to get right, are [`trace-format.md`](trace-format.md).
 
 ### 3.4 Scenario specs as data
 Keep each scenario as a data file (YAML/properties): initial config, stimuli (what the driver injects and when), stop condition, and the golden trace name. The same specs are replayed against the JADE/Jason implementation — only the launcher command changes. That's the whole parity harness.

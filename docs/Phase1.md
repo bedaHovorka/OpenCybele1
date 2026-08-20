@@ -31,7 +31,7 @@ Goal: pin current behavior so completely that the JADE port can be judged mechan
 
 ### 1-PRE.2 Determinism work on `develop` (allowed, minimal, non-behavioral)
 - [ ] Fix random seeds via config/system property.
-- [ ] Make timer periods configurable (shortened in tests); bounded stop condition per scenario (max ticks / max messages / timeout).
+- [ ] Make timer periods configurable (shortened in tests); bounded stop condition per scenario (max ticks / max messages / timeout). *Timer periods and the rest of the parameter surface: done in [#18](https://github.com/bedaHovorka/OpenCybele1/issues/18), see [`scenario-config.md`](scenario-config.md). Stop condition: still open, [#17](https://github.com/bedaHovorka/OpenCybele1/issues/17).*
 - [ ] If message traffic is not observable in logs: add the **probe agent** (T§3.3) — additive only (new agent + config entry), emitting canonical lines `agent|tick|event|from|to|performative|payload`.
 - [ ] Re-run each scenario ≥5×; iterate on `TraceNormalizer` (strip TS/thread/ids, sort within tick) until byte-identical output. **Gate:** zero flake across ≥10 consecutive runs per scenario.
 

@@ -22,24 +22,34 @@ import cybele.kernel.Handler;
 
 /**
  * This is one activity of main agent.
- * Each LAMBDA seconds with exponencial distribution of probability generate new train
+ * Each {@code sim.arrival.lambdaMs} milliseconds with exponencial distribution of
+ * probability generate new train.
+ * <p>
+ * This used to be {@code public static final int LAMBDA = 8500}, read both here
+ * <em>and</em> by {@link Station#computeDifference(String, long)}. The two uses are now
+ * separate parameters — {@code sim.arrival.lambdaMs} and {@code sim.station.voteWindowMs} —
+ * so a scenario can shorten the arrival rate without moving the station scheduling
+ * policy under it. Both default to 8500. See {@code docs/scenario-config.md}.
  * 
  * @author Bedrich Hovorka
  */
 public class Generator implements Handler {
-    /**
-     * 
-     */
-    public static final int LAMBDA = 8500;
     private static final long serialVersionUID = 1L;
     
     // EXTENSION jak delat ruseni?
     private Map<String, String> openedChannels = Collections.synchronizedMap(new HashMap<String, String>());
-    private Serializable[][] hhh = new Serializable[][]{{"stA", "stB"}, {"stA", "stC"}, 
-	    {"stB", "stA"}, {"stB", "stC"}, {"stC", "stB"}, {"stC", "stA"}};
+    private final Serializable[][] hhh;
+    private final long lambda;
  
     private int index = 0;
-    private static final Random random = new Random();
+    /**
+     * Stream for the origin/destination choice. It used to be a {@code static final Random}
+     * shared with every {@link RoadAgent} and published through {@code getRandom()}; see
+     * {@link SimRandom} for why that could not be made reproducible by seeding alone.
+     */
+    private final Random odRandom;
+    /** Stream for the exponential inter-arrival time. Separate on purpose — see {@link SimRandom}. */
+    private final Random interarrivalRandom;
     private RailwayMainAgent mainAgent;
     
     /**
@@ -47,7 +57,12 @@ public class Generator implements Handler {
      */
     public Generator(RailwayMainAgent mainAgent) {
 	this.mainAgent = mainAgent;
-	Activity.setTimer(RailwayMainAgent.CLOCK_ID, 1000, this, "generateTrain");
+	final ScenarioConfig config = ScenarioConfig.get();
+	this.hhh = config.getTrainPairs();
+	this.lambda = config.getArrivalLambdaMs();
+	this.odRandom = SimRandom.forAgent(SimRandom.GENERATOR_OD_STREAM);
+	this.interarrivalRandom = SimRandom.forAgent(SimRandom.GENERATOR_INTERARRIVAL_STREAM);
+	Activity.setTimer(RailwayMainAgent.CLOCK_ID, config.getArrivalFirstFireMs(), this, "generateTrain");
     }
     
     /**
@@ -57,23 +72,22 @@ public class Generator implements Handler {
     public void generateTrain(CybeleEvent ev) {
 	final String train = "vl" + index;
 	final String channelTicket = Activity.openChannel(RailwayMainAgent.CHANNEL_TRAIN_STATE+train, "recieveTrainState", mainAgent);
-	final Serializable[] serializables = hhh[random.nextInt(hhh.length)];
+	// Adding or reordering a draw on this stream re-aligns every later value of it.
+	final Serializable[] serializables = hhh[odRandom.nextInt(hhh.length)];
 	Cybele.createAgent(train, Train.class.getName(), serializables);
 	openedChannels.put(train, channelTicket);
 	index++;
 	Activity.sendAll(Planning.PLAN_TRAIN, new Serializable[]{train, serializables[0], serializables[1]});
-	Activity.setTimer(RailwayMainAgent.CLOCK_ID, exp(LAMBDA), this, "generateTrain");
+	// sim.stop.maxTrains is enforced here rather than by the watchdog, so the bound is
+	// exact: the run generates that many trains and not one more. With the key unset
+	// this always returns true and the timer re-arms exactly as it always did.
+	if (RunControl.trainGenerated(index)) {
+	    Activity.setTimer(RailwayMainAgent.CLOCK_ID, exp(lambda), this, "generateTrain");
+	}
     }
     
-    private long exp(double lambda) {
-        return Math.round(-lambda * Math.log(random.nextDouble()));
-    }
-
-    /**
-     * get random
-     * @return random object
-     */
-    public static Random getRandom() {
-        return random;
+    private long exp(double mean) {
+        // Adding or reordering a draw on this stream re-aligns every later value of it.
+        return Math.round(-mean * Math.log(interarrivalRandom.nextDouble()));
     }
 }

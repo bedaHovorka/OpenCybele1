@@ -23,6 +23,14 @@ import cz.vutbr.fit.ags.xhovor07.util.TreeMultiMap;
 
 /**
  * Agent represents station
+ * <p>
+ * {@link #computeDifference(String, long)} schedules against a <em>voting window</em>
+ * ({@code sim.station.voteWindowMs}). Before #18 that window was
+ * {@code Generator.LAMBDA} — the very same constant as the generator's mean
+ * inter-arrival time — so shortening the arrival rate for a test silently rewrote
+ * this station's scheduling policy as well. The two are now independent parameters
+ * with the same default (8500 ms). See {@code docs/scenario-config.md}.
+ *
  * @author Bedrich Hovorka
  *
  */
@@ -36,6 +44,7 @@ public class Station extends StaticRailwayObject {
     private Map<String, String> pathDirs = new HashMap<String, String>();//prubezne vytvarene znalosti o siti <stanice, jakou trati>
     private final Queue<QueueItem> queue = new LinkedList<QueueItem>();
     private final TreeMultiMap<Long, String> timetable = new TreeMultiMap<Long, String>();
+    private final long voteWindow = ScenarioConfig.get().getStationVoteWindowMs();
     private Info info;
 
     /**
@@ -128,15 +137,15 @@ public class Station extends StaticRailwayObject {
     @SuppressWarnings("boxing")
     @Override
     protected synchronized long computeDifference(String train, long time) {
-	final long timePlusLambda = time+Generator.LAMBDA;
-	final int plannedTrains = timetable.subMultiMap(time-Generator.LAMBDA, timePlusLambda).values().size();
+	final long timePlusLambda = time+voteWindow;
+	final int plannedTrains = timetable.subMultiMap(time-voteWindow, timePlusLambda).values().size();
         if (plannedTrains > info.capacity-1) {//jedno misto pro rezervu
             final int size = timetable.tailSubMultiMap(timePlusLambda).values().size();
             return timetable.lastKey() + 
             	((timePlusLambda < timetable.lastKey() && size <= info.capacity-1) ? 
-            		-Generator.LAMBDA/3 : Generator.LAMBDA/3) - time;
+            		-voteWindow/3 : voteWindow/3) - time;
         }
- 	return plannedTrains*Generator.LAMBDA/6;
+ 	return plannedTrains*voteWindow/6;
     }
     
     @SuppressWarnings("boxing")

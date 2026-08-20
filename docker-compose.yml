@@ -8,6 +8,10 @@ services:
     environment:
       DISPLAY: ${DISPLAY:-host.docker.internal:0}
       XAUTHORITY: /tmp/.docker.xauth
+      # Scenario configuration, appended to the start script's JVM args, e.g.
+      #   OPENCYBELE_OPTS=-Dsim.config=scenarios/short.properties docker compose up app
+      # See docs/scenario-config.md.
+      OPENCYBELE_OPTS: ${OPENCYBELE_OPTS:-}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${XAUTHORITY:-$HOME/.Xauthority}:/tmp/.docker.xauth:ro
