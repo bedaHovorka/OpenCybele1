@@ -72,7 +72,7 @@ git checkout jade-develop                     # the commit that added this manif
 ## 2. Summary — the five goldens
 
 
-| scenario | golden lines | golden SHA-256 (first 16) | trace digest (first 16) | trains generated | departures | final tick |
+| scenario | golden lines | golden SHA-256 (first 16) | trace digest (first 16) | trains generated | departures | final tick (observed) |
 |---|---|---|---|---|---|---|
 | `opencybele-strict` | 607 | `84b51584a40b9614` | `0410d72d933bbddb` | 9 | 5 | 24024 ms |
 | `opencybele-lifecycle` | 84 | `2e7d34242acebcc9` | `acc212d84c66d69b` | 2 | 2 | 40032 ms |
@@ -191,10 +191,26 @@ and exits **0** with a clean stream and a truncated departure stream — roughly
 `sim.stop.stallMs` structurally cannot catch it (it measures the gap between *generated* trains, and
 generation is the half that keeps working).
 
-So a run is accepted only if it reaches **its expected departure count** *and* **its expected final
-tick**. Both figures are per scenario in §10 and were read from the raw stop banner, which the
-normalizer strips (`--- ` and `!!! ` prefixed lines are diagnostics) and which therefore cannot be
-recovered from the golden itself:
+So a run is accepted only if **both** of the following hold, read from the raw stop banner — which
+the normalizer strips (`--- ` and `!!! ` prefixed lines are diagnostics) and which therefore cannot
+be recovered from the golden itself:
+
+1. **It reached its expected departure count** (per scenario in §10). This is the half that catches
+   DEF-22: a wedge truncates the departure stream, and nothing else in the accept path sees it.
+2. **It stopped because it reached its bound** — `reason = sim.stop.maxClockMs reached`, exit **0**,
+   and `simulated clock` **≥ `sim.stop.maxClockMs`**.
+
+**The exact tick is *not* an invariant, and must not be used as one.** `RunControl` polls the clock
+and stops on the first observation of `>= maxClockMs`, so the banner's `simulated clock` is the tick
+the poll happened to see, quantised to the 8 ms tick — measured across repeat runs at
+`opencybele-strict`: 24024, 24040, 24064, 24072, and at `opencybele-capacity`: 27712, 27728, 27732
+(found in review of #24, and reproduced independently — two further `opencybele-strict` runs gave
+24072 and 24040 with 9 trains generated and 5 departures in both, the recorded values).
+Departure count, trains generated, exit status and the discard scan were identical in every one of
+those runs, and the golden is untouched by the jitter because the banner never reaches the trace. A
+future recorder who reads §10's figure as an equality would discard healthy runs, or conclude the
+baseline had drifted when it had not. The figures in §10 are therefore labelled **observed**, and the
+criterion is the inequality above.
 
 ```
 --- simulation stop ---
@@ -255,11 +271,11 @@ against the committed bytes.
 
 | check | command | result |
 |---|---|---|
-| full suite against the committed goldens | `./gradlew characterizationIT -Popencybele.dist=…` | **65 tests, 0 failures**, 5 skipped (`ParityGateIT`, opt-in). All five `OpenCybele*IT` scenarios passed at `strict` |
+| full suite against the committed goldens | `./gradlew characterizationIT -Popencybele.dist=…` | **69 tests, 0 failures**, 5 skipped (`ParityGateIT`, opt-in — 64 executed). All five `OpenCybele*IT` scenarios passed at `strict` |
 | 10 consecutive runs per scenario, each compared against its golden | `./gradlew parityGate -Popencybele.dist=… -Dparity.gate.runs=10 -Dparity.gate.ledger=…` | **5 × 10 = 50 runs, 1 distinct trace per scenario, 0 divergences, 0 golden mismatches** |
 | digests against the ones #23 wrote into `COVERAGE.md` §2.1 | by hand | **all five identical** — `0410d72d933bbddb`, `acc212d84c66d69b`, `7d79066aad6f62a4`, `48fbb42cc6da692c`, `1e056ae970eb4b27` |
 | line counts against the committed golden files | `wc -l` | **identical** — 607 / 84 / 183 / 176 / 230 |
-| departure count and final tick per scenario | one raw run per scenario, stop banner read directly | **all five reached their expected departure count and their bound**; see §10 |
+| departure count and stop reason per scenario | one raw run per scenario, stop banner read directly | **all five reached their expected departure count, exited 0 and stopped on `sim.stop.maxClockMs reached` with the clock past the bound**; see §7 for why the exact tick is not part of the criterion, and §10 for the figures |
 | fresh clone at the tag | see §12 | **reproduced byte-for-byte** |
 
 `ScenarioRunner` compares at the declared contract level on every run, and all five scenarios are
@@ -286,7 +302,7 @@ produces. Had any differed, this section would say so and the golden would have 
 | departure set (`<train> started`) | `vl0, vl1, vl2, vl3, vl4` (5) |
 | arrival lines (`<train> in <station> at <T>`) | 5 |
 | expected trains generated (stop banner) | **9** |
-| expected final tick (stop banner `simulated clock`) | **24024 ms**, reason `sim.stop.maxClockMs reached` |
+| final tick (stop banner `simulated clock`) — **observed sample, not an invariant** | 24024 ms observed; 24040–24072 across later runs; the exact value is poll jitter (§7). The criterion is `reason = sim.stop.maxClockMs reached` **and** clock ≥ `24000` |
 | verification occasion | boot `862aa4f8-9952-4132-9567-f3371a898849`, `2026-08-20T09:42:58.847035451Z` |
 | master seed | `20080415` |
 | unspecified `sim.*` keys | none — all twenty are declared |
@@ -330,7 +346,7 @@ sim.stop.stallMs = 10000
 | departure set (`<train> started`) | `vl0, vl1` (2) |
 | arrival lines (`<train> in <station> at <T>`) | 2 |
 | expected trains generated (stop banner) | **2** |
-| expected final tick (stop banner `simulated clock`) | **40032 ms**, reason `sim.stop.maxClockMs reached` |
+| final tick (stop banner `simulated clock`) — **observed sample, not an invariant** | 40032 ms observed; the exact value is poll jitter (§7). The criterion is `reason = sim.stop.maxClockMs reached` **and** clock ≥ `40000` |
 | verification occasion | boot `862aa4f8-9952-4132-9567-f3371a898849`, `2026-08-20T09:42:05.439531476Z` |
 | master seed | `20080415` |
 | unspecified `sim.*` keys | none — all twenty are declared |
@@ -374,7 +390,7 @@ sim.stop.stallMs = 20000
 | departure set (`<train> started`) | `vl0, vl1, vl2` (3) |
 | arrival lines (`<train> in <station> at <T>`) | 3 |
 | expected trains generated (stop banner) | **3** |
-| expected final tick (stop banner `simulated clock`) | **23520 ms**, reason `sim.stop.maxClockMs reached` |
+| final tick (stop banner `simulated clock`) — **observed sample, not an invariant** | 23520 ms observed; the exact value is poll jitter (§7). The criterion is `reason = sim.stop.maxClockMs reached` **and** clock ≥ `23500` |
 | verification occasion | boot `862aa4f8-9952-4132-9567-f3371a898849`, `2026-08-20T09:43:32.161743745Z` |
 | master seed | `20080415` |
 | unspecified `sim.*` keys | none — all twenty are declared |
@@ -418,7 +434,7 @@ sim.stop.stallMs = 20000
 | departure set (`<train> started`) | `vl0, vl1, vl2, vl3` (4) |
 | arrival lines (`<train> in <station> at <T>`) | 4 |
 | expected trains generated (stop banner) | **4** |
-| expected final tick (stop banner `simulated clock`) | **26952 ms**, reason `sim.stop.maxClockMs reached` |
+| final tick (stop banner `simulated clock`) — **observed sample, not an invariant** | 26952 ms observed; the exact value is poll jitter (§7). The criterion is `reason = sim.stop.maxClockMs reached` **and** clock ≥ `26900` |
 | verification occasion | boot `862aa4f8-9952-4132-9567-f3371a898849`, `2026-08-20T09:41:27.810071653Z` |
 | master seed | `20080415` |
 | unspecified `sim.*` keys | none — all twenty are declared |
@@ -462,7 +478,7 @@ sim.stop.stallMs = 20000
 | departure set (`<train> started`) | `vl0, vl1, vl2, vl3` (4) |
 | arrival lines (`<train> in <station> at <T>`) | 4 |
 | expected trains generated (stop banner) | **9** |
-| expected final tick (stop banner `simulated clock`) | **27728 ms**, reason `sim.stop.maxClockMs reached` |
+| final tick (stop banner `simulated clock`) — **observed sample, not an invariant** | 27728 ms observed; 27712 and 27732 across later runs; the exact value is poll jitter (§7). The criterion is `reason = sim.stop.maxClockMs reached` **and** clock ≥ `27700` |
 | verification occasion | boot `862aa4f8-9952-4132-9567-f3371a898849`, `2026-08-20T09:40:15.716761683Z` |
 | master seed | `20080415` |
 | unspecified `sim.*` keys | none — all twenty are declared |
@@ -649,11 +665,41 @@ consecutive runs" came to be mistaken for reproducibility in the first place.
 * **That every inventory row is pinned.** `COVERAGE.md` §10.9 records DEF-16 as **unmappable**: an
   implementation mutant that clamps the Gaussian travel delay to zero **survives** the whole suite.
   Three other implementation mutants were killed.
+* **That the exact final tick reproduces.** An earlier revision of §7 made "reaches its expected
+  final tick" an acceptance criterion and §10 pinned exact figures for it. Review measured the
+  figure jittering by tens of milliseconds across healthy repeat runs (24024/24040/24064/24072 and
+  27712/27728/27732) while everything the criterion is *for* stayed identical, so the claim was
+  stated more confidently than its evidence supported. It is now an inequality against the bound
+  plus the stop reason, and §10's figures are labelled observed. Nothing else in this manifest
+  depended on it, and no golden did.
+* **That §12's recipe is executable by anyone yet.** The reproduction was run from a clone of the
+  **local** repository, because `pre-migration-baseline` has not been pushed — `git ls-remote --tags
+  origin` returns `withoutGradle` alone. Until the maintainer runs §14's command, the recipe reads as
+  generally executable and is not.
+* **That the harness ref is mechanically tied to the tag.** Nothing binds them: if `jade-develop`'s
+  normalizer changed, the tag would still point at the right binary while the goldens quietly meant
+  something else. That coupling is `characterizationIT@opencybele`'s job — it runs the full suite on
+  every push and is green — not the tag's.
+
 * **That the goldens could not have been recorded from a wedged run** — by the gate alone. The gate
   compares runs to each other and to the golden and structurally cannot see that the golden itself
-  was truncated. What excludes it here is the separate departure-count/final-tick check in §7 and
-  §10, taken from the raw stop banner of a run per scenario, plus the fact that every scenario's
+  was truncated. What excludes it here is the separate departure-count and stop-reason check in §7,
+  taken from the raw stop banner of a run per scenario, plus the fact that every scenario's
   generated-train count equals its planned-election count.
+
+### A follow-up worth doing, and deliberately not done here
+
+`ParityGate`'s **default** ledger path is still `build/parity-gate`, which is what killed #23's
+ledger, and the durable path used here (§11) is a machine-local absolute passed by hand — it is in no
+repository and in no CI job. The workflow runs `characterizationIT` only, and `ParityGateIT` asserts
+`crossOccasionDisagreements().isEmpty()`, which an **empty ledger satisfies vacuously** — so the
+cross-occasion half can never turn red by omission. Reproducing the ledger lines in §11 mitigates the
+loss but is manual, and the next runner is likely to repeat the mistake.
+
+**Recommended:** change the default ledger path to somewhere a clean build does not delete. That is a
+change to the *harness*, which `Phase1.md` L7 permits after the freeze — it touches no golden, no
+scenario and no application source. It is left out of #24 on purpose: this issue's job was to freeze,
+not to alter the instrument while freezing it.
 
 ## 14. The tag command
 
