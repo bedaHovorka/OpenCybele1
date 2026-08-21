@@ -37,6 +37,16 @@ set -uo pipefail
 
 SMOKE_CLASS="cz.vutbr.fit.ags.parity.it.OpenCybeleSmokeIT"
 
+# The one class whose tests are SUPPOSED to skip here. ParityGateIT's five
+# scenarios are an opt-in N-consecutive-runs lane, gated on -Dparity.gate.runs
+# (build.gradle.kts says so explicitly), and this job deliberately does not pass
+# it -- it is minutes, not seconds. Rule 2 below was measured at 0dd6ab6, when
+# the suite had 31 tests and 0 skips; ParityGateIT arrived afterwards and the
+# rule was never updated, so this job has failed on every push since. The rule
+# is kept, not weakened: skips are allowed ONLY from this class, and only the
+# number this class actually declares.
+OPT_IN_CLASS="cz.vutbr.fit.ags.parity.it.ParityGateIT"
+
 MODE="${1:-}"
 RESULTS_DIR="${2:-}"
 
@@ -200,11 +210,30 @@ case "$MODE" in
         # 0dd6ab6 with a dist supplied: 31 tests, 0 skipped, across 5 classes.
         # Asserting the total keeps a future `assumeTrue` from hiding in a
         # class this script does not name.
+        opt_in_file="$RESULTS_DIR/TEST-$OPT_IN_CLASS.xml"
+        opt_in_skipped=0
+        if [ -f "$opt_in_file" ]; then
+            opt_in_skipped="$(attr "$opt_in_file" skipped)"
+            if ! num "$opt_in_skipped"; then
+                echo "FAIL: $OPT_IN_CLASS carries a non-numeric skipped=\"$opt_in_skipped\"." >&2
+                rc=1
+                opt_in_skipped=0
+            elif [ "$opt_in_skipped" -ne "$(attr "$opt_in_file" tests)" ]; then
+                echo "FAIL: $OPT_IN_CLASS is exempt from the zero-skip rule only because ALL of" \
+                     "its tests are opt-in. It reports skipped=\"$opt_in_skipped\" of" \
+                     "tests=\"$(attr "$opt_in_file" tests)\", so some of it RAN and some did not." \
+                     "Decide which, rather than exempting the class wholesale." >&2
+                rc=1
+            fi
+        fi
+
         if skipped_total="$(total skipped)"; then
-            if [ "$skipped_total" -ne 0 ]; then
-                echo "FAIL: $skipped_total test(s) were skipped across the suite. In this job" \
-                     "every precondition is supposed to be satisfied, so a skip is a silently" \
-                     "missing check, not a neutral outcome." >&2
+            unexpected_skips=$(( skipped_total - opt_in_skipped ))
+            if [ "$unexpected_skips" -ne 0 ]; then
+                echo "FAIL: $unexpected_skips test(s) were skipped outside $OPT_IN_CLASS" \
+                     "($skipped_total total, $opt_in_skipped of them the opt-in gate lane). In" \
+                     "this job every other precondition is supposed to be satisfied, so a skip is" \
+                     "a silently missing check, not a neutral outcome." >&2
                 rc=1
             fi
         else
@@ -230,7 +259,7 @@ case "$MODE" in
             # Guarded like everything else: the OK line must not be printable off
             # a number this script could not read.
             if tests_total="$(total tests)"; then
-                echo "OK: $tests_total test(s), 0 skipped, 0 failed -- and $SMOKE_CLASS RAN" \
+                echo "OK: $tests_total test(s), $opt_in_skipped opt-in skipped, 0 failed -- and $SMOKE_CLASS RAN" \
                      "(the application was started as a child JVM and compared against its" \
                      "golden)."
             else
