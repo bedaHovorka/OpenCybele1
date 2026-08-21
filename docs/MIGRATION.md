@@ -147,7 +147,10 @@ one** (a `RoadAgent.State` enum value; a `Station.Info` snapshot). Under `tell`,
 belief raises **no event**, so the GUI-update traffic that the goldens pin would simply vanish.
 Under `signal`, *"if an agent sends the same signal twice, the receiver will have two events."*
 That is the fix. (The full channel→performative ontology is owned by
-[#48](https://github.com/bedaHovorka/OpenCybele1/issues/48) stage 0, not by this document.)
+[#48](https://github.com/bedaHovorka/OpenCybele1/issues/48) stage 0, not by this document. Its input is
+[`message-ontology.md`](message-ontology.md), which fixes the channel→FIPA-act mapping for the JADE
+port — [#46](https://github.com/bedaHovorka/OpenCybele1/issues/46) reuses that document's
+framework-free half verbatim, so `signal` vs `tell` is the only thing left to decide here.)
 
 ### 3.2 Concurrency in plan bodies — `!!`, `|&|`, `|||`, `@[atomic]`
 

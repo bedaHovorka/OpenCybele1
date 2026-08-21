@@ -159,6 +159,12 @@ golden. **Do not put a guessed mapping here.** #27 owns the channel → `ACLMess
 performative mapping, and a value invented in this file would silently become the thing #27
 is measured against.
 
+> **Discharged.** #27 has since decided it — [`message-ontology.md`](message-ontology.md) §4,
+> four `request`s, seven `inform`s, and one each of `cfp`, `propose`, `accept-proposal` and
+> `query-ref`, justified per channel. **This format is unchanged by that**: field 6 stays the
+> literal `-` on the Cybele branch, and #21 still erases it before comparing. The mapping is
+> recorded there, not here, for the reason this paragraph gives.
+
 #### `payload` — and what escaping there is
 
 `key=value,key=value`, in the order of the `Serializable[]` slots, with the key names fixed
