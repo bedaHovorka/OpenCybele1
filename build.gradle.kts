@@ -206,6 +206,13 @@ tasks.named("check") {
 // COMPLETE" -- checked mechanically instead of by hand. Two steps: run the simulation
 // headless and bounded with the probe on, then verdict what it produced.
 //
+// #30 NOTE: `traceRun` (and therefore `traceCheck`) no longer works on this branch. It launches
+// `cz.vutbr.fit.ags.xhovor07.Main` off the main runtime classpath, and since #30 that application
+// does not boot -- `Station` is a `jade.core.Agent` and a Cybele `RailwayMainAgent` cannot spawn
+// it. Expected and planned for (see #4's sequencing decision: the tree compiles at every step of
+// #30-#34 and runs at none of them), but recorded here so it is not rediscovered as a mystery. The
+// tasks are left in place; they come back when the set is complete.
+//
 // Deliberately NOT wired into `check`, unlike rngProof. This one boots the Cybele kernel,
 // takes ~20 s of wall clock, and inherits the kernel's own residual hang (INVENTORY
 // DEF-22, roughly 1 run in 45) -- putting that in every `./gradlew build` would trade a
@@ -273,11 +280,15 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
-    // #27's binding tests -- template disjointness and the ACLMessage round trip -- need the
-    // real JADE classes to be worth anything: a hand-rolled stub would prove that the stub is
-    // disjoint. JADE is on the TEST classpath only. It is deliberately NOT on `implementation`;
-    // see the jadeOntology source set above for why.
-    testImplementation("net.sf.ingenias:jade:4.3")
+    // #27's binding tests -- template disjointness and the ACLMessage round trip -- need the real
+    // JADE classes to be worth anything: a hand-rolled stub would prove that the stub is disjoint.
+    //
+    // #30 CORRECTS THIS COMMENT. It used to end "JADE is on the TEST classpath only. It is
+    // deliberately NOT on `implementation`", which the `implementation` line above now contradicts.
+    // The explicit `testImplementation("net.sf.ingenias:jade:4.3")` that used to sit here is gone
+    // with it: `testImplementation` extends `implementation`, so it was resolving the same
+    // coordinate twice and stating a constraint that no longer holds. The tests still get JADE --
+    // from `implementation`, along with the application they now test.
 }
 
 // The binding classes are compiled by their own source set; the unit tests see them the same

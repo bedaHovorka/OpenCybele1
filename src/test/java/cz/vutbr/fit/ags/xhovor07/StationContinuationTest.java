@@ -20,8 +20,13 @@ import jade.lang.acl.ACLMessage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BiConsumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -63,14 +68,28 @@ class StationContinuationTest {
         }
     }
 
-    /** A real {@link Station} with its outbound seam redirected into a list. */
+    /**
+     * A real {@link Station} with its outbound seam redirected into a list.
+     * <p>
+     * {@link #hook} is how a test gets <em>inside</em> the resume loop: it fires on the next
+     * {@code emit} and is cleared first, so it is one-shot and cannot recurse. That is enough to
+     * drive the two cases that are otherwise unreachable from outside — a continuation that throws,
+     * and a continuation that re-enters {@code resolveDirection} while the loop is still running.
+     */
     private static final class RecordingStation extends Station {
         private static final long serialVersionUID = 1L;
         private final transient List<Sent> sent = new ArrayList<Sent>();
+        private transient BiConsumer<RecordingStation, Sent> hook;
 
         @Override
         protected void emit(RailwayMessage message, String receiver) {
-            sent.add(new Sent(message, receiver));
+            Sent record = new Sent(message, receiver);
+            sent.add(record);
+            BiConsumer<RecordingStation, Sent> oneShot = hook;
+            if (oneShot != null) {
+                hook = null;
+                oneShot.accept(this, record);
+            }
         }
     }
 
@@ -100,6 +119,14 @@ class StationContinuationTest {
             if (s.channel() == channel) {
                 out.add(s);
             }
+        }
+        return out;
+    }
+
+    private static List<String> receivers(RecordingStation station) {
+        List<String> out = new ArrayList<String>();
+        for (Sent s : station.sent) {
+            out.add(s.channel() + "->" + s.receiver());
         }
         return out;
     }
@@ -349,6 +376,185 @@ class StationContinuationTest {
         assertEquals(List.of("stC"), List.copyOf(station.pendingTargets()),
                 "and the evidence stays visible instead of presenting as a hang");
         assertFalse(on(station, Channel.VOTE).isEmpty(), "the station itself is not stalled");
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // A null direction is refused (the premise DEF-01's unreachability rests on)
+    // ---------------------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("a null-direction reply is refused: not cached, nothing resumed, still parked")
+    void a_null_direction_reply_is_refused() {
+        RecordingStation station = station("stA", 3);
+        deliver(station, new EnterRequest("vl0", "tr9", "stC"), "vl0");
+        station.sent.clear();
+
+        String report = captureStderr(() -> deliver(station, new PathFindReply("stC", null), "Main"));
+
+        assertEquals(List.of(), channels(station),
+                "resuming with null is DEF-01's exact symptom: Train.entered reads a null next="
+                        + " as *arrived* and dies mid-route");
+        assertFalse(station.getPathDirs().containsKey("stC"),
+                "and caching null would be worse: resolveDirection reads it as a miss, so every"
+                        + " later train to stC would send a fresh PATH_FIND, forever");
+        assertEquals(List.of("stC"), List.copyOf(station.pendingTargets()));
+        assertTrue(report.contains("stC"), () -> "the refusal must be loud: " + report);
+    }
+
+    @Test
+    @DisplayName("after a refused reply the target is still coalesced, and a good reply resolves all")
+    void a_refused_reply_does_not_break_coalescing() {
+        RecordingStation station = station("stA", 3);
+        deliver(station, new EnterRequest("vl0", "tr9", "stC"), "vl0");
+        captureStderr(() -> deliver(station, new PathFindReply("stC", null), "Main"));
+        station.sent.clear();
+
+        deliver(station, new EnterRequest("vl1", "tr8", "stC"), "vl1");
+        assertEquals(List.of(), channels(station),
+                "the poisoned-cache bug would show here as a second PATH_FIND");
+
+        deliver(station, new PathFindReply("stC", "tr1"), "Main");
+        assertEquals(List.of(Channel.ENTER_REPLY, Channel.STATION_INFO,
+                        Channel.ENTER_REPLY, Channel.STATION_INFO), channels(station));
+        assertEquals("vl0", station.sent.get(0).receiver());
+        assertEquals("vl1", station.sent.get(2).receiver());
+        assertTrue(station.pendingTargets().isEmpty());
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // The one payload field that does move, and the projection that erases it
+    // ---------------------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("STATION_INFO resumed after an interleave reports the NEW occupied, and that is fine")
+    void station_info_in_a_resumed_continuation_reports_post_interleave_occupancy() {
+        RecordingStation station = station("stA", 2);
+        deliver(station, new EnterRequest("vl0", "tr9", "stC"), "vl0");   // occupied 0 -> 1, parked
+        deliver(station, new EnterRequest("vl1", "tr9", "stA"), "vl1");   // occupied 1 -> 2, in-line
+        station.sent.clear();
+
+        deliver(station, new PathFindReply("stC", "tr1"), "Main");
+
+        assertEquals(new StationInfo(2, 2), station.sent.get(1).message(),
+                "2008 emits occupied=1 here -- vl1's ENTER was still queued behind the blocked"
+                        + " handler. This is a real payload-multiset difference, and the reason it"
+                        + " is not a port bug is trace-normalizer.md 2.1: `occupied` is one of the"
+                        + " eight value projections and is ERASED, for DEF-13's reasons.");
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Re-entrancy and failure inside the resume loop
+    // ---------------------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("a continuation that throws does not strand its siblings or their evidence")
+    void a_throwing_continuation_does_not_strand_its_siblings() {
+        RecordingStation station = station("stA", 4);
+        deliver(station, new EnterRequest("vl0", "tr9", "stC"), "vl0");
+        deliver(station, new EnterRequest("vl1", "tr8", "stC"), "vl1");
+        station.sent.clear();
+        // Reachable by construction: emit -> Messages.build -> setContentObject throws
+        // UncheckedIOException by design (Messages.java 31-36).
+        station.hook = (self, sent) -> {
+            throw new UncheckedIOException(new java.io.IOException("cannot serialize ENTER_REPLY"));
+        };
+
+        String report = captureStderr(() -> deliver(station, new PathFindReply("stC", "tr1"), "Main"));
+
+        assertEquals("vl1", station.sent.get(1).receiver(),
+                "vl0's continuation blew up on its ENTER_REPLY; vl1's must still run");
+        assertEquals(List.of(Channel.ENTER_REPLY, Channel.ENTER_REPLY, Channel.STATION_INFO),
+                channels(station), "and only vl0's own trailing sendInfo is lost");
+        assertTrue(station.pendingTargets().isEmpty());
+        assertTrue(report.contains("threw"), () -> "the failure must be loud: " + report);
+    }
+
+    @Test
+    @DisplayName("a continuation re-entering for the same target hits the freshly filled cache")
+    void a_re_entrant_continuation_hits_the_fresh_cache() {
+        RecordingStation station = station("stA", 4);
+        deliver(station, new EnterRequest("vl0", "tr9", "stC"), "vl0");
+        deliver(station, new EnterRequest("vl1", "tr8", "stC"), "vl1");
+        station.sent.clear();
+        // Fires on vl0's ENTER_REPLY, i.e. INSIDE pathFindReply's resume loop.
+        station.hook = (self, sent) -> self.enter(new EnterRequest("vl9", "tr7", "stC"));
+
+        deliver(station, new PathFindReply("stC", "tr1"), "Main");
+
+        assertTrue(on(station, Channel.PATH_FIND).isEmpty(),
+                "the cache is filled BEFORE the loop, so a re-entrant resolve is a hit."
+                        + " Moving that put below the loop turns this into a second request --"
+                        + " and, with pending not yet cleared, into a CME on the list being"
+                        + " iterated.");
+        assertEquals(new EnterReply("stA", "tr1"), station.sent.get(1).message(),
+                "the re-entrant train resolves in-line, from the cache the reply just filled");
+        assertEquals(List.of(
+                        "ENTER_REPLY->vl0",                        // the resumed continuation...
+                        "ENTER_REPLY->vl9", "STATION_INFO->Main",  // ...re-enters, nested and whole
+                        "STATION_INFO->Main",                      // ...then finishes
+                        "ENTER_REPLY->vl1", "STATION_INFO->Main"), // ...and the sibling follows
+                receivers(station), "the sibling must still resume after the nested call");
+        assertTrue(station.pendingTargets().isEmpty());
+    }
+
+    @Test
+    @DisplayName("a continuation arming a NEW cold target does not disturb the running loop")
+    void a_re_entrant_continuation_may_arm_a_new_target() {
+        RecordingStation station = station("stA", 4);
+        deliver(station, new EnterRequest("vl0", "tr9", "stC"), "vl0");
+        deliver(station, new EnterRequest("vl1", "tr8", "stC"), "vl1");
+        station.sent.clear();
+        station.hook = (self, sent) -> self.enter(new EnterRequest("vl9", "tr7", "stD"));
+
+        deliver(station, new PathFindReply("stC", "tr1"), "Main");
+
+        assertEquals(1, on(station, Channel.PATH_FIND).size(), "one fresh request, for stD");
+        assertEquals(new PathFindRequest("stA", "stD"), on(station, Channel.PATH_FIND).get(0).message());
+        assertEquals(List.of(
+                        "ENTER_REPLY->vl0",   // the resumed continuation...
+                        "PATH_FIND->Main",    // ...parks a NEW target mid-loop
+                        "STATION_INFO->Main",
+                        "ENTER_REPLY->vl1", "STATION_INFO->Main"),
+                receivers(station), "adding a map entry must not disturb the list being iterated");
+        assertEquals(List.of("stD"), List.copyOf(station.pendingTargets()));
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // DEF-23's loud half
+    // ---------------------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("the watchdog reports an overdue target once, and still does not resume it")
+    void the_watchdog_is_loud_and_still_does_not_resume() {
+        RecordingStation station = station("stA", 3);
+        deliver(station, new EnterRequest("vl0", "tr9", "stC"), "vl0");
+        station.sent.clear();
+
+        assertEquals("", captureStderr(() -> station.reportOverdue(System.nanoTime())),
+                "a healthy round trip must never trip the alarm");
+
+        long overdue = System.nanoTime() + Station.PATH_FIND_WATCHDOG_MS * 2 * 1000000L;
+        String first = captureStderr(() -> station.reportOverdue(overdue));
+        assertTrue(first.contains("stC"), () -> first);
+        assertTrue(first.contains("not resumed"), () -> first);
+
+        assertEquals("", captureStderr(() -> station.reportOverdue(overdue)),
+                "once per target: #12's ErrorScanner reads stderr, and a spew drowns it");
+        assertEquals(List.of(), channels(station),
+                "logging is not resuming -- DEF-23's pin is untouched");
+        assertEquals(List.of("stC"), List.copyOf(station.pendingTargets()));
+    }
+
+    private static String captureStderr(Runnable body) {
+        PrintStream err = System.err;
+        ByteArrayOutputStream captured = new ByteArrayOutputStream();
+        try {
+            System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
+            body.run();
+        } finally {
+            System.setErr(err);
+        }
+        return captured.toString(StandardCharsets.UTF_8);
     }
 
     /** capacity 1, {@code vl0} admitted and at its destination, {@code vl1} queued for {@code stC}. */
