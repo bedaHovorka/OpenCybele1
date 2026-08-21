@@ -7,7 +7,6 @@ import cz.vutbr.fit.ags.xhovor07.Planning;
 import cz.vutbr.fit.ags.xhovor07.RailwayMainAgent;
 import cz.vutbr.fit.ags.xhovor07.RoadAgent;
 import cz.vutbr.fit.ags.xhovor07.StaticRailwayObject;
-import cz.vutbr.fit.ags.xhovor07.Station;
 import cz.vutbr.fit.ags.xhovor07.Train;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -64,13 +63,21 @@ class ChannelTableTest {
         assertEquals(Train.ENTER_REPLY + "vl3", Channel.ENTER_REPLY.cybeleChannelName("vl3"));
         assertEquals(Train.TRAVEL_END + "vl3", Channel.TRAVEL_END.cybeleChannelName("vl3"));
         assertEquals(RoadAgent.TRAVEL_START + "tr1", Channel.TRAVEL_START.cybeleChannelName("tr1"));
-        assertEquals(Station.PATH_FIND_REPLY + "stA", Channel.PATH_FIND_REPLY.cybeleChannelName("stA"));
+        // The SECOND exception, and it is #33's. Station.PATH_FIND_REPLY is DELETED: the JADE
+        // hub sends the reply to a station's AID, so after #33 ported RailwayMainAgent,
+        // RailwayCanvas and TraceProbe's use of it, this assertion was the constant's only
+        // remaining owner -- i.e. a constant kept alive so that a test could assert it equals a
+        // literal, which asserts nothing. Re-pointed at the literal, which is where a check on
+        // Channel's transcription always belonged: the subject of this test is Channel, not the
+        // agent the 2008 author happened to declare the name on. The other twelve rows keep
+        // their constants because those constants still have non-test owners.
+        assertEquals("PATH_FIND_REPLY.stA", Channel.PATH_FIND_REPLY.cybeleChannelName("stA"));
         assertEquals(RailwayMainAgent.CHANNEL_STATION_INFO + "stA", Channel.STATION_INFO.cybeleChannelName("stA"));
         assertEquals(RailwayMainAgent.CHANNEL_ROAD_STATE + "tr1", Channel.ROAD_STATE.cybeleChannelName("tr1"));
-        // The one exception, and it is the constant's fault, not the test's:
+        // The first exception, and it is the constant's fault, not the test's:
         // RailwayMainAgent.CHANNEL_TRAIN_STATE is package-private, so only a test in
         // cz.vutbr.fit.ags.xhovor07 could name it. Literal, flagged, not quietly the same as
-        // the fourteen above.
+        // the rest.
         assertEquals("TRAIN.STATE.vl3", Channel.TRAIN_STATE.cybeleChannelName("vl3"));
         assertEquals(Planning.PLAN_TRAIN, Channel.PLAN_TRAIN.cybeleChannelName(null));
         assertEquals(Planning.VOTE, Channel.VOTE.cybeleChannelName(null));

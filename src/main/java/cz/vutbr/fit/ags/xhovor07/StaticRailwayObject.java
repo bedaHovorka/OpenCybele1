@@ -16,7 +16,22 @@ import cybele.kernel.CybeleEvent;
 
 /**
  * Reprezents static railway object, which can vote
- * 
+ * <p>
+ * <b>Vestigial since #31, and kept deliberately by #33.</b> Nothing extends it any more —
+ * {@code Station} (#30) and {@code RoadAgent} (#31) are {@code jade.core.Agent}s that inlined the
+ * five methods below rather than sharing them, for the reasons #31's class comment gives at
+ * length. So the Cybele half of this file is unreachable code.
+ * <p>
+ * <b>What it still carries, and for whom.</b> The four channel-name constants. Their non-test
+ * namer is {@code TraceProbe}, which is <b>#36</b>'s to replace with a JADE probe, and their
+ * second is #27's {@code ChannelTableTest}, which compares {@code Channel}'s transcription against
+ * them. #33 re-pointed <em>one</em> row of that test at a literal — {@code PATH_FIND_REPLY}, whose
+ * constant #33's own agents freed and which would otherwise have survived purely so that a test
+ * could assert it equals a literal. It deliberately did not re-point these four: they still have a
+ * non-test owner, so asserting against the constant still checks something. Reducing this file to
+ * its constants was considered and declined — it would churn a file #32/#36 delete wholesale, and
+ * the dead half compiles.
+ *
  * @author Bedrich Hovorka
  *
  */

@@ -9,7 +9,6 @@
  */
 package cz.vutbr.fit.ags.xhovor07;
 
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -202,34 +201,21 @@ import jade.lang.acl.MessageTemplate;
  * per-agent argument #4 asks each ticket to make for itself, not a licence for the other four.
  *
  * <h2>What still runs on Cybele</h2>
- * Nothing in this file does, and the application does not run until #32/#33 land — see #4. The two
- * vestigial members kept below, {@link #PATH_FIND_REPLY} and {@link Info}, exist only so the
- * not-yet-ported {@code RailwayMainAgent}, {@code RailwayCanvas} and {@code TraceProbe} still
- * compile. This comment said "#34's to delete"; #34 landed first and could not, because all three
- * of those namers are #33's. <b>They are #33's to delete</b>, together with {@code RoadAgent.State}.
+ * Nothing in this file does, and the application does not run until #32 lands — see #4. The two
+ * vestigial members this class used to carry, {@code PATH_FIND_REPLY} and {@code Info}, are
+ * <b>deleted by #33</b>, which ported all three of the classes that named them: the hub now sends
+ * {@code PATH_FIND_REPLY} to a station's AID, {@code RailwayCanvas} reads the ontology's immutable
+ * {@link StationInfo} record, and {@code TraceProbe} takes the channel name from
+ * {@code Channel.PATH_FIND_REPLY.cybeleChannelName(...)} instead of from this class. #27's
+ * {@code ChannelTableTest} was the constant's second owner and has been re-pointed at the literal
+ * string it compared against, which is where the assertion always belonged — its subject is
+ * {@code Channel}, not this agent.
  *
  * @author Bedrich Hovorka
  *
  */
 public class Station extends Agent {
     private static final long serialVersionUID = 1L;
-    /**
-     * channel for sending path find result
-     * <p>
-     * <b>This agent no longer uses it.</b> JADE routes {@code PATH_FIND_REPLY} by the station's
-     * AID plus the {@code railway.PATH_FIND_REPLY} ontology slot
-     * ({@code docs/message-ontology.md} §6). The constant stays for two reasons: the
-     * not-yet-ported {@code RailwayMainAgent} and {@code TraceProbe} still name the channel, and
-     * #27's {@code ChannelTableTest.cybele_channel_names_are_reproduced_verbatim} compares
-     * {@code Channel.PATH_FIND_REPLY} against exactly this literal. The first reason expires with
-     * <b>#33</b>, not #34 — {@code RailwayMainAgent} is #33's agent — and the second does not expire
-     * at all unless that assertion is re-pointed at the literal string, which is what it should do,
-     * since the test's subject is {@code Channel} and not this class. #34 left it alone: it kept
-     * {@code Planning.PLAN_TRAIN} and {@code Planning.VOTE} for exactly the same reason, so
-     * re-pointing one of the fifteen rows and not the other two would make the test less uniform,
-     * not more.
-     */
-    public static final String PATH_FIND_REPLY = "PATH_FIND_REPLY.";
     /**
      * How long a {@code PATH_FIND} may go unanswered before {@link Watchdog} says so, in wall-clock
      * milliseconds, and also the watchdog's tick period.
@@ -262,28 +248,6 @@ public class Station extends Agent {
     private StationSchedule schedule;
     private int capacity;
     private int occupied;
-
-    /**
-     * Information about state
-     * <p>
-     * <b>Vestigial</b>, and the reason is worth keeping: this class <em>was</em> the payload of
-     * CH-10, shipped by reference under {@code Local;NoSerialization} and mutated after the send
-     * — INVENTORY SEM-05, DEF-13. The JADE port sends an immutable {@link StationInfo} record
-     * instead, which is the snapshot semantics {@code docs/defect-triage.md} §3.2 places inside
-     * the contract. The type survives only because {@code RailwayMainAgent.stationInfos},
-     * {@code RailwayCanvas.paintStation} and {@code TraceProbe.onStationInfo} still name it.
-     * Delete with #33, which ports all three of those.
-     */
-    public class Info implements Serializable {
-	private static final long serialVersionUID = 1L;
-	int capacity;
-	int occupied;
-	private Info(int occupied, int capacity) {
-	    super();
-	    this.capacity = capacity;
-	    this.occupied = occupied;
-	}
-    }
 
     /**
      * The continuations waiting on one target's {@code PATH_FIND}, and what {@link Watchdog} needs

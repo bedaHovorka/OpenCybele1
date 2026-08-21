@@ -105,7 +105,10 @@ import jade.lang.acl.MessageTemplate;
  * {@link Inbox} narrows its template to {@code VOTE} alone, and a {@code PLAN_TRAIN} simply
  * <b>stays in the agent's message queue</b> — which is what a Cybele channel queue was doing
  * anyway. {@link #template()} is that gate, and it is package-visible because #33 owns the
- * {@code Main} agent's queue and must not widen it. Arrival order among queued
+ * {@code Main} agent's queue and must not widen it. <b>#33 has landed and did not</b>:
+ * {@code RailwayMainAgent.hubTemplate()} lists its four channels rather than calling
+ * {@code Templates.inbound(Party.MAIN)}, and {@code RailwayMainAgentInboxTest} pins the
+ * difference. Arrival order among queued
  * {@code PLAN_TRAIN}s is preserved: {@code receive(t)} scans the queue in order.
  *
  * <h2>Scheduling on an absolute instant, and the bracket that goes with it</h2>
@@ -148,7 +151,10 @@ import jade.lang.acl.MessageTemplate;
  * {@code PriorityBlockingQueue} all go. That is the per-agent argument #4 asks each ticket to
  * make for itself; it is not a licence for {@code Train} or the hub, and it does depend on #33
  * keeping this activity's behaviours on the {@code Main} agent rather than handing its state to
- * the Swing thread.
+ * the Swing thread. #33 landed and did keep them there — and it is worth noting that the hub
+ * could <em>not</em> make the same argument for itself: it publishes three maps and a
+ * {@code TableModel} that the Swing EDT reads, so its monitors stay. Nothing of this activity's
+ * state is published that way.
  *
  * <p>{@code PriorityBlockingQueue} &rarr; {@link PriorityQueue} is observationally inert for a
  * second reason as well as the threading one: {@link TrainPlan#compareTo} breaks a departure
@@ -209,10 +215,11 @@ import jade.lang.acl.MessageTemplate;
  * local name — {@code Main}.
  *
  * <h2>What still runs on Cybele</h2>
- * Nothing in this file does, and the application does not run until #32/#33 land — see #4. The
- * two public channel-name constants below are kept because {@code Generator},
- * {@code StaticRailwayObject}, {@code TraceProbe} and #27's
+ * Nothing in this file does, and the application does not run until #32 lands — see #4. The
+ * two public channel-name constants below are kept because {@code StaticRailwayObject},
+ * {@code TraceProbe} and #27's
  * {@code ChannelTableTest.cybele_channel_names_are_reproduced_verbatim} still name them.
+ * ({@code Generator} dropped off that list with #33: it addresses {@code PLAN_TRAIN} to an AID.)
  *
  * @author Bedrich Hovorka
  */
@@ -286,18 +293,22 @@ public class Planning implements Serializable {
      * {@code VoteCollecting}; this one registers behaviours instead, which is the same
      * "declare what I listen to, at construction" shape.
      *
-     * <p><b>Two obligations this hands to #33</b>, which owns the {@code Main} agent:
+     * <p><b>Two obligations this handed to #33</b>, which owns the {@code Main} agent, and both
+     * are discharged:
      * <ul>
      *   <li>the <b>drain</b>. {@code docs/message-ontology.md} §7 wants one lowest-priority
      *       {@code CyclicBehaviour} on {@code Templates.unexpected(Party.MAIN)} per agent, and
      *       it belongs to the agent, not to one of its activities — this class must not claim
      *       the complement of a template set it only partly consumes. {@link #unexpected} here
-     *       is the {@code default} arm of {@link #dispatch}, not a drain.</li>
+     *       is the {@code default} arm of {@link #dispatch}, not a drain.
+     *       {@code RailwayMainAgent.Drain} is that behaviour.</li>
      *   <li>the <b>ticker</b>. This installs its own, because it must have one to drain its own
      *       {@link AgentClock}. If {@code Generator} gets an {@code AgentClock} as well, share
      *       one clock and one ticker rather than adding a second: two tickers on one agent are
      *       harmless but the period is a budget ({@link RoadAgent#granularityMsFor(double)})
-     *       and it is easier to keep one honest than two.</li>
+     *       and it is easier to keep one honest than two. #33 shares: {@code Generator} is
+     *       constructed with {@link #agentClock()}, so this agent has one clock, one ticker and
+     *       one budget — now {@code sim.clock.granularityMs}.</li>
      * </ul>
      *
      * @param host the {@code Main} agent; must already have its AID, i.e. this must be called
@@ -373,10 +384,11 @@ public class Planning implements Serializable {
      * <p>
      * {@code VOTE} is always taken. {@code PLAN_TRAIN} is taken only when no election is in
      * flight, so that a new request waits in the agent's mailbox exactly as it waited in the
-     * Cybele channel queue behind the blocked handler. #33 must call {@code receive} with
-     * <em>this</em> template for the two channels rather than with
-     * {@code Templates.inbound(Party.MAIN)}, or the seriality — and DEF-22's observable — is
-     * lost.
+     * Cybele channel queue behind the blocked handler. #33 calls {@code receive} with
+     * <em>this</em> template for the two channels, and its own {@code hubTemplate()} lists the
+     * other four explicitly rather than using {@code Templates.inbound(Party.MAIN)} — which
+     * would take {@code PLAN_TRAIN} out from under this gate and lose the seriality, and with it
+     * DEF-22's observable.
      *
      * @return {@code VOTE} alone while busy, {@code VOTE | PLAN_TRAIN} while idle
      */

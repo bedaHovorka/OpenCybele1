@@ -69,6 +69,7 @@ Two build-side notes that belong with it:
 | `sim.road.delaysSec` | `tr1=1,tr2=1,tr3=5,tr4=2,tr5=3,tr6=4,tr7=3` | `RailwayMainAgent.roadDelays` |
 | `sim.clock.startMs` | `0` | `Cybele.createClock(..., 0, 1)` |
 | `sim.clock.pace` | `1` | `Cybele.createClock(..., 0, 1)` |
+| `sim.clock.granularityMs` | `5` | nothing — Cybele had one kernel timer service; the JADE port drains simulated-time wake-ups from per-agent tickers and this is their lateness budget ([#33](https://github.com/bedaHovorka/OpenCybele1/issues/33)), see below |
 | `sim.gui.paces` | `Fast=8,Normal=1,Slow=0.3` | `Gui.createBar` toolbar buttons |
 | `sim.gui.mainLine` | `stA,stH,stG,stE,stD,stB` | `RailwayCanvas.mainRoads` |
 | `sim.gui.branches` | `stC:tr7,stF:tr6` | `RailwayCanvas.paint` branch coordinates |
@@ -80,6 +81,49 @@ Two build-side notes that belong with it:
 | `sim.trace.enabled` | `false` (off) | nothing — the application printed two lines and nothing else was observable ([#20](https://github.com/bedaHovorka/OpenCybele1/issues/20)), see [`docs/trace-format.md`](trace-format.md) |
 | `sim.trace.trainLookahead` | `32` | nothing (#20) — how many train-name slots the probe subscribes ahead of the generator, bounded 1..10000; inert when the trace is off |
 | `sim.random.masterSeed` | `random` | the single unseeded `new Random()` in `Generator`, which fed the generator's two draws **and** every `RoadAgent`'s travel jitter — now one seeded stream per agent, see [`docs/seeded-rng.md`](seeded-rng.md) |
+
+### `sim.clock.granularityMs` is a **simulated**-ms budget, not a timer period
+
+Read the unit twice; it is the whole point of the key, and #31 measured what happens when it is
+read the other way.
+
+A JADE agent's simulated-time wake-ups are drained by a `ClockTickerBehaviour` whose period is
+**real** time, so a wake-up fires at the first tick at or after its deadline and is late by up to
+`periodRealMs × pace` **simulated** milliseconds. What decides whether a golden diffs is not real
+time at all: it is `CanonicalTraceNormalizer.DEFAULT_SEGMENT_GAP_TICKS` = **220 simulated ms**, the
+boundary the normalizer segments bursts at. So the quantity worth bounding is the simulated one,
+and the real-ms period is **derived** from it:
+
+```
+RoadAgent.granularityMsFor(pace) = max(1, ceil(sim.clock.granularityMs / pace))
+```
+
+At the toolbar's three presets, with the default budget of 5: pace 8 → 1 real ms → ≤ 8 simulated
+ms; pace 1 → 5 → ≤ 5; pace 0.3 → 17 → ≤ 5.1. Against the tightest recorded margin in the scenario
+set — `opencybele-capacity.yaml` records the four re-paced scenarios' reaction-gap margins as "44
+ms or better" — the worst case is more than five times clear.
+
+A **raw real-ms** key would recreate exactly the trap #31 removed: the fixed 10 real ms it replaced
+added `U[0, 80]` simulated ms to every reaction event at pace 8, nearly twice that 44 ms margin, and
+enough on its own to move a burst boundary.
+
+Two properties of the resulting error that Cybele did not have, stated because they are new: it is
+**one-sided** (a wake-up is never early, only late), so it does not average out across a run; and it
+is correlated within an agent but **uncorrelated between agents**, since each ticker's phase is
+fixed by when that agent's `setup()` ran. Cybele had one kernel timer service and therefore no
+per-agent phase at all.
+
+**One value, every ticker.** There are exactly two tick sites in the port — each `RoadAgent`'s, and
+the one `Planning` registers on the `Main` agent, which `Generator` shares rather than adding a
+third — and both read this key. That is why it is configuration rather than three constants that
+have to be kept in step. `max(1, …)` is a real floor: a JADE `TickerBehaviour` period is an integer
+count of real milliseconds, so above pace `sim.clock.granularityMs` the budget stops being honoured
+and the worst case is simply `pace` simulated ms.
+
+The key is **inert on the Cybele baseline**, which uses the kernel's timer service and never reads
+it. Measuring the actual gap distribution against 220 per scenario, on a running JADE
+implementation, is [#36](https://github.com/bedaHovorka/OpenCybele1/issues/36)'s first gate run; the
+numbers above are arithmetic on a measured boundary, not a measurement of the port.
 
 `sim.config` names the optional file. Ready-made scenarios live in [`scenarios/`](../scenarios):
 `default.properties` (every default written out, meant to be copied),

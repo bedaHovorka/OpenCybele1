@@ -292,10 +292,12 @@ import jade.lang.acl.MessageTemplate;
  * not in a resurrected {@code RailwayObject} in the application package.
  *
  * <h2>What still runs on Cybele</h2>
- * Nothing in this file does, and the application does not run until #32-#34 land — see #4. The
- * two vestigial members kept below, {@link #TRAVEL_START} and {@link State}, exist only so the
- * not-yet-ported {@code Train}, {@code RailwayMainAgent}, {@code RailwayCanvas} and
- * {@code TraceProbe} still compile.
+ * Nothing in this file does, and the application does not run until #32 lands — see #4. The
+ * {@code State} enum this class used to carry is <b>deleted by #33</b>, which ported its last two
+ * namers: {@code RailwayMainAgent.roadAgentStates} and {@code RailwayCanvas} both hold
+ * {@link RoadDirection} now, and {@code TraceProbe} reads the same enum. {@link #TRAVEL_START}
+ * stays, with the two owners it always had — {@code TraceProbe} (#36) and #27's
+ * {@code ChannelTableTest}.
  *
  * @author Bedrich Hovorka
  *
@@ -375,12 +377,17 @@ public class RoadAgent extends Agent {
      * honoured and the worst case is simply {@code pace} simulated ms. That is why this returns
      * the period rather than pretending the budget always holds.
      * <p>
-     * <b>Note for #33/#34, where this becomes {@code sim.clock.granularityMs}.</b> Document the
-     * key as a <em>simulated</em>-ms budget divided by the pace, not as a raw real-ms period. A
-     * real-ms key recreates exactly the trap this comment describes for {@code Generator} and
-     * {@code Planning}, whose wake-ups feed the same latency-derived gaps. The three agents must
-     * also agree on one value, which is the other half of why it belongs in the configuration
-     * rather than in three constants.
+     * <b>#33 discharged the note this comment used to carry.</b> The budget is now
+     * {@code sim.clock.granularityMs}, and it is documented — here and in
+     * {@code docs/scenario-config.md} — as a <em>simulated</em>-ms budget that is divided by the
+     * pace, never as a raw real-ms period, because a real-ms key would recreate exactly the trap
+     * described above for {@code Generator} and {@code Planning}, whose wake-ups feed the same
+     * latency-derived gaps. {@link #GRANULARITY_TARGET_SIM_MS} is its default and is unchanged, so
+     * a run that sets nothing gets the value this comment's arithmetic was done on. There is one
+     * value and there are two call sites — this agent's ticker and the one {@code Planning}
+     * registers on the {@code Main} agent, which {@code Generator} shares rather than adding a
+     * third — so "the tickers agree" is now a property of the configuration rather than of three
+     * constants staying in step.
      * <p>
      * <b>Not measured here.</b> The numbers above are arithmetic on a measured boundary, not a
      * measurement of this port. Measuring the actual gap distribution against 220 per scenario —
@@ -391,10 +398,27 @@ public class RoadAgent extends Agent {
      * @return the ticker period in real milliseconds, at least 1
      */
     static long granularityMsFor(double pace) {
+	return granularityMsFor(pace, ScenarioConfig.get().getClockGranularityMs());
+    }
+
+    /**
+     * The same arithmetic with the budget supplied, so that a test can drive both inputs and so
+     * that the function stays pure. {@link #granularityMsFor(double)} is this with the budget read
+     * from {@code sim.clock.granularityMs}.
+     *
+     * @param pace simulated ms per real ms; strictly positive
+     * @param targetSimMs the lateness budget in simulated milliseconds; strictly positive
+     * @return the ticker period in real milliseconds, at least 1
+     */
+    static long granularityMsFor(double pace, long targetSimMs) {
 	if (!(pace > 0) || Double.isInfinite(pace)) {
 	    throw new IllegalArgumentException("pace must be finite and positive, was " + pace);
 	}
-	return Math.max(1L, (long) Math.ceil(GRANULARITY_TARGET_SIM_MS / pace));
+	if (targetSimMs <= 0) {
+	    throw new IllegalArgumentException(
+		    "granularity budget must be positive, was " + targetSimMs);
+	}
+	return Math.max(1L, (long) Math.ceil(targetSimMs / pace));
     }
     private String rightStation;
     private String leftStation;
@@ -434,44 +458,6 @@ public class RoadAgent extends Agent {
      * than recomputing it and asserting against its own arithmetic.
      */
     private long tickPeriodMs;
-
-    /**
-     * <b>Vestigial</b>, and superseded by {@link RoadDirection}, which is the same three
-     * constants with the same three symbols in the framework-free {@code msg} package where the
-     * {@code RoadStateReport} payload can reach them. This agent's state field is a
-     * {@code RoadDirection}; nothing here reads the enum below any more.
-     * <p>
-     * It survives only because {@code RailwayCanvas.java:31} imports it,
-     * {@code RailwayMainAgent.roadAgentStates} is a {@code Map<String, RoadAgent.State>} and
-     * {@code TraceProbe.onRoadState} casts to it. Delete with #33.
-     */
-    public enum State {
-	/**
-	 * road is empty
-	 */
-	FREE(""),
-	/**
-	 * train travel from right station to left
-	 */
-	TRAVEL_LEFT("<"),
-	/**
-	 * train travel from left station to right
-	 */
-	TRAVEL_RIGHT(">");
-	
-	private String symbol;
-
-	private State(String symbol) {
-	    this.symbol = symbol;
-	}
-
-	/** 
-	 * @return symbol of direction
-	 */
-	public String getSymbol() {	    
-	    return symbol;
-	}
-    }
 
     /**
      * Reads the three construction arguments {@code RailwayMainAgent} used to pass to the

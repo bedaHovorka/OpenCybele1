@@ -21,6 +21,9 @@ import cybele.kernel.Activity;
 import cybele.kernel.Cybele;
 import cybele.kernel.CybeleEvent;
 import cybele.kernel.Handler;
+import cz.vutbr.fit.ags.railway.domain.msg.Channel;
+import cz.vutbr.fit.ags.railway.domain.msg.RoadDirection;
+import cz.vutbr.fit.ags.railway.domain.msg.StationInfo;
 
 /**
  * The parity trace probe (issue #20): a passive Cybele agent that subscribes to all
@@ -31,7 +34,8 @@ import cybele.kernel.Handler;
  *
  * The whole application prints two lines — {@code "<train> in <station> at <departure>"}
  * from {@link Planning} and {@code "<train> started"} from {@link Train}. Everything else
- * it does reaches the Swing canvas through {@link java.util.Observable} and never touches
+ * it does reaches the Swing canvas through the hub's listener list ({@code java.util.Observable}
+ * until #33 replaced it with {@code RailwayView.Listener}) and never touches
  * a stream, so the behaviour that has to be preserved by the JADE (#36) and Jason (#43)
  * ports is, today, unobservable. This probe is what makes it observable.
  *
@@ -72,8 +76,8 @@ import cybele.kernel.Handler;
  * <h3>1. The aliased payload</h3>
  *
  * The kernel runs {@code Local;NoSerialization} ({@code cybele.prop}), so a payload
- * crosses a channel <b>by reference</b> (INVENTORY {@code SEM-05}). {@link Station.Info}
- * is a non-static inner class of the very {@link Station} that keeps mutating it — from
+ * crosses a channel <b>by reference</b> (INVENTORY {@code SEM-05}). {@code Station.Info}
+ * was a non-static inner class of the very {@link Station} that kept mutating it — from
  * {@code Station.enter} and {@code Station.leave}, on the station's own thread — so what
  * arrives here is a live alias, not a message. Every handler below therefore reads the
  * mutable fields into locals as its <em>first</em> statement and formats from those. It is
@@ -185,7 +189,7 @@ public class TraceProbe implements Handler {
         }
         // CH-09, CH-10 — per station.
         for (String station : config.getStationNames()) {
-            Activity.openChannel(Station.PATH_FIND_REPLY + station, "onPathFindReply", this);
+            Activity.openChannel(Channel.PATH_FIND_REPLY.cybeleChannelName(station), "onPathFindReply", this);
             Activity.openChannel(RailwayMainAgent.CHANNEL_STATION_INFO + station, "onStationInfo", this);
         }
         // CH-08, CH-11 — per track.
@@ -395,23 +399,29 @@ public class TraceProbe implements Handler {
     }
 
     /**
-     * CH-10 {@code STATION.INFO.<st>} — {@code {Station.Info}}, a station to the main agent.
+     * CH-10 {@code STATION.INFO.<st>} — a station to the main agent.
      * <p>
-     * <b>The aliasing hazard.</b> {@code message[0]} is not a copy: under
-     * {@code Local;NoSerialization} it is the station's own live {@link Station.Info}
-     * instance, and {@code Station.enter}/{@code Station.leave} keep incrementing and
-     * decrementing {@code occupied} on it from the station's thread. The two field reads
-     * below are the first two statements of this handler for that reason — everything
-     * downstream formats from the {@code int} locals, which nothing can mutate. Reading
-     * {@code info.occupied} later, inside the string concatenation, would record whatever
-     * value the station had reached by then.
+     * <b>The aliasing hazard.</b> Under {@code Local;NoSerialization} {@code message[0]} was not a
+     * copy: it was the station's own live {@code Station.Info} instance, and
+     * {@code Station.enter}/{@code Station.leave} kept incrementing and decrementing
+     * {@code occupied} on it from the station's thread. The two field reads below are the first
+     * two statements of this handler for that reason — everything downstream formats from the
+     * {@code int} locals, which nothing can mutate. Reading the field later, inside the string
+     * concatenation, would record whatever value the station had reached by then.
+     * <p>
+     * <b>#33 re-pointed the payload type and the hazard is gone with it.</b> {@code Station.Info}
+     * was deleted when its last three namers were ported; the type here is now the ontology's
+     * immutable {@link StationInfo} record, which is the snapshot semantics
+     * {@code docs/defect-triage.md} §3.2 puts inside the contract for DEF-13. The
+     * snapshot-first ordering is kept anyway — it costs nothing, and this probe is #36's to
+     * rewrite, not to quietly loosen.
      */
     public void onStationInfo(CybeleEvent ev) {
         try {
-            final Station.Info info = (Station.Info) ev.getMessage()[0];
+            final StationInfo info = (StationInfo) ev.getMessage()[0];
             // Snapshot FIRST. Do not move these two lines.
-            final int occupied = info.occupied;
-            final int capacity = info.capacity;
+            final int occupied = info.occupied();
+            final int capacity = info.capacity();
             final String station = owner(ev);
             emit(station, "STATION_INFO", station, RailwayMainAgent.MAIN_AGENT_NAME,
                     "occupied=" + occupied + ",capacity=" + capacity);
@@ -419,14 +429,18 @@ public class TraceProbe implements Handler {
     }
 
     /**
-     * CH-11 {@code ROAD.STATE.<tr>} — {@code {RoadAgent.State}}, a track to the main agent.
+     * CH-11 {@code ROAD.STATE.<tr>} — a track to the main agent.
      * The payload is an enum constant, so it is immutable and carries no aliasing hazard;
      * the {@code RoadAgent} fields that <em>are</em> mutable (its queue, its timetable, the
      * train in transit) never cross a channel.
+     * <p>
+     * {@code RoadAgent.State} was deleted by #33 along with its last three namers; this is the
+     * same three constants with the same three symbols, in the ontology package where the
+     * {@code RoadStateReport} payload can reach them.
      */
     public void onRoadState(CybeleEvent ev) {
         try {
-            final RoadAgent.State state = (RoadAgent.State) ev.getMessage()[0];
+            final RoadDirection state = (RoadDirection) ev.getMessage()[0];
             final String name = (state == null) ? NULL : state.name();
             final String road = owner(ev);
             emit(road, "ROAD_STATE", road, RailwayMainAgent.MAIN_AGENT_NAME, "state=" + name);
