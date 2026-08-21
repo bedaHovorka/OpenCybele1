@@ -103,6 +103,61 @@ env:
   MAX_ATTEMPTS: '2'
 
 jobs:
+  # ---------------------------------------------------------------------------------------------
+  # The PORT guard (#75). The job above builds the application from `opencybele-baseline` and
+  # therefore never compiles the branch under test -- from #30 onward `src/main` is a JADE
+  # application that does not run under Cybele at all (see #4's sequencing comment), so that job
+  # will keep reporting green while testing a different program.
+  #
+  # This job is the honest port-side check until #36's JadeLauncher makes the JADE implementation
+  # executable by the harness: `./gradlew build` on THIS ref -- compilation plus every unit suite
+  # (domain, ontology, clock, and the ported agents' behaviour-as-POJO tests).
+  #
+  # It needs the vendor jars for the same reason the tree still compiles mid-port: the un-ported
+  # Cybele classes are still there. It does NOT need `installDist` and does not start the
+  # application, because during 1-PORT there is no runnable application to start.
+  # ---------------------------------------------------------------------------------------------
+  port-build:
+    name: build@this-ref
+    runs-on: ubuntu-24.04
+    # Measured locally at ~7 s of Gradle work. 15 minutes is a runaway guard, not a budget.
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out this ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # `bootstrap-vendor-jars.sh` restores the untracked jars from the `withoutGradle` tag,
+          # so the tag has to be in the clone. The default fetch-depth of 1 does not carry tags.
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          validate-wrappers: true
+          cache-provider: basic
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Bootstrap the vendored Cybele jars
+        run: scripts/bootstrap-vendor-jars.sh
+
+      - name: Build and run every unit suite
+        run: ./gradlew --no-daemon --console=plain --stacktrace build
+
+      - name: Publish the unit test reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v6.0.0
+        with:
+          name: port-build-test-results
+          path: build/test-results/test/**/*.xml
+          if-no-files-found: warn
+
   characterization-it:
     # The name the milestone refers to, and the shape #40 (@jade) and #52 (@jason) will clone:
     # same steps, a different implementation checkout and a different `-P<impl>.dist`.
