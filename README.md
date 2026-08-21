@@ -315,6 +315,7 @@ Full write-up, including how to reproduce the job locally: [`docs/ci.md`](docs/c
 - [`docs/headless-and-stop.md`](docs/headless-and-stop.md) — headless mode, the bounded stop condition, the exit-code table, and the kernel clock-registration race that removing the GUI exposes
 - [`docs/trace-format.md`](docs/trace-format.md) — the canonical parity trace: the line format as a cross-framework contract, the fifteen channels, the aliased-payload hazard, and the probe-on/probe-off perturbation measurement
 - [`docs/message-ontology.md`](docs/message-ontology.md) — the JADE message ontology: all fifteen channels mapped to an addressing mode, a FIPA performative, a payload record and a `MessageTemplate`; the topic-granularity decision; the `ENTER` payload asymmetry
+- [`docs/clock-abstraction.md`](docs/clock-abstraction.md) — simulated time as an object: the `SimClock`/`AgentClock` design, absolute simulated deadlines, the pace decision, the virtual clock, and the measurement that showed the `pauseClock`/`resumeClock` idiom is not a mutex
 
 `dokumentace.pdf` and `prezentace.pdf` (in Czech) are the original project documentation and presentation submitted for the course.
 

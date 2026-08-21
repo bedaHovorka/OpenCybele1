@@ -82,6 +82,8 @@ Since #28 the railway *rules* are plain Java in a source set of their own, and t
 - **`TravelDelay`** — the travel-time expression; the Gaussian draw stays with the agent.
 - **`domain.util` package** — generic data structures: `UnorientedGraph`/`HashMapGraph` (graph of stations/tracks, plus `Util.path`/`Util.pathDirection` for pathfinding), `TreeMultiMap` (sorted multi-map used for station/road timetables), `Doubleton` (unordered pair, used as graph edge key). Moved here unchanged from `cz.vutbr.fit.ags.xhovor07.util`; `AbstractUnorientedGraph` was dead code and was deleted.
 
+- **`domain.clock` package** — simulated time (#29): `SimClock` (the time source: `nowMs`, `pause`, `resume`, `setPace`), `PacedClock` (derived from real time at a pace), `VirtualClock` (advanced explicitly by a test — deterministic L2 tests, #38), `DeadlineQueue` (min-heap keyed on **absolute simulated ms**, so a pace change moves nothing) and `AgentClock` (one per agent; `runDue()` fires wake-ups **on the calling thread**, never on a timer thread, because one thread per agent is JADE's invariant). `PauseSemantics.BOOLEAN_2008` reproduces the kernel's uncounted pause; the default is counted. See [`docs/clock-abstraction.md`](docs/clock-abstraction.md) — including why the `pauseClock`/`resumeClock` idiom at `Planning.java:108-112` and `RoadAgent.java:132-134,167-169` is **deleted rather than replaced with a lock** (`docs/probes/ExpI.java`: it excludes no thread — what it does exclude is clock-derived events system-wide, which #21's normalizer projects; `docs/probes/ExpJ.java`: `setTimer` re-reads the clock, so only `Planning`'s bracket protected anything, and `scheduleAt` on an absolute instant is what replaces it).
+
 - **`domain.msg` package** — the message ontology (#27): `Channel` (all fifteen Cybele channels as data — event token, payload keys, endpoint kinds, subject rule, FIPA performative), `RailwayMessage` and the fifteen immutable payload records, `Payloads` (trace field-7 rendering and its inverse), `TraceLine` (the seven-field trace line), plus `Performative`/`Subject`/`Party`/`RoadDirection`. Pure data, no framework: branch `jason` (#46) reuses it verbatim. See [`docs/message-ontology.md`](docs/message-ontology.md).
 
 **These classes are a transcription, not a cleanup.** Pinned defects (`DEF-03` `long`→`int` narrowing, `DEF-04` dead `frequency` tie-break, `DEF-06` unguarded unboxing NPE, `DEF-16` unclamped negative travel delay, the `compareTo(null) == -1` contract deviation, and the first-path-not-shortest DFS) are reproduced deliberately, each with a `DEF-nn` comment and a unit test in `src/test/java` named for what it preserves. See `docs/defect-triage.md` §3.1/§3.1.1 before changing any of them.
@@ -94,7 +96,9 @@ The one layer of the message ontology that cannot be framework-free: `RailwayOnt
 `:ontology` slot and topic name per channel, and the FIPA act name → JADE `int` lookup),
 `Messages` (build/read an `ACLMessage` — direct AID unicast, plus the optional probe topic as a
 second receiver) and `Templates` (the fifteen `MessageTemplate`s, the per-agent-kind unions, and
-the `not(inbound)` drain).
+the `not(inbound)` drain). Plus `clock.ClockTickerBehaviour` (#29) — the one part of the
+clock that needs `jade.core.behaviours`: a per-agent granularity `TickerBehaviour` whose
+`onTick()` drains that agent's due simulated-time wake-ups on the agent's own thread.
 
 It is **not** on the Cybele application's classpath: JADE is on `jadeOntologyImplementation` and
 on `testImplementation`, never on `implementation`, so `./gradlew run` and `installDist` are the
