@@ -80,6 +80,25 @@ dependencies {
     "jadeOntologyImplementation"("net.sf.ingenias:jade:4.3")
 }
 
+// #30 SPENDS THE BUDGET THE COMMENT ABOVE SET ASIDE, and this is the note that says so.
+//
+// That comment keeps JADE off `main` because "the Cybele agents deliberately do NOT use this
+// ontology (that is #30-#34's job, ticket by ticket, each with its own gate run)". #30 is the
+// first of those tickets: `Station` is now a `jade.core.Agent` that builds its messages with
+// `Messages`/`Templates`, so `main` needs JADE and this source set's output on its compile
+// classpath. Packaged as a jar, exactly like `domainJar`, so `main` consumes it as a library and
+// the one-way dependency stays visible in the build file.
+//
+// The cost is the one that comment predicted: jade-4.3.jar and this jar land in
+// `build/install/opencybele/lib` and on the start script's classpath. It is no longer a change to
+// the thing under measurement -- per #4's sequencing decision the application stops running at
+// #30, and the parity gate measures the frozen baseline dist in `../wt/opencybele-ref`, not this
+// tree's. Nothing else in the build moves.
+val jadeOntologyJar by tasks.registering(Jar::class) {
+    archiveBaseName.set("opencybele-jade-ontology")
+    from(jadeOntology.output)
+}
+
 tasks.named("check") {
     dependsOn(jadeOntology.classesTaskName)
 }
@@ -243,6 +262,11 @@ dependencies {
     // therefore inside `installDist`'s lib/ and on the start script's classpath. The
     // dependency is deliberately one-way -- `domain` has no dependency on `main`.
     implementation(files(domainJar))
+
+    // #30: `Station` is a `jade.core.Agent`. See the note next to `jadeOntologyJar` for why this
+    // is now on `main` when the jadeOntology source set's comment says it should not be.
+    implementation("net.sf.ingenias:jade:4.3")
+    implementation(files(jadeOntologyJar))
 
     // L1 (TESTING.md 4.1): unit tests for the extracted domain rules. JUnit 5 is already a
     // dependency of the harness source set, so this adds no new coordinate to resolve.

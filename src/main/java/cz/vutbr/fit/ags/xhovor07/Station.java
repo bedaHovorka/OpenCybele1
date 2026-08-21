@@ -10,18 +10,37 @@
 package cz.vutbr.fit.ags.xhovor07;
 
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
-import cybele.kernel.Activity;
-import cybele.kernel.Agent;
-import cybele.kernel.CybeleEvent;
 import cz.vutbr.fit.ags.railway.domain.StationQueue;
 import cz.vutbr.fit.ags.railway.domain.StationSchedule;
+import cz.vutbr.fit.ags.railway.domain.msg.Channel;
+import cz.vutbr.fit.ags.railway.domain.msg.EnterReply;
+import cz.vutbr.fit.ags.railway.domain.msg.EnterRequest;
+import cz.vutbr.fit.ags.railway.domain.msg.LeaveNotice;
+import cz.vutbr.fit.ags.railway.domain.msg.Party;
+import cz.vutbr.fit.ags.railway.domain.msg.PathFindReply;
+import cz.vutbr.fit.ags.railway.domain.msg.PathFindRequest;
+import cz.vutbr.fit.ags.railway.domain.msg.RailwayMessage;
+import cz.vutbr.fit.ags.railway.domain.msg.StationInfo;
+import cz.vutbr.fit.ags.railway.domain.msg.Vote;
+import cz.vutbr.fit.ags.railway.domain.msg.VoteRequest;
+import cz.vutbr.fit.ags.railway.domain.msg.VoteResult;
+import cz.vutbr.fit.ags.railway.jade.Messages;
+import cz.vutbr.fit.ags.railway.jade.Templates;
+import jade.core.Agent;
+import jade.core.behaviours.CyclicBehaviour;
+import jade.lang.acl.ACLMessage;
+import jade.lang.acl.MessageTemplate;
 
 /**
- * Agent represents station
+ * Agent represents station — <b>ported to JADE by #30</b>.
  * <p>
  * {@link #computeDifference(String, long)} schedules against a <em>voting window</em>
  * ({@code sim.station.voteWindowMs}). Before #18 that window was
@@ -32,28 +51,167 @@ import cz.vutbr.fit.ags.railway.domain.StationSchedule;
  *
  * <p>
  * Since #28 the timetable and the voting rule live in {@link StationSchedule} and the
- * waiting queue in {@link StationQueue}, both framework-free; this agent is the Cybele
- * glue around them — channels, the {@code Info} the GUI observes, and the lazy
+ * waiting queue in {@link StationQueue}, both framework-free; this agent is the framework
+ * glue around them — messages, the {@code STATION_INFO} the GUI hub observes, and the lazy
  * {@code PATH_FIND} round trip.
+ *
+ * <h2>The blocking {@code wait()} is gone, and what replaced it</h2>
+ * The 2008 agent resolved the onward direction inside its own message handler:
+ * <pre>
+ * Activity.sendAll(RailwayMainAgent.PATH_FIND, new Serializable[]{getName(), target});
+ * wait();                       // blocks the station's own handler thread
+ * dir = pathDirs.get(target);
+ * </pre>
+ * and a second Cybele activity ({@code PathFinding}, ACT-04) existed for the sole purpose of
+ * owning a second thread that could {@code notify()} it. {@code PathFinding.java:20} says so
+ * itself: <em>"Solution of problem with {@code Activity.sendAllBlock}"</em>. Both the wait and
+ * that activity are <b>deleted</b> here. A JADE agent runs all of its behaviours on one thread,
+ * so a blocking {@code action()} would stall the whole scheduler — not one channel, every
+ * channel <em>and</em> every behaviour.
+ *
+ * <p>
+ * <b>What the workaround cost the original, for #41's comparison log.</b> One extra activity class
+ * (49 lines) instantiated <em>eight times</em>, once per station — ACT-04 in
+ * {@code docs/INVENTORY.md} §3, which counts 11 explicit activities at steady state and calls ACT-03
+ * and ACT-04 "pure workarounds ... Both disappear in a framework with non-blocking continuations".
+ * With it came a cross-thread monitor protocol between the station and its own activity, and the
+ * only two defects at this site: DEF-01 and DEF-23 exist <em>because</em> of the borrowed thread,
+ * not despite it. The port replaces all of that with one handler method and one map. The register
+ * of what the kernel gave back for the price is {@code docs/CYBELLE_TO_JADE.md}; this is one entry
+ * in it.
+ *
+ * <p>
+ * In its place: {@link #resolveDirection(String, Consumer)}, an explicit continuation queue.
+ * On a cache hit it calls the continuation <b>synchronously, in-line</b>, so the hit path — which
+ * is every path once the cache is warm — emits exactly the messages the 2008 handler emitted, in
+ * exactly its order. On a miss it parks the continuation in {@link #pending}, sends
+ * {@code PATH_FIND}, and returns; {@link #pathFindReply} resumes it when the answer arrives.
+ *
+ * <p>
+ * <b>Misses coalesce per target.</b> The 2008 station could only ever have one request in flight,
+ * because the blocked handler stopped it from starting a second one (INVENTORY SEM-04). This one
+ * can be handling a second {@code ENTER} while the first is still pending, so a second miss on the
+ * <em>same</em> target must attach to the request already in flight rather than send another. It
+ * is not tidiness: {@code PATH_FIND}/{@code PATH_FIND_REPLY} are traced lines, the golden pins the
+ * multiset of lines in a burst ({@code docs/trace-normalizer.md} §3), and a duplicate request would
+ * be a line the baseline never wrote.
+ *
+ * <h2>Is the changed interleaving observable? No, and here is the argument</h2>
+ * A miss window is now <em>permeable</em>: other {@code ENTER}/{@code LEAVE}/vote traffic on this
+ * station is served while a continuation is parked, where Cybele queued it behind the blocked
+ * handler (SEM-04). Three things bound what that can do to a trace.
+ * <ol>
+ *   <li><b>The multiset of lines does not change.</b> Misses coalesce per target, so the run still
+ *       emits one {@code PATH_FIND}/{@code PATH_FIND_REPLY} pair per (station, target) — 21 pairs
+ *       in the traced 66-train run {@code docs/trace-format.md} measured.</li>
+ *   <li><b>No state a message is computed from moves.</b> The only work deferred past a suspension
+ *       is {@code sendEnterReply} and {@code sendInfo}; neither touches the timetable, and
+ *       {@code occupied} is already incremented before the request goes out, exactly as in 2008.
+ *       The one place where deferred work <em>did</em> touch the timetable is {@link #leave}, and
+ *       that is what the hoist above removes.</li>
+ *   <li><b>What is left is line order inside one burst, which the golden does not pin.</b> A
+ *       {@code PATH_FIND} round trip is one local message pair; the normalizer segments at gaps
+ *       over 220 simulated ms and sorts within a segment, and {@code docs/trace-normalizer.md} §3
+ *       states the trade in as many words: "Within one burst the golden pins <em>which lines
+ *       occurred</em>, not <em>in what order</em>."</li>
+ * </ol>
+ * The residual, stated rather than hidden: if a miss window straddled a burst boundary the two
+ * implementations would order those lines differently and the projection would not carry it. That
+ * cannot be settled from here — it is #36's first gate run and #39's to triage, under the 1-POST
+ * rule, and it is a <em>normalizer-gap-or-port-bug</em> question, never accepted drift.
+ *
+ * <h2>The defects at this site, decided rather than inherited</h2>
+ * <ul>
+ *   <li><b>DEF-01</b> (spurious/mis-targeted wakeup ⇒ {@code null} direction ⇒ a train that dies
+ *       mid-route) — class (c), never observed, "do not file"
+ *       ({@code docs/defect-triage.md} §3.3). The continuation has no monitor to be woken
+ *       spuriously from, and it resumes only on a reply <em>for its own target</em>, so the branch
+ *       is structurally unreachable. Nothing is lost: no golden records it, and §6.1's note
+ *       withdraws the requirement that a port reproduce a class-(c) hang observably. The
+ *       {@code notify()}-vs-{@code notifyAll()} half of the row is vacuous either way — a station
+ *       dispatches serially, so there was never more than one waiter on the monitor.</li>
+ *   <li><b>DEF-23</b> (the reply never comes ⇒ the station stalls forever) — class (c), PIN. The
+ *       <em>untimed</em> half is reproduced exactly: there is no timeout and no fall-through, so a
+ *       lost {@code PATH_FIND_REPLY} leaves that continuation parked forever and the train it
+ *       belongs to is never admitted. Adding a timeout that resumed with a {@code null} direction
+ *       would <em>manufacture</em> DEF-01 out of DEF-23, which §6.1 calls "a loud baseline hang
+ *       turned into quiet wrong data". The <em>starvation</em> half — every other {@code ENTER},
+ *       {@code LEAVE} and vote on the station starving behind the blocked handler (SEM-04) — is
+ *       <b>not</b> reproduced, and cannot be: it is a property of Cybele's serial per-activity
+ *       dispatch, not of this application. {@link #pendingTargets()} exposes the parked set so
+ *       #36/#38 can assert on it instead of watching for a hang.</li>
+ *   <li><b>No wait-loop / no predicate re-check</b> — turned into a predicate by construction. A
+ *       reply is matched to the continuations parked on <em>its</em> target; a reply nobody is
+ *       waiting for updates the cache and resumes nothing.</li>
+ *   <li><b>{@code leave} resolved the direction before {@code removeTrain}</b> — the same family.
+ *       Deterministic, and <em>unobservable in the baseline</em>, because SEM-04 makes the window
+ *       impermeable: nothing else on that station can run between the two. Under a continuation
+ *       the window becomes permeable, and a {@code VOTE_REQUEST} landing inside it would vote
+ *       against a timetable that still holds the departed train. {@link #leave} therefore
+ *       <b>hoists</b> {@code schedule.removeTrain(train)} above the resolution. That reordering is
+ *       what preserves the behaviour; transliterating the source order would have changed it.</li>
+ *   <li><b>DEF-13</b> (the aliased, still-mutating {@code Info} payload) — class (b), projected
+ *       ({@code docs/defect-triage.md} §3.2). {@link #sendInfo} now ships an immutable
+ *       {@link StationInfo} record, i.e. snapshot semantics, which that row explicitly places
+ *       <em>inside</em> the contract.</li>
+ * </ul>
+ *
+ * <h2>Why there is no {@code synchronized} left</h2>
+ * The 2008 handlers were {@code synchronized} and {@code PathFinding} took the station's monitor,
+ * for a real reason: ACT-04 was a <em>second thread</em> touching {@code pathDirs}. This ticket
+ * deletes that thread. Every field below is now touched only from the behaviours of this agent,
+ * and JADE runs one agent on one thread. The monitor is redundant <em>here</em> — which is the
+ * per-agent argument #4 asks each ticket to make for itself, not a licence for the other four.
+ *
+ * <h2>What still runs on Cybele</h2>
+ * Nothing in this file does, and the application does not run until #31–#34 land — see #4. The two
+ * vestigial members kept below, {@link #PATH_FIND_REPLY} and {@link Info}, exist only so the
+ * not-yet-ported {@code RailwayMainAgent}, {@code RailwayCanvas} and {@code TraceProbe} still
+ * compile. They are #34's to delete.
  *
  * @author Bedrich Hovorka
  *
  */
-public class Station extends StaticRailwayObject {
+public class Station extends Agent {
     private static final long serialVersionUID = 1L;
     /**
      * channel for sending path find result
+     * <p>
+     * <b>This agent no longer uses it.</b> JADE routes {@code PATH_FIND_REPLY} by the station's
+     * AID plus the {@code railway.PATH_FIND_REPLY} ontology slot
+     * ({@code docs/message-ontology.md} §6). The constant stays for two reasons: the
+     * not-yet-ported {@code RailwayMainAgent} and {@code TraceProbe} still name the channel, and
+     * #27's {@code ChannelTableTest.cybele_channel_names_are_reproduced_verbatim} compares
+     * {@code Channel.PATH_FIND_REPLY} against exactly this literal. The first reason expires with
+     * #34; the second does not.
      */
     public static final String PATH_FIND_REPLY = "PATH_FIND_REPLY.";
     private Collection<String> roads;//trate vychazejici ze stacice
     private Map<String, String> pathDirs = new HashMap<String, String>();//prubezne vytvarene znalosti o siti <stanice, jakou trati>
+    /**
+     * Continuations parked on a {@code PATH_FIND} that has not been answered yet, keyed by the
+     * target station. Insertion-ordered so that two trains waiting on the same answer resume in
+     * arrival order. The key set is exactly the set of requests in flight, which is what makes
+     * "one request per target" checkable rather than hoped for.
+     */
+    private final Map<String, List<Consumer<String>>> pending =
+            new LinkedHashMap<String, List<Consumer<String>>>();
     private final StationQueue queue = new StationQueue();
     private final long voteWindow = ScenarioConfig.get().getStationVoteWindowMs();
-    private final StationSchedule schedule;
-    private Info info;
+    private StationSchedule schedule;
+    private int capacity;
+    private int occupied;
 
     /**
      * Information about state
+     * <p>
+     * <b>Vestigial</b>, and the reason is worth keeping: this class <em>was</em> the payload of
+     * CH-10, shipped by reference under {@code Local;NoSerialization} and mutated after the send
+     * — INVENTORY SEM-05, DEF-13. The JADE port sends an immutable {@link StationInfo} record
+     * instead, which is the snapshot semantics {@code docs/defect-triage.md} §3.2 places inside
+     * the contract. The type survives only because {@code RailwayMainAgent.stationInfos},
+     * {@code RailwayCanvas.paintStation} and {@code TraceProbe.onStationInfo} still name it.
+     * Delete with #34.
      */
     public class Info implements Serializable {
 	private static final long serialVersionUID = 1L;
@@ -65,21 +223,110 @@ public class Station extends StaticRailwayObject {
 	    this.occupied = occupied;
 	}
     }
-    
+
     /**
-     * @param capacity
-     * @param roads
+     * Reads the two construction arguments {@code RailwayMainAgent} used to pass to the
+     * constructor — capacity and the tracks leaving this station — registers the inbound and
+     * drain behaviours, and pushes the opening {@code STATION_INFO}.
+     * <p>
+     * The opening push is the last statement, as it was the last statement of the 2008
+     * constructor: it is the first line this station contributes to a trace.
      */
-    public Station(int capacity, Collection<String> roads) {
-	this.roads = roads;
-	info = new Info(0, capacity);
+    @Override
+    @SuppressWarnings("unchecked")
+    protected void setup() {
+	final Object[] args = getArguments();
+	if (args == null || args.length != 2) {
+	    throw new IllegalArgumentException(
+		    "Station " + getLocalName() + " needs {Integer capacity, Collection<String> roads}");
+	}
+	this.capacity = ((Number) args[0]).intValue();
+	this.roads = (Collection<String>) args[1];
 	this.schedule = new StationSchedule(capacity, voteWindow);
-	Agent.createActivity("pathFindWaiting", PathFinding.class.getName(), new Object[]{this});
+	addBehaviour(new Inbox());
+	addBehaviour(new Drain());
 	sendInfo();
     }
 
+    /**
+     * The one inbound behaviour. All five of this agent's channels share it, because a JADE agent
+     * has one message queue and five competing {@code receive}/{@code block()} loops over
+     * overlapping templates is the classic way to lose a message to it
+     * ({@code docs/message-ontology.md} §7).
+     */
+    final class Inbox extends CyclicBehaviour {
+	private static final long serialVersionUID = 1L;
+	private final MessageTemplate template = Templates.inbound(Party.STATION);
+
+	@Override
+	public void action() {
+	    final ACLMessage acl = myAgent.receive(template);
+	    if (acl == null) {
+		block();
+		return;
+	    }
+	    dispatch(acl);
+	}
+    }
+
+    /**
+     * The drain {@code docs/message-ontology.md} §7 asks every ported agent to register: the exact
+     * complement of {@link Inbox}'s template. With a correct port it never fires. When it does it
+     * names the bug on the spot rather than presenting it as a hang.
+     */
+    final class Drain extends CyclicBehaviour {
+	private static final long serialVersionUID = 1L;
+	private final MessageTemplate template = Templates.unexpected(Party.STATION);
+
+	@Override
+	public void action() {
+	    final ACLMessage acl = myAgent.receive(template);
+	    if (acl == null) {
+		block();
+		return;
+	    }
+	    unexpected(acl);
+	}
+    }
+
+    /**
+     * Dispatch one inbound message to the handler for its channel.
+     * <p>
+     * Named {@code dispatch} rather than {@code handle} because {@code Behaviour.handle} exists
+     * and an inner {@code CyclicBehaviour} would resolve the unqualified call to that one.
+     * <p>
+     * Package-visible and free of any container dependency on purpose: it is the seam
+     * {@code docs/TESTING.md} §4.1 asks for, so the whole agent can be driven as a POJO.
+     *
+     * @param acl a message matching {@link Templates#inbound(Party)} for {@link Party#STATION}
+     */
+    void dispatch(ACLMessage acl) {
+	final Channel channel = Messages.channelOf(acl);
+	final RailwayMessage message = Messages.contentOf(acl);
+	switch (channel) {
+	    case ENTER -> enter((EnterRequest) message);
+	    case LEAVE -> leave((LeaveNotice) message);
+	    case VOTE_REQUEST -> voteRequest((VoteRequest) message);
+	    case VOTE_RESULT -> voteResult((VoteResult) message);
+	    case PATH_FIND_REPLY -> pathFindReply((PathFindReply) message);
+	    default -> unexpected(acl);
+	}
+    }
+
+    /**
+     * Report a message this agent has no handler for. Loud, and it does not throw: the queue is
+     * drained either way, so one stray message cannot wedge the agent.
+     *
+     * @param acl the message
+     */
+    void unexpected(ACLMessage acl) {
+	System.err.println("Station " + name() + ": unexpected message, ontology=" + acl.getOntology()
+		+ " performative=" + ACLMessage.getPerformative(acl.getPerformative())
+		+ " from=" + Messages.senderName(acl));
+    }
+
     private void sendInfo() {
-	Activity.sendAll(RailwayMainAgent.CHANNEL_STATION_INFO+getName(), new Serializable[]{info});
+	emit(new StationInfo(occupied, capacity), RailwayMainAgent.MAIN_AGENT_NAME);
     }
 
     /**
@@ -98,55 +345,195 @@ public class Station extends StaticRailwayObject {
         return pathDirs;
     }
 
-    @Override
-    public synchronized void enter(CybeleEvent ev) {
-	final Serializable[] message = ev.getMessage();
-	final String train = (String) message[0];
-	if (info.occupied == info.capacity) {
-	    queue.offer(train, (String) message[2]);
+    /**
+     * The targets this station has an unanswered {@code PATH_FIND} out for.
+     * <p>
+     * DEF-23's observable, made checkable. A baseline station that lost a reply simply stopped
+     * emitting; this one keeps working and leaves the evidence here.
+     *
+     * @return the parked targets, in request order
+     */
+    Collection<String> pendingTargets() {
+	return new ArrayList<String>(pending.keySet());
+    }
+
+    /**
+     * Queueing system operation enter. Admit the train if there is room, otherwise queue it.
+     *
+     * @param request the train's request
+     */
+    void enter(EnterRequest request) {
+	final String train = request.train();
+	if (occupied == capacity) {
+	    queue.offer(train, request.endStation());
+	    sendInfo();
 	} else {
-	    info.occupied++;
-	    sendEnterReply(train, getPathDirection((String) message[2]));
+	    occupied++;
+	    resolveDirection(request.endStation(), dir -> {
+		sendEnterReply(train, dir);
+		sendInfo();
+	    });
 	}
-	sendInfo();
     }
 
-    private String getPathDirection(String target) {
-	if (target.equals(getName())) return null;
-	String dir = pathDirs.get(target);
-	if (dir == null) {
-	    try {
-		Activity.sendAll(RailwayMainAgent.PATH_FIND, new Serializable[]{getName(), target});
-		wait();
-		dir = pathDirs.get(target);		
-	    } catch (InterruptedException e) {
-		assert false : e;
-	    }
-	}
-	return dir;
-    }
-
-    @Override
-    public synchronized void leave(CybeleEvent ev) {
-	final Serializable[] message = ev.getMessage();
-	final String train = (String) message[0];
+    /**
+     * Queueing system operation leave. Release the slot, or hand it straight to the
+     * longest-waiting train.
+     * <p>
+     * {@code schedule.removeTrain(train)} is <b>hoisted</b> above the direction resolution; see
+     * the class comment. Emission order on the cache-hit path is unchanged from 2008:
+     * {@code ENTER_REPLY} then {@code STATION_INFO}.
+     *
+     * @param notice the departing train
+     */
+    void leave(LeaveNotice notice) {
+	final String train = notice.train();
+	StationQueue.Waiting admitted = null;
 	if (queue.size() == 0) {
-	    info.occupied--;
+	    occupied--;
 	} else {
-	    final StationQueue.Waiting poll = queue.poll();
-	    sendEnterReply(poll.getTrain(), getPathDirection(poll.getEndStation()));
+	    admitted = queue.poll();
 	}
 	schedule.removeTrain(train);
-	sendInfo();
+	if (admitted == null) {
+	    sendInfo();
+	    return;
+	}
+	final StationQueue.Waiting waiting = admitted;
+	resolveDirection(waiting.getEndStation(), dir -> {
+	    sendEnterReply(waiting.getTrain(), dir);
+	    sendInfo();
+	});
     }
-    
-    @Override
-    protected synchronized long computeDifference(String train, long time) {
+
+    /**
+     * Process incoming vote request.
+     *
+     * @param request the train and the time it is expected
+     */
+    void voteRequest(VoteRequest request) {
+	final long diff = computeDifference(request.train(), request.expected());
+	emit(new Vote(name(), request.train(), diff), RailwayMainAgent.MAIN_AGENT_NAME);
+    }
+
+    /**
+     * Process incoming vote result.
+     *
+     * @param result the agreed slot
+     */
+    void voteResult(VoteResult result) {
+	addToPlan(result.train(), result.planned());
+    }
+
+    /**
+     * The answer to a {@code PATH_FIND}. Caches it, then resumes every continuation parked on
+     * <em>this</em> target.
+     * <p>
+     * A reply for a target nobody is waiting on is not an error and is not a wakeup: the cache
+     * takes it and nothing resumes. That is the predicate re-check the 2008 {@code wait()} did not
+     * have (DEF-01).
+     *
+     * @param reply the target and the track to leave by
+     */
+    void pathFindReply(PathFindReply reply) {
+	pathDirs.put(reply.target(), reply.direction());
+	final List<Consumer<String>> parked = pending.remove(reply.target());
+	if (parked == null) {
+	    return;
+	}
+	for (Consumer<String> resume : parked) {
+	    resume.accept(reply.direction());
+	}
+    }
+
+    /**
+     * Resolve the track to leave by for a train headed to {@code target}, and run {@code resume}
+     * with it.
+     * <p>
+     * <b>Synchronously on a cache hit</b> — the common path, and the one that has to stay
+     * byte-identical to 2008. On a miss the continuation is parked and {@code PATH_FIND} is sent;
+     * a second miss on a target already in flight is parked behind the first and sends nothing.
+     *
+     * @param target the train's final destination
+     * @param resume what to do once the direction is known; receives {@code null} when the train
+     *     is already at its destination, exactly as {@code getPathDirection} returned {@code null}
+     */
+    private void resolveDirection(String target, Consumer<String> resume) {
+	if (target.equals(name())) {
+	    resume.accept(null);
+	    return;
+	}
+	final String dir = pathDirs.get(target);
+	if (dir != null) {
+	    resume.accept(dir);
+	    return;
+	}
+	final List<Consumer<String>> parked = pending.get(target);
+	if (parked != null) {
+	    parked.add(resume);
+	    return;
+	}
+	final List<Consumer<String>> fresh = new ArrayList<Consumer<String>>();
+	fresh.add(resume);
+	pending.put(target, fresh);
+	emit(new PathFindRequest(name(), target), RailwayMainAgent.MAIN_AGENT_NAME);
+    }
+
+    /**
+     * Enter reply - accepting train
+     *
+     * @param train the admitted train
+     * @param nextPosition the track it leaves by, or {@code null} when it has arrived
+     */
+    private void sendEnterReply(String train, String nextPosition) {
+	emit(new EnterReply(name(), nextPosition), train);
+    }
+
+    /**
+     * find free in plan and compute difference between expected time and founded free in plan
+     *
+     * @param train train id
+     * @param time the requested arrival time
+     * @return time difference
+     */
+    long computeDifference(String train, long time) {
 	return schedule.computeDifference(train, time);
     }
-    
-    @Override
-    protected synchronized void addToPlan(String train, long time) {
+
+    /**
+     * add train to plan
+     *
+     * @param train train id
+     * @param time agreed arrival time
+     */
+    void addToPlan(String train, long time) {
 	schedule.addToPlan(train, time);
+    }
+
+    /**
+     * This agent's local name — trace fields 4 and 5, and the {@code from} of a
+     * {@code PATH_FIND}.
+     * <p>
+     * Overridable so the agent can be unit-tested outside a container; in the container it is
+     * {@code getLocalName()}, which is what {@code RailwayObject.getName()} reconstructed from
+     * the Cybele agent id (INVENTORY DEF-12 notes that reifying it is the more correct form).
+     *
+     * @return the station name
+     */
+    protected String name() {
+	return getLocalName();
+    }
+
+    /**
+     * The single outbound seam. Every message this agent sends goes through here.
+     * <p>
+     * Overridable for the same reason as {@link #name()}, and it is where #36 adds the probe's
+     * topic AID as a second receiver ({@code Messages.build(msg, from, to, topic)}).
+     *
+     * @param message the payload record
+     * @param receiver the addressed agent's local name
+     */
+    protected void emit(RailwayMessage message, String receiver) {
+	send(Messages.build(message, name(), receiver));
     }
 }
