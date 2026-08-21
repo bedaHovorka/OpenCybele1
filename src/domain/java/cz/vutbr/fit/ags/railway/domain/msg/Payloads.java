@@ -11,7 +11,7 @@ import java.util.List;
  * back.
  * <p>
  * The format is fixed by {@code docs/trace-format.md} and this class is its executable copy:
- * {@code key=value,key=value} in wire order, keys from {@link Channel#payloadKeys()}, a
+ * {@code key=value,key=value} in trace field-7 order, keys from {@link Channel#payloadKeys()}, a
  * {@code null} slot rendered as the four characters {@code null}, and three characters
  * percent-escaped — {@code |} to {@code %7C}, LF to {@code %0A}, CR to {@code %0D} — with
  * {@code %} to {@code %25} applied <em>first</em> so the transformation is reversible.

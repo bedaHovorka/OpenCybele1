@@ -160,14 +160,47 @@ public final class Messages {
     }
 
     /**
-     * Trace field 1 — the subject, computed from the channel identity and the message, exactly
-     * as {@code docs/trace-format.md} fixes it. Equal to {@code acl.getConversationId()} for
-     * every message this ontology builds.
+     * Trace field 1 — the subject.
+     * <p>
+     * Read straight out of {@code :conversation-id}, which {@link #build} sets to exactly this
+     * value. <strong>No deserialization.</strong> The naive form,
+     * {@code contentOf(acl).subject(...)}, costs a full {@code getContentObject()} on every
+     * call, and a probe that also wants the payload — which #36's does, on every single line —
+     * would pay it twice per message. The slot is already there; use it.
      *
      * @param acl an incoming message
      * @return the subject
      */
     public static String subjectOf(ACLMessage acl) {
+        return acl.getConversationId();
+    }
+
+    /**
+     * Trace field 1, derived the long way — from the channel identity and the payload record,
+     * exactly as {@code docs/trace-format.md} fixes it, with no reliance on the
+     * {@code :conversation-id} slot.
+     * <p>
+     * This is the <em>normative</em> definition and {@link #subjectOf} is the fast path;
+     * {@code AclBindingTest.the_conversation_id_is_the_trace_subject} asserts they agree on
+     * every channel. A port that forgets to set the slot still has a correct answer here, and
+     * the test says so rather than the trace saying it later.
+     *
+     * @param acl an incoming message
+     * @return the subject
+     */
+    public static String computeSubject(ACLMessage acl) {
         return contentOf(acl).subject(senderName(acl), receiverName(acl));
+    }
+
+    /**
+     * Trace field 1, derived from an already-read payload record. The shape a probe should use
+     * when it holds both: one deserialization, both fields.
+     *
+     * @param acl     an incoming message
+     * @param content its payload, already read via {@link #contentOf}
+     * @return the subject
+     */
+    public static String subjectOf(ACLMessage acl, RailwayMessage content) {
+        return content.subject(senderName(acl), receiverName(acl));
     }
 }

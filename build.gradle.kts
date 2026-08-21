@@ -264,6 +264,16 @@ sourceSets["test"].runtimeClasspath += jadeOntology.output
 tasks.named<Test>("test") {
     dependsOn(jadeOntology.classesTaskName)
     useJUnitPlatform()
+    // ONE JVM for the whole lane, pinned rather than inherited from the default. #27's
+    // JadeDeliverySpikeTest boots a JADE main container, and `jade.core.Runtime` is a JVM-wide
+    // singleton -- as is `jade.core.AID.platformID`, which AgentContainerImpl overwrites at
+    // boot. Booting a second one in a second fork is not something these tests are written for,
+    // and a test that reasons about that global state has to be able to say what it is running
+    // in. Both values happen to be today's defaults; the point is that a future edit has to
+    // change them deliberately rather than inherit a change. (Same reasoning, and the same two
+    // lines, as characterizationIT below.)
+    maxParallelForks = 1
+    forkEvery = 0
     // -ea matches how the application runs (README "Assertions (-ea)", #22): a domain class
     // asserting its own preconditions must be exercised the same way here as in a recording.
     jvmArgs("-ea")

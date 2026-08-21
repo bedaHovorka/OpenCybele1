@@ -25,10 +25,12 @@ import java.util.List;
  * {@code and(MatchOntology(channel.id()), MatchPerformative(...))}. An {@code ACLMessage} has
  * exactly one {@code :ontology} slot and the fifteen ids are distinct strings, so two templates
  * can never both match. Performative alone would not be enough and it is worth knowing why:
- * seven channels are {@code inform}, and both collisions land inside a single agent —
- * {@code LEAVE} against {@code PATH_FIND_REPLY} at a station, {@code ENTER_REPLY} against
- * {@code TRAVEL_END} at a train, {@code ENTER} against {@code TRAVEL_START} at a track, and
- * three separate {@code inform}s at {@code Main}. The performative is kept in the template
+ * <strong>every</strong> collision lands inside a single agent, and there are four of them —
+ * three among the seven {@code inform} channels ({@code LEAVE} against {@code PATH_FIND_REPLY}
+ * at a station, {@code ENTER_REPLY} against {@code TRAVEL_END} at a train, and a three-way
+ * {@code STATION_INFO}/{@code ROAD_STATE}/{@code TRAIN_STATE} at {@code Main}) plus one among
+ * the {@code request}s ({@code ENTER} against {@code TRAVEL_START} at a track). The full table
+ * is {@code docs/message-ontology.md} §7. The performative is kept in the template
  * anyway, so that a message with the right channel and the wrong act is rejected loudly by
  * {@link #unexpected(Party)} instead of being silently accepted.
  */

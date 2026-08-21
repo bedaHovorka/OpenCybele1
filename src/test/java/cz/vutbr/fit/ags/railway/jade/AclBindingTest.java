@@ -38,12 +38,19 @@ class AclBindingTest {
     @Test
     @DisplayName("all fifteen channels are plain unicast to an AID resolved by local name -- no DF")
     void addressing_is_direct_aid_unicast() {
+        // Read the platform name AT ASSERT TIME, never as a literal. AID.platformID is a
+        // JVM-global static and AgentContainerImpl overwrites it at boot, so once
+        // JadeDeliverySpikeTest has run in this JVM the GUID suffix is that platform's
+        // (e.g. "@172.17.0.1:33851/JADE"), not the fixture's. Hardcoding the fixture value
+        // makes this test pass or fail on test-class discovery order, and the failure would
+        // read as an addressing bug in the ontology when it is nothing of the sort.
+        String platform = JadePlatformFixture.currentPlatformId();
         CanonicalMessages.all().forEach((channel, sample) -> {
             ACLMessage acl = Messages.build(sample.message(), sample.from(), sample.to());
             List<AID> receivers = receivers(acl);
             assertEquals(1, receivers.size(), channel.event() + " must have exactly one receiver");
             assertEquals(sample.to(), receivers.get(0).getLocalName(), channel.event());
-            assertEquals(sample.to() + "@opencybele-test", receivers.get(0).getName(), channel.event());
+            assertEquals(sample.to() + "@" + platform, receivers.get(0).getName(), channel.event());
             assertEquals(sample.from(), Messages.senderName(acl), channel.event());
             assertEquals(sample.to(), Messages.receiverName(acl), channel.event());
         });
@@ -104,7 +111,12 @@ class AclBindingTest {
         CanonicalMessages.all().forEach((channel, sample) -> {
             ACLMessage acl = Messages.build(sample.message(), sample.from(), sample.to());
             assertEquals(sample.expectedSubject(), acl.getConversationId(), channel.event());
+            // The fast path (reads the slot) and the normative derivation (reads the channel
+            // identity and the payload) must agree, or the slot is a lie the probe would repeat.
             assertEquals(sample.expectedSubject(), Messages.subjectOf(acl), channel.event());
+            assertEquals(sample.expectedSubject(), Messages.computeSubject(acl), channel.event());
+            assertEquals(sample.expectedSubject(),
+                    Messages.subjectOf(acl, Messages.contentOf(acl)), channel.event());
         });
     }
 

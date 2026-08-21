@@ -27,6 +27,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -49,8 +50,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       registers to {@code railway.ENTER} once and sees {@code ENTER.stA} and {@code ENTER.stB}
  *       alike. That is the topic-granularity decision, end to end.</li>
  * </ul>
- * The container is a JVM-wide singleton ({@code jade.core.Runtime}), so this runs once per test
- * JVM and Gradle's {@code test} task is configured with one fork.
+ * <strong>This class mutates JVM-global state and the build now says so.</strong>
+ * {@code jade.core.Runtime} is a JVM-wide singleton, and booting a container also overwrites
+ * {@code jade.core.AID.platformID} — after {@link #bootPlatform} every
+ * {@code new AID(name, AID.ISLOCALNAME)} in this JVM carries <em>this</em> platform's suffix, not
+ * the one {@code JadePlatformFixture.install} set. {@code AclBindingTest} therefore reads the
+ * platform name at assert time rather than as a literal, and {@code build.gradle.kts} pins the
+ * {@code test} task to {@code maxParallelForks = 1} / {@code forkEvery = 0} so that "one JVM" is
+ * a property of the build rather than of the default it happened to inherit.
  */
 @Timeout(value = 90, unit = TimeUnit.SECONDS)
 class JadeDeliverySpikeTest {
@@ -74,9 +81,13 @@ class JadeDeliverySpikeTest {
         jade.core.Runtime runtime = jade.core.Runtime.instance();
         runtime.setCloseVM(false);
         Profile profile = new ProfileImpl();
-        // An ephemeral port and no message transport: this platform talks to nothing outside
-        // the JVM, so a build machine never has a port to free and never opens a socket to the
-        // world. A real deployment would set neither.
+        // MTPS="" removes the EXTERNAL message transport (the HTTP MTP). It does NOT make this
+        // hermetic: JADE's intra-platform IMTP still binds a JICP listener, and the boot log
+        // says so -- measured, "Listening for intra-platform commands on address:
+        // - jicp://172.17.0.1:38419", a TCP listener on a routable interface. MAIN_PORT="0"
+        // makes that port ephemeral, so a build machine never has a fixed port to free; it does
+        // not make the socket go away. A CI box that forbids listening sockets fails this
+        // class at BOOT, not at an assertion -- which is the useful thing to know when it does.
         profile.setParameter(Profile.MAIN_PORT, "0");
         profile.setParameter(Profile.MTPS, "");
         // JADE's AMS writes APDescription.txt on startup, into getProperty("file-dir", "") --
@@ -132,6 +143,23 @@ class JadeDeliverySpikeTest {
         while (OBSERVED.poll(250, TimeUnit.MILLISECONDS) != null) {
             // drain
         }
+    }
+
+    @Test
+    @DisplayName("booting a container overwrites AID.platformID -- the hazard, pinned")
+    void booting_a_container_overwrites_the_global_platform_id() {
+        // This is the regression cover for the order-coupling a review caught in
+        // AclBindingTest: it asserted the literal "@opencybele-test", which is only true in a
+        // JVM where no container has booted yet. jade.core.AID.platformID is a JVM-global
+        // static and AgentContainerImpl overwrites it, so once THIS class has run, every
+        // new AID(name, ISLOCALNAME) in the JVM carries this platform's suffix instead.
+        String platform = jade.core.JadePlatformFixture.currentPlatformId();
+        assertNotNull(platform);
+        assertNotEquals("opencybele-test", platform,
+                "the container should have taken over the global platform id");
+        // And the rule every GUID assertion must follow: derive it, never hardcode it.
+        ACLMessage acl = Messages.build(new EnterRequest("vl3", null, "stB"), "vl3", "stA");
+        assertEquals("stA@" + platform, ((AID) acl.getAllReceiver().next()).getName());
     }
 
     @Test
@@ -225,8 +253,12 @@ class JadeDeliverySpikeTest {
     }
 
     private static void record(Agent agent, ACLMessage acl) {
+        // Deserialize ONCE. This is the shape #36 will copy, so it must not model the naive
+        // one: subjectOf(acl) alone would read the :conversation-id slot, but calling it
+        // beside contentOf(acl) in the old form paid getContentObject() twice per line.
+        RailwayMessage content = Messages.contentOf(acl);
         OBSERVED.add(new Observed(agent.getLocalName(), acl.getOntology(),
-                Messages.subjectOf(acl), Messages.receiverName(acl), Messages.contentOf(acl)));
+                Messages.subjectOf(acl, content), Messages.receiverName(acl), content));
     }
 
     /** An ordinary addressed agent. Consumes everything its kind is supposed to receive. */

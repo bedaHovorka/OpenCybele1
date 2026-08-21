@@ -36,14 +36,24 @@ Five decisions are taken here and are not open to #30–#34:
 ## 1. The census this rests on — do not re-derive it
 
 From [#9](https://github.com/bedaHovorka/OpenCybele1/issues/9) and the subscriber table on #27.
-Every channel name is opened at **exactly one** `Activity.openChannel` site, and the per-agent
-name suffix makes collisions impossible.
+Every channel name is opened at **exactly one `Activity.openChannel` site in the simulation**,
+and the per-agent name suffix makes collisions impossible. (`TraceProbe` is the sixteenth caller
+and is not part of the simulation — see the note below.)
 
-**All fifteen channels have exactly one subscriber.** Thirteen are strictly 1 → 1; `VOTE` and
-`PATH_FIND` are many-senders-to-one-receiver. **Despite the `Activity.sendAll` API name there is
-no fan-out anywhere in this application.** Not one channel has two subscribers.
+**All fifteen channels have exactly one _application_ subscriber.** Thirteen are strictly
+1 → 1; `VOTE` and `PATH_FIND` are many-senders-to-one-receiver. **Despite the
+`Activity.sendAll` API name there is no fan-out among the agents.**
 
-That single fact settles §2 and most of §6.
+> **The qualifier is load-bearing, and an earlier draft of this section dropped it.** With
+> `sim.trace.enabled=true` there *is* a second subscriber on every one of the fifteen:
+> `TraceProbe` opens its own handler on all of them — the three bare names, four per static
+> object, two per station, two per track, and four per train slot. That is not a counterexample
+> to §2; **it is the mechanism §6 exists to replace.** Cybele lets a second handler attach to a
+> channel and JADE does not, which is exactly why the probe needs topics and normal delivery
+> does not. Read §1 as "one subscriber that is part of the simulation", and §6 as "and here is
+> what to do about the one that is not".
+
+That — one *application* subscriber, always — settles §2 and most of §6.
 
 ## 2. Addressing — direct AID unicast, and no DF
 
@@ -70,10 +80,16 @@ topic and no directory involved.
 ## 3. The table
 
 `id` is the `docs/INVENTORY.md` channel id; `event` is trace field 3. `record` is the class in
-`cz.vutbr.fit.ags.railway.domain.msg`. Fields are listed in wire order, which is the order of the
-baseline's `Serializable[]` slots and of the trace payload.
+`cz.vutbr.fit.ags.railway.domain.msg`. Fields are listed in **trace field-7 key order**, which is
+what `Channel.payloadKeys()` returns and what a golden holds.
 
-| id | Cybele channel | from → to | record | payload (wire order) | performative |
+**That is not always the baseline's slot count**, and the difference matters to a port. CH-10
+`STATION_INFO` shows two keys, `occupied` and `capacity`, but the baseline sends **one** Cybele
+slot — a `Station.Info` object the probe reads two fields out of. CH-11 `ROAD_STATE` likewise
+sends one slot holding a `RoadAgent.State` enum. The other thirteen channels do have one key per
+slot. Read the column as "what field 7 contains", never as "how many things were on the wire".
+
+| id | Cybele channel | from → to | record | payload (trace field-7 key order) | performative |
 |---|---|---|---|---|---|
 | CH-01 | `VOTE_REQUEST.<obj>` | `Main` → station\|track | `VoteRequest` | `train:String`, `expected:long` | `cfp` |
 | CH-02 | `VOTE_RESULT.<obj>` | `Main` → station\|track | `VoteResult` | `train:String`, `planned:long` | `accept-proposal` |
@@ -114,9 +130,25 @@ And the JADE slots, per channel:
 Eight subjects come from the payload, three from the sender, four from the receiver. All three
 sources are on a plain `ACLMessage`; §6 turns on that.
 
-**`PLAN_TRAIN` is `Main` → `Main`.** It crosses two *activities* of one agent — `Generator` to
-`Planning`. Trace fields 4 and 5 name agents, so a port that gives those two their own agent
-identity must still write `Main` in both, or every `PLAN_TRAIN` line diffs.
+**`Main` is five channel families, not one.** `Generator`, `Planning` and `VoteCollecting` are
+*activities* of `RailwayMainAgent`, not agents, so the frozen goldens carry the literal `Main`
+wherever one of them is an endpoint:
+
+| channel | field | who really sends/receives it |
+|---|---|---|
+| CH-13 `PLAN_TRAIN` | **4 _and_ 5** | `Generator` → `Planning` |
+| CH-01 `VOTE_REQUEST` | 4 | `Planning` |
+| CH-02 `VOTE_RESULT` | 4 | `Planning` |
+| CH-05 `START` | 4 | `Planning` |
+| CH-14 `VOTE` | 5 | `VoteCollecting` |
+
+**If #34 takes the option §11 leaves open — separate AIDs for the three activities — all five
+families diff, not just `PLAN_TRAIN`.** Whatever the internal split, the probe must write `Main`
+in those fields. `Party.MAIN` in the channel table already covers all five; this is the sentence
+that says so.
+
+**`PATH_FIND` and `PATH_FIND_REPLY` are not on that list** and need no special handling:
+`RailwayMainAgent` itself handles them, so its own name is already the right one.
 
 **`PATH_FIND.` really does end in a dot and really is used bare.**
 `RailwayMainAgent.PATH_FIND = "PATH_FIND."`, opened and sent to with nothing appended.
@@ -140,10 +172,25 @@ FIPA's contract net is the idiom it is a degenerate case of. So:
 **Three deviations from FIPA-CNP, all deliberate, all recorded here so #39 does not read them as
 port bugs:**
 
-1. **`accept-proposal` goes to every voter, not to a winner.** Fourteen of fifteen path members
-   typically proposed a smaller delay than the maximum and still receive an `accept-proposal`
-   carrying a value they did not propose. There is **no `reject-proposal` anywhere in this
+1. **`accept-proposal` goes to every path member, and it carries a value that _no_ voter
+   proposed — not even the one that set it.** The two legs are not in the same units. `VOTE`
+   carries a **delay difference** (`computeDifference`, `StaticRailwayObject.java:63`), while
+   `VOTE_RESULT` carries `planned.get(i)` — an **absolute accumulated departure instant**,
+   re-derived by `DispatchTimeline.accumulate(path, roadDelays, requestTime + max(votes))`
+   (`Planning.java:101-105`). So this is not "most voters get someone else's number": the
+   number in the `accept-proposal` is the initiator's synthesis and was never on the table.
+   The recipient still performs the action the round was for — `addToPlan`, commit the slot —
+   which is why `accept-proposal` remains the closest act; but the departure from FIPA-CNP is
+   larger than a first reading suggests, and there is **no `reject-proposal` anywhere in this
    application.**
+
+   *(A count that was wrong here and is worth correcting rather than deleting: an earlier draft
+   said "fourteen of fifteen path members". **15 is the number of static objects in the whole
+   topology, not the size of a path.** On the default topology and the default OD pairs
+   — `ScenarioConfig` `DEF_TOPOLOGY` / `DEF_ARRIVAL_PAIRS` — a path is **9 or 11** members:
+   `stA↔stB` and `stA↔stC` are 11, `stB↔stC` is 9, and 11 is the longest the topology admits.
+   The eleven `VOTE_REQUEST`/`VOTE`/`VOTE_RESULT` legs in `docs/trace-format.md`'s `vl3` sample
+   are one `stA→stB` election, not a coincidence.)*
 2. **There is no `refuse` and no `not-understood`.** A voter always answers. `computeDifference`
    cannot decline.
 3. **There is no deadline.** `latch.await()` has no timeout — *the latch count **is** the
@@ -490,11 +537,20 @@ The spike also sets, and a port should consider:
 
 | parameter | value | why |
 |---|---|---|
-| `Profile.MTPS` | `""` | no message transport; this platform talks to nothing outside the JVM |
-| `Profile.MAIN_PORT` | `"0"` | an ephemeral IMTP port, so a build machine never has a port to free |
+| `Profile.MTPS` | `""` | removes the **external** message transport (the HTTP MTP). |
+| `Profile.MAIN_PORT` | `"0"` | makes the intra-platform IMTP port **ephemeral**, so a build machine never has a fixed port to free. |
 | `"file-dir"` | a scratch directory, with a trailing separator | **JADE's AMS writes `APDescription.txt` into `getProperty("file-dir", "")` on startup** — i.e. the process working directory unless told otherwise. A golden-recording run must not drop a file into the directory it was launched from; a build must not leave an untracked one in the repo. |
 
-The first two are test conveniences; the third is not. A headless golden-recording run has the same requirement as the
+> **Neither of the first two makes a JADE platform hermetic, and a port must not assume they
+> do.** The JICP **IMTP** listener still binds even with no MTP: measured on the spike's own
+> boot, `Listening for intra-platform commands on address: - jicp://172.17.0.1:38419` — a TCP
+> listener on a routable interface. `MAIN_PORT="0"` makes the port ephemeral, not absent. Two
+> consequences worth writing down before #36 inherits them: the spike is **not** hermetic, so a
+> locked-down CI box fails it at *boot* rather than at an assertion; and a JADE golden-recording
+> run opens a socket where the Cybele one does not, which is a difference in the *environment* a
+> run needs, not in the trace it produces.
+
+The `file-dir` row is not a convenience — see the note under it. A headless golden-recording run has the same requirement as the
 Cybele one (`docs/headless-and-stop.md`) and should keep them.
 
 ## 9. Conversation ids, `reply-with`, and what must not leak into the trace
@@ -555,8 +611,11 @@ The `jade` source set has no dependency on `main` and must never import
 * **The drain behaviour.** §7 specifies the template; each agent has to register it.
 * **`Main`'s internal split.** `Generator`, `Planning` and `VoteCollecting` are activities of one
   Cybele agent. Whether they become behaviours of one JADE agent or agents of their own is #34's
-  call — with the constraint from §3 that `PLAN_TRAIN` writes `Main` in trace fields 4 and 5
-  either way.
+  call — **but if they become agents of their own, five channel families have to be told to keep
+  writing `Main`, not one.** `PLAN_TRAIN` in trace fields 4 *and* 5; `VOTE_REQUEST`,
+  `VOTE_RESULT` and `START` in field 4; `VOTE` in field 5. The table in §3 is the list. Getting
+  this wrong does not fail a build — it produces a golden diff on every election in the run,
+  which is the most expensive way to discover it.
 
 ## 12. Corrections and cross-references to other documents
 

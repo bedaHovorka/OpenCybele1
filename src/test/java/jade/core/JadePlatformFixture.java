@@ -30,4 +30,19 @@ public final class JadePlatformFixture {
             AID.setPlatformID(platformName);
         }
     }
+
+    /**
+     * The platform name {@code new AID(localName, AID.ISLOCALNAME)} will append right now.
+     * <p>
+     * {@code AID.platformID} is a JVM-global static and {@code AgentContainerImpl} overwrites it
+     * when a container boots, so this is <strong>not</strong> necessarily what {@link #install}
+     * was given. A test that asserts on a GUID must read it here, at assert time, or it becomes
+     * coupled to test-class discovery order. Package-private in {@code jade.core}, hence the
+     * accessor.
+     *
+     * @return the current platform name, or {@code null} if none is set
+     */
+    public static String currentPlatformId() {
+        return AID.getPlatformID();
+    }
 }

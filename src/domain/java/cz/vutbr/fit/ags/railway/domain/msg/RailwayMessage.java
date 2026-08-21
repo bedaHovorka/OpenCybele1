@@ -41,15 +41,17 @@ public sealed interface RailwayMessage extends Serializable
     Channel channel();
 
     /**
-     * The payload slot values in wire order, unescaped, {@code null} where the baseline sends a
-     * {@code null}. The list is positionally aligned with {@link Channel#payloadKeys()}.
+     * The payload values in <strong>trace field-7 order</strong>, unescaped, {@code null} where
+     * the baseline sends a {@code null}. Positionally aligned with
+     * {@link Channel#payloadKeys()} — see there for why that is not the same as the baseline's
+     * {@code Serializable[]} slot count on CH-10 and CH-11.
      *
-     * @return the raw slot values
+     * @return the raw values
      */
     List<String> values();
 
     /**
-     * Field 7 of the canonical parity trace: {@code key=value,key=value} in wire order, with
+     * Field 7 of the canonical parity trace: {@code key=value,key=value} in field-7 key order, with
      * {@code %}, {@code |}, LF and CR percent-escaped. See {@code docs/trace-format.md}.
      *
      * @return the rendered payload

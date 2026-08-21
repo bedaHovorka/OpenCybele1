@@ -11,14 +11,18 @@ import java.util.List;
  * One constant per {@code docs/INVENTORY.md} channel id, in that document's order, carrying
  * everything a port needs to reproduce the message faithfully: the Cybele channel-name
  * expression, the trace event token, where the trace's subject field comes from, the payload
- * key names in wire order, the two endpoint kinds, and the FIPA performative #27 assigns.
+ * key names in trace field-7 order, the two endpoint kinds, and the FIPA performative #27 assigns.
  * <p>
- * <strong>Every channel has exactly one subscriber.</strong> Thirteen are strictly 1&rarr;1;
- * {@link #VOTE} and {@link #PATH_FIND} are many-senders-to-one-receiver. Despite the
- * {@code Activity.sendAll} API name there is no fan-out anywhere, so the faithful JADE mapping
- * for all fifteen is a plain {@code ACLMessage} addressed to
- * {@code new AID(localName, AID.ISLOCALNAME)} — AMS white pages, no DF. See
- * {@code docs/message-ontology.md}.
+ * <strong>Every channel has exactly one <em>application</em> subscriber.</strong> Thirteen are
+ * strictly 1&rarr;1; {@link #VOTE} and {@link #PATH_FIND} are many-senders-to-one-receiver.
+ * Despite the {@code Activity.sendAll} API name there is no fan-out among the agents, so the
+ * faithful JADE mapping for all fifteen is a plain {@code ACLMessage} addressed to
+ * {@code new AID(localName, AID.ISLOCALNAME)} — AMS white pages, no DF.
+ * <p>
+ * The qualifier is not padding: with {@code sim.trace.enabled=true}, {@code TraceProbe} opens a
+ * <em>second</em> handler on every one of the fifteen. That is not a counterexample to the
+ * unicast mapping — it is the mechanism JADE topics replace, because Cybele lets a second
+ * handler attach to a channel and JADE does not. See {@code docs/message-ontology.md} §1 and §6.
  * <p>
  * This class is deliberately in the framework-free {@code domain} source set: it is pure data,
  * it is what branch {@code jason} (#46) needs just as much as the JADE port does, and it must
@@ -183,7 +187,17 @@ public enum Channel {
         return subject;
     }
 
-    /** @return the payload key names, in wire order, exactly as {@code docs/trace-format.md} fixes them */
+    /**
+     * The payload key names in <strong>trace field-7 order</strong>, exactly as
+     * {@code docs/trace-format.md} fixes them.
+     * <p>
+     * This is not always the baseline's slot count. {@link #STATION_INFO} has two keys but
+     * crossed the Cybele channel as <em>one</em> slot (a {@code Station.Info} the probe read two
+     * fields out of), and {@link #ROAD_STATE}'s single key is one slot holding an enum. The
+     * other thirteen are one key per slot.
+     *
+     * @return the key names, in order
+     */
     public List<String> payloadKeys() {
         return payloadKeys;
     }
@@ -240,8 +254,17 @@ public enum Channel {
      *
      * @param self {@link Party#TRAIN}, {@link Party#STATION}, {@link Party#ROAD} or {@link Party#MAIN}
      * @return the inbound channels, in declaration order
+     * @throws IllegalArgumentException for {@link Party#STATIC_OBJECT}, which is a channel
+     *         endpoint kind and not an agent kind. Passing it used to return the four
+     *         {@code StaticRailwayObject} channels — because {@code covers} is trivially true
+     *         for itself — rather than the station&cup;road union a caller would expect, which
+     *         is a wrong answer wearing the shape of a right one.
      */
     public static List<Channel> inboundFor(Party self) {
+        if (self == Party.STATIC_OBJECT) {
+            throw new IllegalArgumentException(
+                    "STATIC_OBJECT is an endpoint kind, not an agent kind: ask for STATION or ROAD");
+        }
         return List.of(values()).stream().filter(c -> c.receiver.covers(self)).toList();
     }
 }
