@@ -724,6 +724,52 @@ bound and golden predate #23 and `Phase1.md` L7 forbids re-recording — and it 
 10/10 twice here and 14/14 in #21. It is recorded rather than fixed, so that a future flake there is
 diagnosable in one step.
 
+#### 12.2.1 The same margins, measured against a second implementation (#39)
+
+The table above was measured on the baseline alone, which is all there was to measure. #39 measured
+it again on the JADE port, over 20 runs per scenario per implementation. **Nearest approach of any
+raw inter-line gap to the 220 ms width**, min / median over 20 runs:
+
+| scenario | baseline | JADE port |
+|---|---|---|
+| `opencybele-strict` | **4** / 12 | **0** / 10 |
+| `opencybele-congestion` | 124 / 180 | **9** / 49 |
+| `opencybele-capacity` | 56 / 60 | **3** / 16 |
+| `opencybele-lifecycle` | 164 / 180 | 118 / 163 |
+
+Two things follow, and they are the reason this subsection exists rather than a footnote.
+
+**A margin is not a property of a scenario; it is a property of a scenario *and* an
+implementation.** The port's arrival-handover cascade takes 52 simulated ms where the baseline's
+takes 13 (`docs/parity-triage-jade.md` §4.1), so every latency-derived gap moves and a scenario with
+a comfortable margin on one implementation can have none on the next. `opencybele-congestion` goes
+from 124 ms of headroom to 9 ms without a line of its configuration changing.
+
+**The margin predicts the pass rate, in rank order.** Twenty runs per scenario on the port:
+
+| scenario | port's nearest margin | port's pass rate |
+|---|---|---|
+| `opencybele-lifecycle` | 118 ms | 20/20 |
+| `opencybele-timers` | no gap in [120, 400] | 20/20 |
+| `opencybele-capacity` | 3 ms | **6/20**, and 15/20 in a second corpus |
+| `opencybele-congestion` | 9 ms | **3/20** |
+| `opencybele-strict` | 0 ms | **0/20** |
+
+The small-margin rows swing between corpora; the large-margin rows do not move at all. Nothing about
+the port's behaviour varies across the table either — outside two accounted-for effects
+(`docs/parity-triage-jade.md` T-07 and T-12) every run of every scenario produces the same multiset
+as its golden, at the same length. `opencybele-capacity` was reported green by #36's single-run
+gate; over twenty runs it is 6/20, so **a green run of a small-margin scenario is luck, not a
+pass**. §12.2's warning ("a gap that sits *near* 220 is a coin toss ... a `strict`
+golden fails with a diff that looks like a content change and is not") is now an observation rather
+than a prediction, on both implementations.
+
+The `strict` row is the one this file already flagged as inherited and never re-tuned. Its 28 ms
+nearest approach was measured on a smaller sample; over 20 runs it is **4 ms**. Re-tuning it needs
+a re-record, which `Phase1.md` L7 confines to a harness defect and which
+`docs/parity-triage-jade.md` §7 argues would not help anyway — so it is carried into Phase 2 as
+2-PRE work, not patched here.
+
 ### 12.3 Adding a scenario
 
 1. Shape it with `sim.*` (`docs/scenario-config.md` on `opencybele-baseline`); declare **all twenty**

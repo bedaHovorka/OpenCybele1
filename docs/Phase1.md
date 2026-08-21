@@ -101,8 +101,18 @@ Goal: white-box confidence inside the new implementation + black-box proof of eq
 - [ ] One lifecycle test: agents register/deregister with DF as expected (if DF is used).
 
 ### 1-POST.3 Parity run (L3)
-- [ ] Run the full 1-PRE scenario suite via `JadeLauncher` against the same goldens.
-- [ ] Every diff triaged: (a) port bug → fix port; (b) normalizer gap (e.g., JADE-specific ids leaking) → fix normalizer, re-verify it still passes on `develop`; (c) never "accept new behavior" — features are frozen.
+- [x] Run the full 1-PRE scenario suite via `JadeLauncher` against the same goldens. **Two of five
+  reproduce byte-for-byte, 20 runs out of 20** (`lifecycle`, `timers`); `capacity` is 6/20,
+  `congestion` 3/20 and `strict` 0/20, and every one of their diffs is a pure reordering of an
+  identical multiset at an identical length.
+- [x] Every diff triaged: **[`parity-triage-jade.md`](parity-triage-jade.md)**. Nothing resolved as
+  (c); no golden re-recorded, no contract level demoted, no width changed.
+- [ ] **`strict`, `congestion` and `capacity` are red and stay red.** The residual is classified
+  (b) and is not closable: a golden is a fixed point of the normalizer at every width, so
+  `burst-order`'s width re-segments the run only, and the comparison therefore asks the port to
+  reproduce the baseline's *message latency* rather than its behaviour. Seven candidate repairs were
+  measured and rejected (`parity-triage-jade.md` §6). The three scenarios' margins against the
+  segmentation width — 0, 9 and 3 ms — are 2-PRE work.
 - [ ] CI: `characterizationIT@jade` job, same suite, must be green.
 
 ### 1-POST.4 Wrap-up artifacts

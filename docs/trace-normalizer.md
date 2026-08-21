@@ -269,6 +269,35 @@ because within-burst order is not a property of the system: the probe is one ser
 fifteen channels, so even a single sender's messages reach it out of send order — measured, the
 `VOTE_RESULT` fan-out arrives permuted in the golden itself.
 
+### 3.1 The width is one-sided, and that is what decides a cross-implementation run
+
+`ScenarioRunner` normalizes the **golden** with the same normalizer before comparing it — the
+mechanism that let #21 land without re-recording anything. A golden read back has no parseable tick
+in field 2, so it is recognised as projected and every ordering rule is skipped on it (see
+"Idempotence" above). Measured on the shipped file:
+
+```
+normalize(each of the five parity-tests/golden/opencybele-*.txt) at w = 0, 8, 100, 220, 5000, 100000
+  -> byte-identical to the file on disk, at every width, for all five
+```
+
+**A golden is a fixed point of this normalizer at every width.** Its line order is frozen at the
+width it was recorded under, and cannot be recomputed from the file. `DEFAULT_SEGMENT_GAP_TICKS`
+therefore re-segments the *run* only.
+
+On the implementation the golden was recorded from that is invisible and harmless. Across
+implementations it is the whole story: the comparison is not "do these two runs agree up to burst
+order" but "does this run reproduce the burst partition the baseline recorded" — and a burst
+partition is a function of the implementation's **message latency**, which is exactly the quantity
+§3 set out to stop asserting. Measured on the JADE port (#39, `docs/parity-triage-jade.md` §4.1):
+the arrival-handover cascade takes 13 ms of simulated time on the baseline and 52 ms on the port,
+so a gap that reads 448 ms on one reads 214 ms on the other. There is no threshold, one-sided or
+two-sided, that puts both on the same side of it.
+
+The practical rule that follows, for a scenario author: **the margin between a scenario's gaps and
+the width is the scenario's real tolerance to a port**, and `parity-tests/scenarios/COVERAGE.md`
+§12.2 is where it is recorded. `opencybele-strict`'s is 4 ms.
+
 ## 4. What is deliberately not normalized
 
 ### 4.1 A missing entity

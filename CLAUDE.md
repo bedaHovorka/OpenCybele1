@@ -124,3 +124,9 @@ Jason unchanged — and it is a source set of its own, wired to nothing in `main
 
 Scenario specs are YAML data under `parity-tests/scenarios/`. Format, contract levels and the order
 in which a run is judged: [`docs/parity-harness.md`](docs/parity-harness.md).
+
+The L3 run of this branch against the frozen goldens, and the classification of every diff
+it produced, is [`docs/parity-triage-jade.md`](docs/parity-triage-jade.md): two of the five
+scenarios reproduce byte-for-byte across 20 runs, and the three that do not are red on a
+normalizer limit that the file measures rather than works around — every one of them emits the
+same events, in the same multiset, at the same length.
