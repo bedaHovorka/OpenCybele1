@@ -249,39 +249,31 @@ import jade.wrapper.StaleProxyException;
  * one thread writes now, where EVT-04 had several.
  *
  * <h2>What still runs on Cybele</h2>
- * Nothing in this file does. The five constants below are vestigial and say so one by one; they
- * outlive #33 because {@code TraceProbe} — #36's to replace — and #27's {@code ChannelTableTest}
- * still name them.
+ * Nothing in this file does, and since #36 nothing anywhere else does either. The four channel-name
+ * constants below are vestigial and say so one by one; they outlive #33 because #27's
+ * {@code ChannelTableTest} pins them against {@link Channel}.
  *
  * <p>
- * <b>One concrete handover to #36, found here and worth stating before it costs a debugging
- * session.</b> {@code RunControl}'s watchdog enforces {@code sim.stop.maxClockMs} by reading
- * {@code Cybele.getTime(clockId)}, guarded by a {@code clockReady} flag that only
- * {@code RunControl.verifyClockControl} sets — and this agent no longer calls it, because there is
- * no kernel clock registration to verify. So <b>{@code sim.stop.maxClockMs} is inert on the JADE
- * side</b>, and <em>every</em> {@code opencybele-*} scenario is bounded by exactly that key. The
- * failure is not silent — each of them also sets {@code sim.stop.wallClockMs}, so such a run ends
- * on the wall-clock bound with {@code EXIT_WALL_CLOCK_TIMEOUT} — but the <em>diagnosis</em> would
- * be wrong, and a run that stops for the wrong reason is not the run the golden records. #36 (or
- * #17's follow-up) has to point that bound at the {@link SimClock} this agent creates. Not fixed
- * here: {@code RunControl} is installed by {@code Main}, which is still the Cybele launcher and is
- * #36's to replace, so a hook added now would be a guess at that design.
+ * <b>#81 is discharged here, in one statement.</b> {@code RunControl}'s watchdog enforced
+ * {@code sim.stop.maxClockMs} by reading {@code Cybele.getTime(clockId)} behind a flag that only
+ * {@code RunControl.verifyClockControl} set — and this agent stopped calling it at #33, because
+ * there is no kernel clock registration to verify. That left the simulated-clock bound
+ * <b>inert</b>, while <em>every</em> {@code opencybele-*} scenario is bounded by exactly that key,
+ * and the wall-clock net that caught it would have named the wrong reason. The fix is the
+ * {@link RunControl#useClock(SimClock, long)} call in {@link #setup()}: it hands over the very
+ * clock this agent creates, at the same point in the sequence the Cybele
+ * {@code verifyClockControl(CLOCK_ID, startMs)} used to occupy. What is <em>not</em> reproduced is
+ * the round trip — there is no announcement to lose, so there is nothing to prove commandable.
  *
  * @author Bedrich Hovorka
  *
  */
 public class RailwayMainAgent extends Agent implements RailwayView {
     // spravce socialnich znalosti
-    /**
-     * global clock identification
-     * <p>
-     * <b>Vestigial.</b> This agent's clock is a {@link SimClock} object (#29), which has no id
-     * because it has no registry — the whole point of the abstraction is that there is no
-     * {@code Cybele.getTime(CLOCK_ID)} global left to reach. The constant survives only because
-     * {@code TraceProbe.tick()} still calls {@code Cybele.getTime(RailwayMainAgent.CLOCK_ID)} and
-     * {@code RunControl} still names a clock id. Delete with #36, which replaces the Cybele probe.
-     */
-    public static final String CLOCK_ID = "myClock";
+    // CLOCK_ID is GONE, as its own comment asked #36 to make it. It named a key into Cybele's
+    // clock registry; this agent's clock is a SimClock object (#29) with no registry to key into,
+    // and the two callers that kept the string alive -- TraceProbe.tick() and RunControl -- now
+    // both read the object. Nothing, not even a test, named it afterwards.
     /**
      * channel for station info
      * <p>
@@ -376,6 +368,10 @@ public class RailwayMainAgent extends Agent implements RailwayView {
 	// (sim.topology / sim.station.capacities / sim.road.delaysSec). Vychozi hodnoty
 	// jsou totozne s puvodnimi literaly - viz docs/scenario-config.md.
 	this.clock = new PacedClock(config.getClockStartMs(), config.getClockPace());
+	// #81: the run's simulated-time bound reads THIS clock. Cybele's verifyClockControl stood
+	// here and did two jobs -- prove the kernel had registered the clock, and publish it to the
+	// watchdog. Only the second survives the port; see RunControl.useClock.
+	RunControl.useClock(clock, config.getClockStartMs());
 	addListener(trainTableModel);
 
 	// vytvoreni gui
@@ -627,14 +623,15 @@ public class RailwayMainAgent extends Agent implements RailwayView {
     /**
      * Report a message this agent has no handler for. Loud, and it does not throw: the queue is
      * drained either way, so one stray message cannot wedge the agent.
+     * <p>
+     * <b>#36 split this in two.</b> {@code Templates.unexpected} is the complement of everything,
+     * so on a live platform it also catches AMS delivery failures — housekeeping the baseline
+     * performs silently. See {@link UnexpectedMessage} for the measurement and the two shapes.
      *
      * @param acl the message
      */
     void unexpected(ACLMessage acl) {
-	System.err.println("RailwayMainAgent " + name() + ": unexpected message, ontology="
-		+ acl.getOntology() + " performative="
-		+ ACLMessage.getPerformative(acl.getPerformative())
-		+ " from=" + Messages.senderName(acl));
+	UnexpectedMessage.report("RailwayMainAgent", name(), getAMS(), acl);
     }
 
     /**
@@ -779,13 +776,18 @@ public class RailwayMainAgent extends Agent implements RailwayView {
     /**
      * The single outbound seam. This agent sends exactly one kind of message —
      * {@code PATH_FIND_REPLY} — but the seam is the shape every ported agent has, and it is where
-     * #36 adds the probe's topic AID as a second receiver.
+     * the probe's topic AID is added as a second receiver.
+     * <p>
+     * <b>#36 spent the budget this note reserved.</b> {@link TraceTopics#of} returns the
+     * channel's probe topic when {@code sim.trace.enabled=true} and {@code null} otherwise, and
+     * {@code Messages.build} adds it as a <em>second</em> receiver. With tracing off the
+     * {@code :receiver} set is byte-identical to what it was before this line changed.
      *
      * @param message the payload record
      * @param receiver the addressed agent's local name
      */
     protected void emit(RailwayMessage message, String receiver) {
-	send(Messages.build(message, name(), receiver));
+	send(Messages.build(message, name(), receiver, TraceTopics.of(message.channel())));
     }
 
     private void fireChange() {

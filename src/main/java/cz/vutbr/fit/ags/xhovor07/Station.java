@@ -416,13 +416,15 @@ public class Station extends Agent {
     /**
      * Report a message this agent has no handler for. Loud, and it does not throw: the queue is
      * drained either way, so one stray message cannot wedge the agent.
+     * <p>
+     * <b>#36 split this in two.</b> {@code Templates.unexpected} is the complement of everything,
+     * so on a live platform it also catches AMS delivery failures — housekeeping the baseline
+     * performs silently. See {@link UnexpectedMessage} for the measurement and the two shapes.
      *
      * @param acl the message
      */
     void unexpected(ACLMessage acl) {
-	System.err.println("Station " + name() + ": unexpected message, ontology=" + acl.getOntology()
-		+ " performative=" + ACLMessage.getPerformative(acl.getPerformative())
-		+ " from=" + Messages.senderName(acl));
+	UnexpectedMessage.report("Station", name(), getAMS(), acl);
     }
 
     private void sendInfo() {
@@ -664,13 +666,18 @@ public class Station extends Agent {
     /**
      * The single outbound seam. Every message this agent sends goes through here.
      * <p>
-     * Overridable for the same reason as {@link #name()}, and it is where #36 adds the probe's
-     * topic AID as a second receiver ({@code Messages.build(msg, from, to, topic)}).
+     * Overridable for the same reason as {@link #name()}, and it is where the probe's topic AID is
+     * added as a second receiver ({@code Messages.build(msg, from, to, topic)}).
+     * <p>
+     * <b>#36 spent the budget this note reserved.</b> {@link TraceTopics#of} returns the
+     * channel's probe topic when {@code sim.trace.enabled=true} and {@code null} otherwise, and
+     * {@code Messages.build} adds it as a <em>second</em> receiver. With tracing off the
+     * {@code :receiver} set is byte-identical to what it was before this line changed.
      *
      * @param message the payload record
      * @param receiver the addressed agent's local name
      */
     protected void emit(RailwayMessage message, String receiver) {
-	send(Messages.build(message, name(), receiver));
+	send(Messages.build(message, name(), receiver, TraceTopics.of(message.channel())));
     }
 }

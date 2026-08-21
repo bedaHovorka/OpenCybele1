@@ -260,12 +260,17 @@ public class Generator implements Serializable {
      * The single outbound seam. {@code Activity.sendAll(Planning.PLAN_TRAIN, payload)} becomes one
      * AID-addressed {@code ACLMessage} to this agent itself; overridable so a test can capture what
      * was sent without a message-transport service.
+     * <p>
+     * <b>#36 spent the budget this note reserved.</b> {@link TraceTopics#of} returns the
+     * channel's probe topic when {@code sim.trace.enabled=true} and {@code null} otherwise, and
+     * {@code Messages.build} adds it as a <em>second</em> receiver. With tracing off the
+     * {@code :receiver} set is byte-identical to what it was before this line changed.
      *
      * @param message the payload record
      * @param receiver the addressed agent's local name — {@code Main}, for the one channel this
      *        activity sends on
      */
     protected void emit(RailwayMessage message, String receiver) {
-	host.send(Messages.build(message, name(), receiver));
+	host.send(Messages.build(message, name(), receiver, TraceTopics.of(message.channel())));
     }
 }

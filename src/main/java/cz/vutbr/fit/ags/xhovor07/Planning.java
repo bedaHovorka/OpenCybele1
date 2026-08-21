@@ -419,13 +419,15 @@ public class Planning implements Serializable {
 
     /**
      * Reports a message this activity has no handler for, on stderr, and discards it.
+     * <p>
+     * <b>#36 split this in two.</b> {@code Templates.unexpected} is the complement of everything,
+     * so on a live platform it also catches AMS delivery failures — housekeeping the baseline
+     * performs silently. See {@link UnexpectedMessage} for the measurement and the two shapes.
      *
      * @param acl the offending message
      */
     void unexpected(ACLMessage acl) {
-	System.err.println("Planning " + name() + ": unexpected message, ontology=" + acl.getOntology()
-		+ " performative=" + ACLMessage.getPerformative(acl.getPerformative())
-		+ " from=" + Messages.senderName(acl));
+	UnexpectedMessage.report("Planning", name(), host.getAMS(), acl);
     }
 
     /**
@@ -660,11 +662,16 @@ public class Planning implements Serializable {
      * The single outbound seam. {@code Activity.sendAll(CHANNEL+name, payload)} becomes one
      * AID-addressed {@code ACLMessage}; overridable so a test can capture what was sent without
      * a message-transport service.
+     * <p>
+     * <b>#36 spent the budget this note reserved.</b> {@link TraceTopics#of} returns the
+     * channel's probe topic when {@code sim.trace.enabled=true} and {@code null} otherwise, and
+     * {@code Messages.build} adds it as a <em>second</em> receiver. With tracing off the
+     * {@code :receiver} set is byte-identical to what it was before this line changed.
      *
      * @param message the payload record
      * @param receiver the addressed agent's local name — the 2008 channel-name suffix
      */
     protected void emit(RailwayMessage message, String receiver) {
-	host.send(Messages.build(message, name(), receiver));
+	host.send(Messages.build(message, name(), receiver, TraceTopics.of(message.channel())));
     }
 }

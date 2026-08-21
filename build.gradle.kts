@@ -206,12 +206,14 @@ tasks.named("check") {
 // COMPLETE" -- checked mechanically instead of by hand. Two steps: run the simulation
 // headless and bounded with the probe on, then verdict what it produced.
 //
-// #30 NOTE: `traceRun` (and therefore `traceCheck`) no longer works on this branch. It launches
-// `cz.vutbr.fit.ags.xhovor07.Main` off the main runtime classpath, and since #30 that application
-// does not boot -- `Station` is a `jade.core.Agent` and a Cybele `RailwayMainAgent` cannot spawn
-// it. Expected and planned for (see #4's sequencing decision: the tree compiles at every step of
-// #30-#34 and runs at none of them), but recorded here so it is not rediscovered as a mystery. The
-// tasks are left in place; they come back when the set is complete.
+// #30 NOTE, DISCHARGED BY #36. `traceRun`/`traceCheck` stopped working at #30, because the
+// application stopped booting: `Station` had become a `jade.core.Agent` and a Cybele
+// `RailwayMainAgent` could not spawn it. That was expected and planned for (#4's sequencing
+// decision: the tree compiles at every step of #30-#34 and runs at none of them). #36 completed
+// the set -- `Main` boots a JADE main container and the probe registers to the fifteen topics --
+// and these two tasks run again unchanged. `TraceCheck`'s one baseline-specific assertion, "field
+// 6 is always '-'", was replaced rather than deleted: it now checks field 6 against the FIPA act
+// #27 assigned to that channel.
 //
 // Deliberately NOT wired into `check`, unlike rngProof. This one boots the Cybele kernel,
 // takes ~20 s of wall clock, and inherits the kernel's own residual hang (INVENTORY
@@ -372,13 +374,19 @@ val characterizationIT by tasks.registering(Test::class) {
     // while the test JVM's working directory is the project directory. `java` is NOT: it may be a
     // bare command name resolved on PATH, and absolutising `java` to <project>/java produced a
     // launch failure with error=2.
-    for (name in listOf("opencybele.dist", "opencybele.home")) {
+    //
+    // #36 adds `jade.dist`, the same thing for adapter 2: a `build/install/opencybele` built from
+    // the JADE port. There is no `jade.home` -- OpenCybeleLauncher needs a second directory only
+    // because Cybele reads cybelle/*.prop through --patch-module, and the JADE implementation
+    // reads no such file.
+    for (name in listOf("opencybele.dist", "opencybele.home", "jade.dist")) {
         (providers.gradleProperty(name).orNull ?: providers.systemProperty(name).orNull)
             ?.let { systemProperty(name, file(it).absolutePath) }
     }
-    (providers.gradleProperty("opencybele.java").orNull
-        ?: providers.systemProperty("opencybele.java").orNull)
-        ?.let { systemProperty("opencybele.java", it) }
+    for (name in listOf("opencybele.java", "jade.java")) {
+        (providers.gradleProperty(name).orNull ?: providers.systemProperty(name).orNull)
+            ?.let { systemProperty(name, it) }
+    }
 
     // A golden run is never up to date; there is no input Gradle can hash that captures "the
     // behaviour of a child process".
@@ -428,13 +436,14 @@ val parityGate by tasks.registering(Test::class) {
         (providers.gradleProperty(name).orNull ?: providers.systemProperty(name).orNull)
             ?.let { systemProperty(name, it) }
     }
-    for (name in listOf("opencybele.dist", "opencybele.home")) {
+    for (name in listOf("opencybele.dist", "opencybele.home", "jade.dist")) {
         (providers.gradleProperty(name).orNull ?: providers.systemProperty(name).orNull)
             ?.let { systemProperty(name, file(it).absolutePath) }
     }
-    (providers.gradleProperty("opencybele.java").orNull
-        ?: providers.systemProperty("opencybele.java").orNull)
-        ?.let { systemProperty("opencybele.java", it) }
+    for (name in listOf("opencybele.java", "jade.java")) {
+        (providers.gradleProperty(name).orNull ?: providers.systemProperty(name).orNull)
+            ?.let { systemProperty(name, it) }
+    }
 
     testLogging {
         events("passed", "failed", "skipped")
