@@ -328,6 +328,12 @@ class RoadAgentStateMachineTest {
         road.addToPlan("vl0", 1000);
         enter(road, "vl0", LEFT);
 
+        // TOOLCHAIN NOTE: this arrangement is tuned against JDK 21's PriorityQueue.offer, which
+        // sets `size` AFTER siftUp -- so a frequency() walking the queue mid-sift does not see
+        // the element being inserted. JDK 8 set it before. The build pins a 21 toolchain; if that
+        // moves, re-check that the mutant below still flips, because a different mid-sift view
+        // changes which arrangement makes a working tie-break visible.
+        //
         // Six waiting trains, ONE planned slot between them, so every comparison in the heap is
         // a tie and the tie-break is the only thing that could decide anything. The shape is not
         // arbitrary: with a WORKING frequency tie-break this is the arrangement in which the
@@ -494,7 +500,11 @@ class RoadAgentStateMachineTest {
         clock.advanceSimBy(600000);
         road.agentClock().runDue();
 
-        assertTrue(road.sent.size() >= 1);
+        // Deterministically TWO: two travelStart calls arm two independent wake-ups, nothing
+        // cancels the first, and both are due after the advance. Asserting ">= 1" would pass for
+        // a port that cancelled the pending timer on re-arm -- which is precisely the tidy-up
+        // DEF-14 invites, and precisely what must not be done.
+        assertEquals(2, road.sent.size(), "two arms, two wake-ups; re-arming must not cancel");
         for (Sent s : road.sent) {
             assertEquals("vl1", s.receiver(), "both wake-ups read the one slot");
         }
@@ -637,5 +647,46 @@ class RoadAgentStateMachineTest {
 
         assertSame(clock, road.agentClock().clock());
         assertEquals(4200, road.agentClock().now());
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // The ticker granularity (review FIX 1)
+    // ---------------------------------------------------------------------------------------
+
+    @Test
+    @DisplayName("the ticker period is a SIMULATED-ms budget divided by the pace, not a fixed real period")
+    void the_granularity_is_derived_from_the_pace() {
+        // The quantity a golden is sensitive to is the normalizer's 220 simulated-ms
+        // segmentation boundary; opencybele-capacity.yaml measures the tightest surviving
+        // margin at 44 ms. Worst-case ticker lateness is period x pace SIMULATED ms, so the
+        // period has to shrink as the pace grows or the budget is silently multiplied.
+        assertEquals(1, RoadAgent.granularityMsFor(8.0), "the Fast preset");
+        assertEquals(5, RoadAgent.granularityMsFor(1.0), "the Normal preset");
+        assertEquals(17, RoadAgent.granularityMsFor(0.3), "the Slow preset");
+
+        for (double pace : new double[]{0.3, 1.0, 4.0, 8.0}) {
+            long lateSimMs = Math.round(RoadAgent.granularityMsFor(pace) * pace);
+            assertTrue(lateSimMs <= 8,
+                    () -> "pace " + pace + " must stay far inside the 44 ms tightest margin,"
+                            + " was " + Math.round(RoadAgent.granularityMsFor(pace) * pace));
+        }
+    }
+
+    @Test
+    @DisplayName("the period floors at one real millisecond, because a JADE ticker cannot go below it")
+    void the_granularity_floors_at_one_real_millisecond() {
+        assertEquals(1, RoadAgent.granularityMsFor(5.0));
+        assertEquals(1, RoadAgent.granularityMsFor(1000.0),
+                "above the budget the period cannot shrink further; the worst case becomes pace");
+        assertThrows(IllegalArgumentException.class, () -> RoadAgent.granularityMsFor(0.0));
+        assertThrows(IllegalArgumentException.class, () -> RoadAgent.granularityMsFor(-1.0));
+    }
+
+    @Test
+    @DisplayName("the agent ticks at the period its own shared clock's pace implies")
+    void the_agent_ticks_at_the_derived_period() {
+        assertEquals(RoadAgent.granularityMsFor(8.0), road(new VirtualClock(0, 8.0)).tickPeriodMs());
+        assertEquals(RoadAgent.granularityMsFor(1.0), road(new VirtualClock(0, 1.0)).tickPeriodMs());
+        assertEquals(RoadAgent.granularityMsFor(0.3), road(new VirtualClock(0, 0.3)).tickPeriodMs());
     }
 }

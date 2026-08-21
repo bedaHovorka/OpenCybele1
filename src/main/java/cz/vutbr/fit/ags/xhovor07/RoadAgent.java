@@ -99,32 +99,52 @@ import jade.lang.acl.MessageTemplate;
  *
  * <p>
  * <b>Resolution, stated rather than assumed.</b> A wake-up fires at the first tick at or after
- * its deadline, so it is late by up to {@link #CLOCK_GRANULARITY_MS} × pace simulated ms. The
- * baseline is late too (a zero-delay Cybele timer fires in 1–5 ms), and the five clock-derived
- * trace families are projected by the normalizer, so the contract this has to meet is ordering,
- * not timestamps.
+ * its deadline, so it is late by up to {@code period × pace} simulated ms — one-sided, never
+ * early. That budget is set in <b>simulated</b> milliseconds and divided by the pace, because
+ * the quantity a golden is sensitive to is the normalizer's 220 simulated-ms segmentation
+ * boundary and not anything real-timed; see {@link #GRANULARITY_TARGET_SIM_MS}, which carries
+ * the measured margins and the mistake an earlier revision of this file made.
  *
  * <h2>Which instant the queue comparator is evaluated at</h2>
  * {@link #push} and {@link #pop} read {@link AgentClock#now()} <b>once, at the call, in the
- * handler that is performing the heap operation</b> — the same instant 2008's
- * {@code pauseClock}/{@code resumeClock} bracket froze the clock at, and the same statement
- * position. Nothing is cached from an earlier handler and nothing is deferred, so a train
- * queued at simulated 12 000 is compared at 12 000, exactly as it was.
+ * handler that is performing the heap operation</b> — the same statement position 2008's
+ * {@code pauseClock}/{@code resumeClock} bracket occupied. That is a nicety, and it is labelled
+ * as one below rather than presented as the justification.
  *
  * <p>
- * That it <em>matches</em> 2008 is proved twice over, which is why the brackets could go:
+ * <b>The brackets go for two reasons, and neither of them is "the same instant".</b>
  * <ol>
  *   <li>#28 surfaced the read to one call site. {@code RoadQueue.offer}/{@code poll} fix one
- *       {@code comparisonTime} for the whole heap operation, so every comparison inside it sees
- *       one value by construction — which is precisely what the bracket bought by freezing the
- *       clock across it.</li>
+ *       {@code comparisonTime} for the whole heap operation — one field, written once per
+ *       operation — so every comparison inside it sees one value <em>by construction</em>. That
+ *       is precisely what the bracket bought by freezing the clock across it, and it now holds
+ *       structurally rather than by exclusion.</li>
  *   <li>The value cancels algebraically anyway.
  *       {@code (plan(a) − t) − (plan(b) − t) == plan(a) − plan(b)}, and
  *       {@link RoadQueueItem#compareTo} does the subtraction in {@code long} <em>before</em>
  *       DEF-03's {@code (int)} narrowing, so the cancellation is exact and survives overflow.
  *       {@code defect-triage.md} §4.1 retracted the "unstable comparator" claim on exactly this
- *       ground.</li>
+ *       ground, and it is asserted — with the overflow case — by
+ *       {@code RoadQueueOrderingTest.the_surfaced_time_cancels_out_of_the_comparison} and
+ *       {@code .pairwise_comparison_is_independent_of_the_clock}. Those are the tests that carry
+ *       the claim; this agent's suite carries the separate, weaker fact that the ordering is
+ *       observable through the agent at all.</li>
  * </ol>
+ *
+ * <p>
+ * <b>The consequence, stated because it makes one sentence above unfalsifiable.</b> Since
+ * {@code t} provably cancels and the queue holds a single {@code comparisonTime}, the
+ * {@link AgentClock#now()} calls in {@link #push} and {@link #pop} are <b>dead reads</b>:
+ * passing {@code 0L} instead would leave every test in this repository and every golden green.
+ * A mutation that changes the instant therefore cannot fail anything, and one was run and
+ * survived — which is the algebra <em>restated</em>, not evidence for it. So "the same instant
+ * 2008 froze" is a property this repository cannot check, and it is kept because it is free and
+ * because it stops being free if either premise moves: if DEF-03's narrowing is ever repaired
+ * at an overflowing delta, or if a future queue caches {@code diff} at insertion time instead of
+ * recomputing it per comparison. Reading the live clock at the call site is the form that
+ * survives both.
+ *
+ * <p>
  * So the two 2008 brackets ({@code RoadAgent.java:132-134} and {@code :167-169}) protect
  * nothing and are <b>deleted with no replacement</b>, as {@code docs/clock-abstraction.md} §2.6
  * directs. What the deletion does change is real and worth naming: those brackets froze the
@@ -162,13 +182,44 @@ import jade.lang.acl.MessageTemplate;
  *       inside {@code PriorityQueue}'s sift — so a train queued after a lost {@code VOTE_RESULT}
  *       throws from inside the heap and leaves it undefined. {@code defect-triage.md} §3.3 rules
  *       "do not file, and do not fix", naming this ticket: <em>"#31 proposed a port-time null
- *       check; the pin-or-fix call is here and it is pin."</em> §5's carve-out would allow the
+ *       check; the pin-or-fix call is here and it is pin."</em> §6.1's carve-out would allow the
  *       check in the port <em>if</em> it also emitted an observable marker; that is declined,
- *       because the ontology has no slot such a marker could travel on and inventing one would
- *       add a trace line no golden holds. So {@link #push} calls straight through and the NPE
- *       escapes the handler.
+ *       and the reason is not that no observable exists — {@link #unexpected} already writes to
+ *       stderr, where #12's {@code ErrorScanner} reads and no golden holds. It is that
+ *       <b>the marker would buy nothing</b>: an {@code ErrorScanner} hit voids the run exactly
+ *       as the uncaught NPE does, so the two outcomes are the same verdict reached by two
+ *       routes, and the guarded one additionally suppresses the failure it is reporting. So
+ *       {@link #push} calls straight through.
  *       {@code RoadAgentStateMachineTest.queueing_an_unplanned_train_throws_from_inside_the_heap}
- *       is the lock.</li>
+ *       is the lock.
+ *       <p>
+ *       <b>Which shape the port actually produces, since the shape is what is contractual.</b>
+ *       On Cybele the NPE left the agent alive with a corrupt heap ({@code defect-triage.md}
+ *       §3.3). Under JADE it is strictly worse, and the difference is in the platform rather
+ *       than in this file: {@code Agent$ActiveLifeCycle.execute()} calls {@code actionWrapper()}
+ *       with <b>no</b> catch, and the only handler is {@code Agent.run()}'s
+ *       {@code catch (Throwable)} spanning the whole loop <em>and</em>
+ *       {@code myLifeCycle.init()} — where {@code setup()} runs. It prints to stderr, sets
+ *       {@code terminating}, and goes {@code LifeCycle.end()} → {@code Agent.clean(false)},
+ *       which writes <b>two {@code System.out.println} lines</b> and calls {@code takeDown()}.
+ *       So the throw does not merely escape the handler: it <em>kills the agent</em>, which then
+ *       answers no further {@code ENTER}, {@code LEAVE} or {@code VOTE_REQUEST}, and it writes
+ *       to <em>stdout</em>, which is the trace stream. Both outcomes void a recording, so no
+ *       behaviour changes here — but the shapes differ and #39 should not be told they are the
+ *       same one.
+ *       <p>
+ *       The same platform behaviour covers <b>every {@code assert} in this file</b>, and the
+ *       goldens are recorded with {@code -ea} (and #36 replays with {@code -ea}), so the
+ *       assertion branch is a contract surface and not a developer aid: {@link #leave}'s
+ *       {@code assert state != RoadDirection.FREE} — the one §5 singles out at 160 evaluations —
+ *       {@link #travelEnd}'s {@code assert traveledTrain != null}, and
+ *       {@link #acceptTrain}'s {@code assert position.equals(rightStation)}. It covers the three
+ *       {@code IllegalArgumentException}s in {@link #setup()} too, which sit inside that same
+ *       {@code try}: a bad argument list is therefore a <em>quietly dead agent</em>, not a
+ *       fail-fast abort — and that is concrete rather than hypothetical, because
+ *       {@code RailwayMainAgent.java:119} still passes three arguments where this agent now
+ *       needs four. Cross-cutting with #30 and carried to #36 as one decision; not this
+ *       ticket's to change.</li>
  *   <li><b>DEF-14, the single {@code traveledTrain} slot</b> — carried unchanged. It is
  *       overwritten by every {@code travelStart} and {@link #travelEnd()} notifies whatever is
  *       in it, which is safe only because a track is single-occupancy. That invariant is what
@@ -263,23 +314,85 @@ public class RoadAgent extends Agent {
      */
     public static final String TRAVEL_START = "TRAVEL_START.";
     /**
-     * The {@link ClockTickerBehaviour} period, in <b>real</b> milliseconds.
+     * The ticker's lateness budget, in <b>simulated</b> milliseconds — the unit that decides
+     * whether a golden diffs, and the reason this is not a raw real-time period.
      * <p>
-     * A wake-up fires at the first tick at or after its deadline, so this is the worst-case
-     * lateness in real time and {@code CLOCK_GRANULARITY_MS × pace} in simulated time. The
-     * shortest simulated interval this simulation can distinguish is a 1 s track, i.e. 1000
-     * simulated ms; at the toolbar's fastest preset (pace 8) 10 ms of granularity is 80
-     * simulated ms, comfortably inside it. Cybele's own floor is 1–5 ms for a zero-delay timer
-     * (SEM-06), so this is the same order of accuracy the baseline had.
+     * <b>The yardstick is the normalizer's segmentation boundary, not the shortest track.</b> An
+     * earlier revision of this comment benchmarked a fixed 10 real ms against "the shortest
+     * simulated interval the simulation can distinguish", i.e. a 1 s track, and concluded 80
+     * simulated ms at pace 8 was "comfortably inside it". That is the wrong measurement. What
+     * decides a diff is {@code CanonicalTraceNormalizer.DEFAULT_SEGMENT_GAP_TICKS} = <b>220
+     * simulated ms</b>, and the margin against it is already measured:
+     * {@code parity-tests/scenarios/opencybele-capacity.yaml} separates gaps that come from the
+     * simulated <em>schedule</em> (pace-invariant) from gaps that come from <em>message
+     * latency</em> (wall-clock, multiplied by the pace), measures the latter at pace 8 as "184,
+     * 192, 208, 208, 216 and 232 ms — i.e. it CROSSED 220 inside one sweep", and re-paces that
+     * one scenario to 4. The other four stay at pace 8 because "their measured margins are
+     * already 44 ms or better".
      * <p>
-     * A constant rather than a {@code ScenarioConfig} key <em>for now</em>: a road is the first
-     * agent to need one, and a granularity that only one agent honours is not a scenario
-     * parameter. When #33 and #34 give {@code Generator} and {@code Planning} their tickers the three
-     * must agree, and that is the point to promote it to {@code sim.clock.granularityMs} — one
-     * key, documented in {@code docs/scenario-config.md}, rather than three constants that can
-     * drift apart.
+     * {@code TRAVEL_END} is a latency-derived reaction event — it is the head of the
+     * {@code TRAVEL_END → LEAVE → ENTER → ENTER_REPLY} chain — so ticker lateness lands squarely
+     * on the quantity those 44 ms are measured against. A fixed 10 real ms period would have
+     * added {@code U[0, 80]} simulated ms to every one of them: <b>nearly twice the tightest
+     * recorded margin</b>, and enough on its own to move a burst boundary.
+     * <p>
+     * <b>Two properties of that error that Cybele did not have, stated because they are new.</b>
+     * It is <em>one-sided</em> — a wake-up is never early, only late — so it does not average
+     * out across a run the way a symmetric jitter would. And it is <em>correlated within an
+     * agent but uncorrelated between agents</em>: each ticker's phase is fixed by when that
+     * agent's {@code setup()} ran, so two roads whose deadlines fall less than one period apart
+     * are ordered by tick phase rather than by deadline. Cybele had one kernel timer service and
+     * therefore no per-agent phase at all.
+     * <p>
+     * <b>The Cybele comparison, with its units fixed.</b> {@code docs/defect-triage.md}'s DEF-16
+     * row measures {@code delay=2000} arriving at 2001–2010, i.e. <b>1–10 simulated ms</b> late
+     * (0.1–1.2 real ms at pace 8). The earlier revision compared that figure against a
+     * <em>real</em>-ms period and called them the same order; they are not, and at pace 8 the
+     * old constant was 8× coarser. Budgeting in simulated ms is what makes the two comparable:
+     * 5 simulated ms of budget is inside Cybele's own 1–10 ms band.
+     *
+     * @see #granularityMsFor(double)
      */
-    static final long CLOCK_GRANULARITY_MS = 10L;
+    static final long GRANULARITY_TARGET_SIM_MS = 5L;
+
+    /**
+     * The {@link ClockTickerBehaviour} period in <b>real</b> milliseconds for a given pace —
+     * {@code max(1, ceil(GRANULARITY_TARGET_SIM_MS / pace))}.
+     * <p>
+     * Derived rather than fixed, because the whole error is
+     * {@code periodRealMs × pace} simulated ms and the pace is a runtime value (three toolbar
+     * presets today, {@code sim.clock.pace} in a scenario). At the toolbar's presets that is:
+     * pace 8 → 1 real ms → ≤ 8 simulated ms; pace 1 → 5 real ms → ≤ 5; pace 0.3 → 17 real ms →
+     * ≤ 5.1. Against the 44 ms tightest recorded margin the worst case is now 8 ms, better than
+     * five times clear, where the old fixed constant was 80.
+     * <p>
+     * The {@code max(1, …)} is a real floor, not defensive clutter: a JADE
+     * {@code TickerBehaviour} period is an integer count of real milliseconds and cannot go
+     * below 1, so above pace {@value #GRANULARITY_TARGET_SIM_MS} the budget stops being
+     * honoured and the worst case is simply {@code pace} simulated ms. That is why this returns
+     * the period rather than pretending the budget always holds.
+     * <p>
+     * <b>Note for #33/#34, where this becomes {@code sim.clock.granularityMs}.</b> Document the
+     * key as a <em>simulated</em>-ms budget divided by the pace, not as a raw real-ms period. A
+     * real-ms key recreates exactly the trap this comment describes for {@code Generator} and
+     * {@code Planning}, whose wake-ups feed the same latency-derived gaps. The three agents must
+     * also agree on one value, which is the other half of why it belongs in the configuration
+     * rather than in three constants.
+     * <p>
+     * <b>Not measured here.</b> The numbers above are arithmetic on a measured boundary, not a
+     * measurement of this port. Measuring the actual gap distribution against 220 per scenario —
+     * the protocol {@code opencybele-capacity.yaml} used — needs a running JADE implementation
+     * and is #36's, on its first gate run.
+     *
+     * @param pace simulated ms per real ms; strictly positive
+     * @return the ticker period in real milliseconds, at least 1
+     */
+    static long granularityMsFor(double pace) {
+	if (!(pace > 0) || Double.isInfinite(pace)) {
+	    throw new IllegalArgumentException("pace must be finite and positive, was " + pace);
+	}
+	return Math.max(1L, (long) Math.ceil(GRANULARITY_TARGET_SIM_MS / pace));
+    }
     private String rightStation;
     private String leftStation;
     private long delay;
@@ -311,6 +424,13 @@ public class RoadAgent extends Agent {
      * is per-agent and private, exactly as {@code docs/clock-abstraction.md} §3.1 splits them.
      */
     private AgentClock clock;
+    /**
+     * The {@link ClockTickerBehaviour} period this agent actually registered, in real ms.
+     * Recorded so a test — and #33/#34, when they have to make three agents agree — can read
+     * back what {@link #granularityMsFor(double)} resolved to for the clock in force, rather
+     * than recomputing it and asserting against its own arithmetic.
+     */
+    private long tickPeriodMs;
 
     /**
      * <b>Vestigial</b>, and superseded by {@link RoadDirection}, which is the same three
@@ -379,7 +499,7 @@ public class RoadAgent extends Agent {
 	this.delay = ((Number) args[0]).longValue();
 	this.leftStation = neighbour(args[1], "leftStation");
 	this.rightStation = neighbour(args[2], "rightStation");
-	if (!(args[3] instanceof SimClock)) {
+	if (!(args[3] instanceof SimClock shared)) {
 	    throw new IllegalArgumentException("RoadAgent " + getLocalName()
 		    + ": argument 4 must be the simulation's shared SimClock, was " + args[3]);
 	}
@@ -392,10 +512,11 @@ public class RoadAgent extends Agent {
 	assert ScenarioConfig.get().getRoadNames().contains(name())
 		: "road agent name '" + name() + "' is not a configured track";
 	this.random = SimRandom.forAgent(name());
-	this.clock = new AgentClock((SimClock) args[3]);
+	this.clock = new AgentClock(shared);
 	addBehaviour(new Inbox());
 	addBehaviour(new Drain());
-	addBehaviour(new ClockTickerBehaviour(this, CLOCK_GRANULARITY_MS, clock));
+	this.tickPeriodMs = granularityMsFor(shared.pace());
+	addBehaviour(new ClockTickerBehaviour(this, tickPeriodMs, clock));
 	sendState();
     }
 
@@ -572,8 +693,12 @@ public class RoadAgent extends Agent {
      * why it protected nothing and why {@link AgentClock#now()} read here, once, is the same
      * instant it froze. DEF-06 lives on this line: a train the road never planned makes
      * {@code RoadQueueItem.diff} unbox a {@code null} inside {@code PriorityQueue}'s sift, and
-     * the resulting {@link NullPointerException} escapes this method and the handler above it.
-     * That is the pinned behaviour, not an oversight.
+     * the resulting {@link NullPointerException} escapes this method, the handler above it and —
+     * under JADE, unlike under Cybele — <b>the agent itself</b>: {@code ActiveLifeCycle.execute}
+     * does not catch, so it reaches {@code Agent.run()}'s {@code catch (Throwable)}, which
+     * terminates the agent and writes two lines to <em>stdout</em>. See the DEF-06 bullet in the
+     * class comment for why that difference is recorded rather than repaired. Pinned behaviour,
+     * not an oversight.
      *
      * @param train the waiting train
      * @param trainPosition the station it wants to enter from
@@ -615,6 +740,17 @@ public class RoadAgent extends Agent {
      * straight-line code that sends one message and returns, so nothing of this agent's can run
      * between it and the {@code removeTrain} below. Reordering would have been a change with no
      * reason behind it.
+     * <p>
+     * <b>And the window is inert for a second reason that does not depend on that one.</b> There
+     * <em>is</em> a {@link RoadSchedule} reader inside it — {@link #pop()} →
+     * {@code RoadQueueItem.diff} → {@code RoadQueue.plannedTime} → {@code schedule.plannedTime} —
+     * so the reader/mutator pair the hoist would reorder genuinely exists, and "nothing can run
+     * in between" is not the whole answer. The pair cannot interfere because the two touch
+     * <b>disjoint entries</b>: the reader consults the slots of the <em>queued</em> trains, while
+     * {@code removeTrain} deletes the slot of the train <em>on the track</em>, and DEF-14's
+     * single-occupancy invariant is exactly the statement that those two sets never overlap. That
+     * argument survives a later change to the first one — to JADE's send semantics, to the
+     * behaviour scheduling, or to {@code acceptTrain} growing a suspension.
      *
      * @param notice the departing train
      */
@@ -706,6 +842,14 @@ public class RoadAgent extends Agent {
      */
     int queueSize() {
 	return queue.size();
+    }
+
+    /**
+     * @return the ticker period this agent registered, in real milliseconds
+     * @see #granularityMsFor(double)
+     */
+    long tickPeriodMs() {
+	return tickPeriodMs;
     }
 
     /**
