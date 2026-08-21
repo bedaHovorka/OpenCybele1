@@ -423,10 +423,21 @@ class RoadAgentStateMachineTest {
         enter(road, "vl0", LEFT);
         road.sent.clear();
 
+        // Skip forward to the first POSITIVE draw on tr1's stream, firing any negative ones as
+        // DEF-16 says they fire -- at the very next drain. #32 turned this into a loop: it used to
+        // be `assertTrue(delay > 0)`, which is a ~2.3 % per-run FLAKE, because the master seed is
+        // DRAWN when `sim.random.masterSeed` is unset and 2.2645 % of draws on a 1 s track are
+        // negative (the figure this file's own DEF-16 test quotes). Skipping the run on those
+        // seeds would have hidden it; consuming the draw keeps the assertion for every seed.
+        int index = 0;
         travelStart(road, "vl0");
-        long delay = firstDelayOf(ROAD);
-        assertTrue(delay > 0, "this seed's first tr1 draw must be positive for this test to mean"
-                + " anything; the negative case is covered separately");
+        while (delayOf(ROAD, index) <= 0) {
+            assertEquals(1, road.agentClock().runDue(), "a negative delay fires at the next drain");
+            road.sent.clear();
+            index++;
+            travelStart(road, "vl0");
+        }
+        long delay = delayOf(ROAD, index);
         assertEquals(1, road.agentClock().pending());
         assertTrue(road.sent.isEmpty(), "arming sends nothing");
 
@@ -571,9 +582,21 @@ class RoadAgentStateMachineTest {
         return delays;
     }
 
-    private static long firstDelayOf(String name) {
+    /**
+     * The {@code index}-th travel delay on an agent's own stream, counting from zero — the same
+     * sequence the agent itself draws, recomputed from the master seed rather than observed.
+     *
+     * @param name the agent whose stream to read
+     * @param index how many draws to skip
+     * @return the delay in ms, which {@code TravelDelay} deliberately does not clamp (DEF-16)
+     */
+    private static long delayOf(String name, int index) {
         Random oracle = SimRandom.forAgent(ScenarioConfig.get().getMasterSeed(), name);
-        return TravelDelay.travelMs(BASE_MS, oracle.nextGaussian());
+        long delay = 0;
+        for (int i = 0; i <= index; i++) {
+            delay = TravelDelay.travelMs(BASE_MS, oracle.nextGaussian());
+        }
+        return delay;
     }
 
     // ---------------------------------------------------------------------------------------

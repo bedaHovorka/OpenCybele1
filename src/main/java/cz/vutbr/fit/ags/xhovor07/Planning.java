@@ -215,11 +215,13 @@ import jade.lang.acl.MessageTemplate;
  * local name — {@code Main}.
  *
  * <h2>What still runs on Cybele</h2>
- * Nothing in this file does, and the application does not run until #32 lands — see #4. The
- * two public channel-name constants below are kept because {@code StaticRailwayObject},
- * {@code TraceProbe} and #27's
+ * Nothing in this file does. All five agents are ported as of #32; the application still does not
+ * run until #36 supplies {@code JadeLauncher} and a JADE probe — see #4. The
+ * two public channel-name constants below are kept because {@code TraceProbe} and #27's
  * {@code ChannelTableTest.cybele_channel_names_are_reproduced_verbatim} still name them.
- * ({@code Generator} dropped off that list with #33: it addresses {@code PLAN_TRAIN} to an AID.)
+ * ({@code Generator} dropped off that list with #33: it addresses {@code PLAN_TRAIN} to an AID;
+ * {@code StaticRailwayObject} dropped off it with #32, which reduced that class to its four
+ * channel-name constants.)
  *
  * @author Bedrich Hovorka
  */
@@ -229,15 +231,16 @@ public class Planning implements Serializable {
      * <p>
      * <b>This activity no longer uses it.</b> JADE routes {@code PLAN_TRAIN} by the
      * {@code railway.PLAN_TRAIN} ontology slot to the {@code Main} AID. The constant stays for
-     * the not-yet-ported {@code Generator} and {@code TraceProbe}, and because
+     * {@code TraceProbe}, which is #36's, and because
      * {@code ChannelTableTest} compares {@code Channel.PLAN_TRAIN} against exactly this literal.
      */
     public static final String PLAN_TRAIN = "PLAN_TRAIN";
     /**
      * channel id for incomming votes
      * <p>
-     * Vestigial for the same two reasons as {@link #PLAN_TRAIN}; {@code StaticRailwayObject}
-     * still names it.
+     * Vestigial for the same two reasons as {@link #PLAN_TRAIN}. Its third namer,
+     * {@code StaticRailwayObject.voteRequest}, went with #32's reduction of that class to its four
+     * channel-name constants.
      */
     public static final String VOTE = "VOTE";
     /**

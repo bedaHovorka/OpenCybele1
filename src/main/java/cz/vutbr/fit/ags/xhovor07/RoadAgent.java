@@ -253,13 +253,13 @@ import jade.lang.acl.MessageTemplate;
  * which that ticket deletes.
  *
  * <h2>What happened to {@code StaticRailwayObject} and {@code RailwayObject}</h2>
- * This agent no longer extends them; {@code Station} already stopped. The two base classes are
- * <b>left exactly as they are</b> — they now have no subclass, and that is deliberate rather
- * than an oversight. {@code Train} still names {@code StaticRailwayObject.ENTER}/{@code .LEAVE}
- * and {@code extends RailwayObject}, and {@code TraceProbe} names four of the constants, so
- * deleting either class today is a compile error. #32 takes {@code Train} out of
- * {@code RailwayObject}; #33 takes the probe's and the canvas' channel names; after both, the
- * two classes are dead and can go with them.
+ * This agent no longer extends them; {@code Station} already stopped. #31 left both base classes
+ * exactly as they were, because {@code Train} still named {@code StaticRailwayObject.ENTER}/
+ * {@code .LEAVE} and {@code extends RailwayObject}. <b>#32 discharged that.</b>
+ * {@code RailwayObject} is <b>deleted</b> — a ported {@code Train} reifies its name as
+ * {@code getLocalName()} — and {@code StaticRailwayObject} is <b>reduced to its four channel-name
+ * constants</b>, whose remaining owner is {@code TraceProbe} (#36) and, behind it, #27's
+ * {@code ChannelTableTest}. When #36 replaces the probe, that file goes too.
  *
  * <p>
  * <b>The alternative — extracting a shared JADE base now — was considered and declined.</b>
@@ -282,17 +282,20 @@ import jade.lang.acl.MessageTemplate;
  *       refusals, the emission order) into shared ones, when #4 requires each to be made
  *       separately.</li>
  * </ul>
- * <b>What that implies for #32–#34.</b> {@code Train} (#32) is inbound {@code START} /
- * {@code ENTER_REPLY} / {@code TRAVEL_END} and shares none of the five methods except
- * {@code name}/{@code emit}; it should inline too and then delete {@code RailwayObject}.
+ * <b>What that implied for #32–#34, and how it turned out.</b> {@code Train} (#32) is inbound
+ * {@code START} / {@code ENTER_REPLY} / {@code TRAVEL_END} and shares none of the five methods
+ * except {@code name}/{@code emit}; it did inline too, and deleted {@code RailwayObject}.
  * The point at which extraction pays is <em>after</em> #34, when all five agents exist and the
- * repeated shape can be read off four finished files instead of guessed at from two — and the
+ * repeated shape can be read off finished files instead of guessed at from two — and the
  * unit of duplication by then is {@code name}/{@code emit}/{@code Inbox}/{@code Drain}, which is
  * a JADE concern and belongs in the {@code jadeOntology} source set next to {@code Templates},
- * not in a resurrected {@code RailwayObject} in the application package.
+ * not in a resurrected {@code RailwayObject} in the application package. All five have now
+ * landed and the shape repeated five times unchanged, which #32 records as confirmation rather
+ * than acting on inside a ticket about the train.
  *
  * <h2>What still runs on Cybele</h2>
- * Nothing in this file does, and the application does not run until #32 lands — see #4. The
+ * Nothing in this file does. The five agents are all ported as of #32; the application still does
+ * not run until #36 supplies {@code JadeLauncher} and a JADE probe — see #4. The
  * {@code State} enum this class used to carry is <b>deleted by #33</b>, which ported its last two
  * namers: {@code RailwayMainAgent.roadAgentStates} and {@code RailwayCanvas} both hold
  * {@link RoadDirection} now, and {@code TraceProbe} reads the same enum. {@link #TRAVEL_START}
@@ -310,12 +313,12 @@ public class RoadAgent extends Agent {
      * <b>This agent no longer uses it.</b> JADE routes {@code TRAVEL_START} by the road's AID
      * plus the {@code railway.TRAVEL_START} ontology slot ({@code docs/message-ontology.md} §6).
      * The constant stays for two reasons, the same two {@code Station.PATH_FIND_REPLY} carries:
-     * {@code Train.java:96} and {@code TraceProbe.java:193} still name the channel, and #27's
+     * {@code TraceProbe.java:193} still names the channel, and #27's
      * {@code ChannelTableTest.cybele_channel_names_are_reproduced_verbatim} compares
-     * {@code Channel.TRAVEL_START.cybeleChannelName("tr1")} against exactly this literal. The
-     * first reason expires with #32/#33; the second does not, unless that assertion is
-     * re-pointed at the literal string — which is what it should do, since the test's subject is
-     * {@code Channel} and not this class.
+     * {@code Channel.TRAVEL_START.cybeleChannelName("tr1")} against exactly this literal. #32 took
+     * the {@code Train.java:96} namer; the probe's is #36's, and the test's does not expire unless
+     * that assertion is re-pointed at the literal string — which is what it should do, since the
+     * test's subject is {@code Channel} and not this class.
      */
     public static final String TRAVEL_START = "TRAVEL_START.";
     /**

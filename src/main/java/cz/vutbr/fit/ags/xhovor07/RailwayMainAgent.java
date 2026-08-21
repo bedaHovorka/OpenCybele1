@@ -701,8 +701,9 @@ public class RailwayMainAgent extends Agent implements RailwayView {
      * process icoming train state
      * <p>
      * {@code Train.KILLED} is now {@link TrainState#KILLED} — the same {@code "KILL"} literal, in
-     * the ontology package where the payload lives, so this handler no longer has to name a class
-     * #32 is about to rewrite.
+     * the ontology package where the payload lives, so this handler does not have to name
+     * {@code Train} at all. #32 pointed {@code Train.KILLED} at the same constant, so the two
+     * cannot drift.
      *
      * @param train the sending train
      * @param state its state, or the destructor sentinel

@@ -201,7 +201,8 @@ import jade.lang.acl.MessageTemplate;
  * per-agent argument #4 asks each ticket to make for itself, not a licence for the other four.
  *
  * <h2>What still runs on Cybele</h2>
- * Nothing in this file does, and the application does not run until #32 lands — see #4. The two
+ * Nothing in this file does. All five agents are ported as of #32; the application still does not
+ * run until #36 supplies {@code JadeLauncher} and a JADE probe — see #4. The two
  * vestigial members this class used to carry, {@code PATH_FIND_REPLY} and {@code Info}, are
  * <b>deleted by #33</b>, which ported all three of the classes that named them: the hub now sends
  * {@code PATH_FIND_REPLY} to a station's AID, {@code RailwayCanvas} reads the ontology's immutable
@@ -650,7 +651,8 @@ public class Station extends Agent {
      * {@code PATH_FIND}.
      * <p>
      * Overridable so the agent can be unit-tested outside a container; in the container it is
-     * {@code getLocalName()}, which is what {@code RailwayObject.getName()} reconstructed from
+     * {@code getLocalName()}, which is what {@code RailwayObject.getName()} — the base class #32
+     * deleted — reconstructed from
      * the Cybele agent id (INVENTORY DEF-12 notes that reifying it is the more correct form).
      *
      * @return the station name

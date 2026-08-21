@@ -226,9 +226,11 @@ public class Generator implements Serializable {
      * generator wants to capture the trains without also standing up a hub. Overridable for the
      * same reason {@link #emit} is.
      * <p>
-     * {@code Train} is still a Cybele {@code Handler} — #32 has not landed — so this call compiles
-     * and would fail at runtime, which is #4's stated position for the whole of 1-PORT: the tree
-     * compiles at every step and runs at none of them until the set is complete.
+     * {@code Train} is a {@code jade.core.Agent} since #32, so the two-element
+     * {@code {from, to}} array below is read by {@code Train.setup()} through
+     * {@code getArguments()} — the same pair, in the same order, that
+     * {@code Cybele.createAgent(train, Train.class.getName(), od)} passed to the 2008 constructor.
+     * The call still needs a live container, which is why it is a seam.
      *
      * @param train the train's local name, {@code vl<n>}
      * @param originDestination the {@code {from, to}} pair, passed on as the agent's arguments
