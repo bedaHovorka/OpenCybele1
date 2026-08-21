@@ -30,11 +30,18 @@ import cybele.kernel.Handler;
  *       and resumes entirely inside A's hold. If pause is not counted, B's resume restarts the
  *       clock while A still believes it is frozen, and A's own {@code getTime} delta across its
  *       bracket is greater than zero. The control arm runs A alone.</li>
- *   <li><b>NO EXCLUSION AT ALL.</b> B's handler records whether it was running while A was
- *       inside its bracket. Pausing a clock stops simulated <em>time</em>; it does not stop a
- *       <em>thread</em>. If B's body executes inside A's bracket, then the idiom never excluded
- *       anything, in which case the counted/not-counted question is beside the point: there is
- *       no critical section to make mutually exclusive, whatever the counting semantics are.</li>
+ *   <li><b>NO EXCLUSION OF THREADS.</b> B's handler records, at its entry and again at its
+ *       exit, whether A was inside its bracket. Pausing a clock stops simulated <em>time</em>;
+ *       it does not stop a <em>thread</em>. If B's body runs to completion inside A's bracket,
+ *       then the idiom never excluded a handler from anything, in which case the
+ *       counted/not-counted question is beside the point: there is no critical section to make
+ *       mutually exclusive, whatever the counting semantics are.
+ *       <p><b>State this precisely.</b> A freeze is not inert — it <em>defers</em> every
+ *       clock-derived event, system-wide, for the bracket's duration, because all four
+ *       {@code Activity.setTimer} sites are on this one global clock and every agent's
+ *       {@code getTime} stamp is frozen with it. What the probe shows is that it excludes no
+ *       <em>thread</em>. Deferred, not dropped; and because all pending timers shift together,
+ *       their relative order is preserved.</p></li>
  * </ol>
  *
  * <p>Self-verdicting: prints VERDICT lines and exits 1 if the clock's command channel is dead
@@ -74,8 +81,25 @@ public class ExpI {
 
     /** Set by A for the whole duration of its bracket; read by B to answer question 2. */
     static volatile boolean aInsideBracket = false;
-    /** Set by B: was A inside its bracket when B's body ran? */
-    static volatile boolean bRanInsideA = false;
+    /**
+     * Question 2, ACCUMULATED over every trial rather than overwritten by the last one. An
+     * earlier revision assigned a single {@code boolean} here, so the headline verdict was
+     * effectively n=1 per run while the subordinate verdict 1 was a genuine 20/20. Two
+     * counters, and two samples per trial: at B's ENTRY and again at B's EXIT, because
+     * "B's body ran to completion inside A's bracket" is a claim about the whole body and the
+     * entry sample alone only supports it by geometry.
+     */
+    static final java.util.concurrent.atomic.AtomicInteger bEnteredInsideA =
+            new java.util.concurrent.atomic.AtomicInteger();
+    static final java.util.concurrent.atomic.AtomicInteger bFinishedInsideA =
+            new java.util.concurrent.atomic.AtomicInteger();
+    /** Trials in which B ran at all, i.e. the denominator for the two counters above. */
+    static final java.util.concurrent.atomic.AtomicInteger bTrials =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    /** Handler threads, recorded rather than inferred -- see the note on VERDICT 2. */
+    static volatile String aThread = "?";
+    static volatile String bThread = "?";
 
     static long startUpToCreateClockGapNs = -1;
 
@@ -89,6 +113,7 @@ public class ExpI {
             agentsUp.countDown();
         }
         public void bracket(CybeleEvent ev) throws InterruptedException {
+            aThread = Thread.currentThread().getName();
             Cybele.pauseClock(CLOCK);
             Thread.sleep(SETTLE_MS);                     // let the async pause land
             final long t0 = Cybele.getTime(CLOCK);
@@ -109,10 +134,17 @@ public class ExpI {
             agentsUp.countDown();
         }
         public void bracket(CybeleEvent ev) throws InterruptedException {
-            bRanInsideA = aInsideBracket;                // question 2, sampled at entry
+            bThread = Thread.currentThread().getName();
+            bTrials.incrementAndGet();
+            if (aInsideBracket) {                        // question 2, sampled at B's ENTRY
+                bEnteredInsideA.incrementAndGet();
+            }
             Cybele.pauseClock(CLOCK);
             Thread.sleep(B_BRACKET_MS);
             Cybele.resumeClock(CLOCK);
+            if (aInsideBracket) {                        // and again at B's EXIT
+                bFinishedInsideA.incrementAndGet();
+            }
             bDone[0].countDown();
         }
     }
@@ -157,9 +189,20 @@ public class ExpI {
                     + "  [predicted advance if not counted: ~" + expectedAdvance + " ms]");
             System.out.println("VERDICT 1 control:        " + countAbove(control, 50) + "/" + N
                     + " control trials did");
-            System.out.println("VERDICT 2 (exclusion):    B's body ran while A held the bracket: "
-                    + bRanInsideA
-                    + "   [true => pauseClock excludes nothing; it stops time, not threads]");
+            final int trials = bTrials.get();
+            System.out.println("VERDICT 2 (exclusion):    B ENTERED its body inside A's bracket "
+                    + bEnteredInsideA.get() + "/" + trials
+                    + ", and RETURNED from it still inside A's bracket "
+                    + bFinishedInsideA.get() + "/" + trials);
+            System.out.println("                          [=> pauseClock blocks no thread. It DOES"
+                    + " defer every clock-derived event for the bracket's duration --");
+            System.out.println("                           all four setTimer sites are on this one"
+                    + " global clock -- but it excludes no handler from running.]");
+            System.out.println("  handler threads: A=" + aThread + "  B=" + bThread
+                    + "   [distinct => the two brackets really are concurrent. If dispatch were"
+                    + " single-threaded this probe would DEADLOCK:");
+            System.out.println("                   A blocks in aResult.put() on a SynchronousQueue"
+                    + " while the driver waits on bDone for the thread A holds.]");
         }
 
         private long[] arm(boolean withB) throws Exception {

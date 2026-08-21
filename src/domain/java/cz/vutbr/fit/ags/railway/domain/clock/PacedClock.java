@@ -105,14 +105,26 @@ public class PacedClock implements SimClock {
         final long elapsedNanos = source.nanos() - epochNanos;
         // elapsedNanos is non-negative (NanoSource is monotone), so the cast floors rather than
         // truncating towards zero, and nowMs() cannot go backwards between two calls.
-        return epochSimMs + (long) (elapsedNanos * pace / 1000000.0);
+        final double advanced = elapsedNanos * pace / 1000000.0;
+        // SATURATE, do not wrap. A double->long cast pins at Long.MAX_VALUE, and adding
+        // epochSimMs to that wraps NEGATIVE -- the one way the class's central promise
+        // (monotonicity) is falsifiable. MAX_PACE alone puts this out of reach for ~36 million
+        // simulated years, but setPace is public API the agent ports call, so the guarantee is
+        // enforced here rather than argued from the bound.
+        if (advanced >= (double) Long.MAX_VALUE - (double) epochSimMs) {
+            return Long.MAX_VALUE;
+        }
+        return epochSimMs + (long) advanced;
     }
 
     @Override
     public final synchronized void pause() {
         if (pauseDepth == 0) {
-            epochSimMs = nowMs();          // fold elapsed simulated time in before freezing
+            // One reading, used for both halves of the rebase: taking two would silently drop
+            // the sliver of simulated time between them.
+            final long now = nowMs();
             epochNanos = source.nanos();
+            epochSimMs = now;              // fold elapsed simulated time in before freezing
             pauseDepth = 1;
         } else if (semantics == PauseSemantics.COUNTED) {
             pauseDepth++;
@@ -159,8 +171,9 @@ public class PacedClock implements SimClock {
     @Override
     public final synchronized void setPace(double newPace) {
         requireUsablePace(newPace);
-        epochSimMs = nowMs();              // rebase first: elapsed time keeps the OLD pace
+        final long now = nowMs();          // rebase first: elapsed time keeps the OLD pace
         epochNanos = source.nanos();
+        epochSimMs = now;
         pace = newPace;
     }
 
@@ -183,10 +196,28 @@ public class PacedClock implements SimClock {
         return source;
     }
 
+    /**
+     * The fastest pace accepted: one million simulated milliseconds per real millisecond, i.e.
+     * about 16 simulated minutes per real millisecond. Chosen as a bound far above anything a
+     * scenario can want (the toolbar's fastest preset is 8) and far below where
+     * {@code elapsedNanos * pace} loses {@code double} precision against a {@code long}.
+     */
+    public static final double MAX_PACE = 1e6;
+
+    /**
+     * The slowest pace accepted. Below this a run makes no observable progress, and the useful
+     * reading of "stopped" is {@link #pause()}, which says so.
+     */
+    public static final double MIN_PACE = 1e-6;
+
     private static void requireUsablePace(double pace) {
-        // Rejecting 0 is a decision, not an oversight: see SimClock#setPace.
-        if (!(pace > 0.0) || Double.isInfinite(pace)) {
-            throw new IllegalArgumentException("pace must be positive and finite, was " + pace);
+        // Rejecting 0 is a decision, not an oversight: see SimClock#setPace. The upper and
+        // lower bounds are the arithmetic ones -- nowMs() saturates rather than wraps in any
+        // case, but a pace that could only ever produce a saturated clock is a configuration
+        // error and should fail where it is set, not where it is read.
+        if (!(pace >= MIN_PACE) || !(pace <= MAX_PACE)) {
+            throw new IllegalArgumentException("pace must be in [" + MIN_PACE + ", " + MAX_PACE
+                    + "], was " + pace);
         }
     }
 

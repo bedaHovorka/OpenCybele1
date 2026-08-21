@@ -17,7 +17,7 @@ did, and the parity gate still measures the same binary. Rewiring the agents ont
 
 | # | Decision | Where |
 |---|---|---|
-| 1 | The `pauseClock`/`resumeClock` idiom is **deleted**, not replaced with a lock — because it is not a lock and never was | §2 |
+| 1 | The `pauseClock`/`resumeClock` idiom is **deleted**, not replaced with a lock — because it excludes no *thread* and never did. What it *does* exclude is clock-derived events, system-wide, which the normalizer projects | §2, §2.4.1 |
 | 2 | Simulated time becomes an **object** (`SimClock`), not a global static | §3.1 |
 | 3 | Deadlines are stored as **absolute simulated milliseconds**, not relative delays | §3.2 |
 | 4 | Wake-ups fire **on the agent's own thread**, via a per-agent granularity ticker | §3.3 |
@@ -105,23 +105,38 @@ make the whole probe a measurement of nothing. The gap is printed beside the res
 [`probes/README.md`](probes/README.md) caveat 1 requires.
 
 ```
-startUp -> createClock gap: 20.206305 ms   (race window is ~3.4 ms; see SEM-02)
+startUp -> createClock gap: 20.60119 ms   (race window is ~3.4 ms; see SEM-02)
 clock=ovlClock scope=HOST pace=1  HOLD=300ms  B at +100ms for 20ms  settle=10ms  n=20 per arm
 
 control arm: 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
-overlap arm: 190 190 190 189 190 190 190 190 190 189 189 190 190 190 190 190 190 190 190 189
+overlap arm: 190 191 189 189 190 189 190 190 190 190 190 190 189 191 189 190 189 190 189 190
 
 ARM              A's own getTime delta across its bracket (ms)
   control (A alone)   min=0 max=0 median=0
-  overlap (A and B)   min=189 max=190 median=190
+  overlap (A and B)   min=189 max=191 median=190
 
 VERDICT 1 (early resume): 20/20 overlap trials saw the clock advance more than 50 ms inside A's bracket  [predicted advance if not counted: ~190 ms]
 VERDICT 1 control:        0/20 control trials did
-VERDICT 2 (exclusion):    B's body ran while A held the bracket: true   [true => pauseClock excludes nothing; it stops time, not threads]
+VERDICT 2 (exclusion):    B ENTERED its body inside A's bracket 20/20, and RETURNED from it still inside A's bracket 20/20
+  handler threads: A=Thread-3  B=Thread-2
 ```
 
-**60/60 across three consecutive runs**, control 0/60. The predicted value if pause is not counted
-is `HOLD + settle − overlapAt − bBracket = 300 + 10 − 100 − 20 = 190`; measured 189–191.
+**Both verdicts are 60/60 across three consecutive runs**, control 0/60. The predicted value if
+pause is not counted is `HOLD + settle − overlapAt − bBracket = 300 + 10 − 100 − 20 = 190`;
+measured 188–191.
+
+Two things about verdict 2 that an earlier revision of this document got wrong and a review
+caught. It used to be a single overwritten `boolean` printed once, so the *headline* verdict was
+n=1 per run while the subordinate one was a genuine 20/20; it is now two counters over every
+trial. And "B's body ran to completion inside A's bracket" used to be inferred from the geometry
+of the sleeps; B now samples `aInsideBracket` at its **exit** as well as its entry, so completion
+is recorded rather than reasoned.
+
+The distinct handler threads are printed rather than inferred, and their being distinct is not
+incidental. **If dispatch were single-threaded this probe would deadlock rather than report:** A
+blocks in `aResult.put()` on a `SynchronousQueue` while the driver waits on `bDone` for the very
+thread A is holding. So "verdict 2 true *and* the run terminated" is itself positive evidence
+that the two brackets are genuinely concurrent.
 
 ### 2.3 Verdict 1 — the hypothesis is confirmed
 
@@ -132,12 +147,13 @@ compose.
 ### 2.4 Verdict 2 — and it changes the conclusion rather than supporting it
 
 **The idiom is not a mutex.** Pausing a clock stops simulated *time*; it does not stop a
-*thread*. Agent B's handler entered, ran its whole body and returned while agent A was inside its
-bracket — measured, not argued. Nothing was ever excluded from anything.
+*thread*. Agent B's handler entered its body (20/20, 60/60 over three runs) and returned from it
+(same denominators) while agent A was inside its bracket. No thread was ever excluded from
+anything.
 
 So "replace the `pauseClock`/`resumeClock` mutex idiom with a real lock" answers a question the
 code never asked, and the counting semantics are beside the point: even a perfectly counted,
-perfectly reentrant pause would exclude exactly as much as this one does, which is nothing.
+perfectly reentrant pause would exclude exactly as many *threads* as this one does, which is none.
 
 This belongs to the category the project keeps running into — synchronisation that cannot exclude
 anything — but it is a new species of it. The others are locks on the wrong object, or guards a
@@ -145,6 +161,35 @@ second party never takes. This one is not a lock at all: no call in the idiom ca
 there is no critical section to be mutually excluded from. Which is why "replace it with a real
 lock" is the wrong repair, and why the repair that *is* right (§2.5) is not a synchronisation
 change.
+
+#### 2.4.1 What a freeze *does* exclude — state this precisely
+
+"The idiom excludes nothing" is too strong, and #30–#34 will read this section as licence, so the
+exact scope matters.
+
+A freeze is **not inert**. All four `Activity.setTimer` sites are armed on the *one* global
+`myClock` (`INVENTORY.md` CNT-09, TMR-01…TMR-04), so for the duration of any bracket, anywhere:
+
+* **no timer anywhere in the simulation can fire** — not `Generator`'s next arrival, not
+  `Planning`'s departure, not any road's traversal end;
+* **every agent's `Cybele.getTime` stamp is frozen**, including the ones the trace records.
+
+The exclusion domain is therefore **clock-derived events, system-wide** — which is a much bigger
+blast radius than a mutex would have had, and a completely different one from "the code between
+these two lines runs alone".
+
+It does not change the disposition, for three reasons worth writing down rather than
+re-deriving:
+
+1. **Deferred, not dropped.** A frozen deadline is still pending; it arrives once time moves.
+2. **Relative order is preserved**, because every pending timer shifts by the same amount.
+3. **The tick is family 1 of #21's projection** ([`trace-format.md`](trace-format.md)), so the
+   absolute shift is projected away by the normalizer before any golden comparison.
+
+`PauseIdiomTest.a_bracket_defers_every_pending_wakeup_by_its_duration` pins all three.
+
+So: **excludes no thread; defers clock-derived events by the bracket duration, which the
+normalizer projects.** That is the sentence to cite.
 
 ### 2.5 So what *is* it, and is the sequence really non-atomic?
 
@@ -156,12 +201,45 @@ clock drift**, and it is only load-bearing at one of the three sites.
 converts the agreed absolute departure `requestTime + timeDiff` into a *relative* delay `t`. Line
 `:111` hands `t` to `setTimer`, which measures it from the **kernel's own, later** clock read
 inside the timer service. Two reads of a moving clock, and the departure lands late by whatever
-elapsed between them. Freezing the clock across the two statements makes that interval zero. That
-is a genuine non-atomic sequence, and the bracket genuinely fixes it.
+elapsed between them. Freezing the clock across the two statements makes that interval zero.
 
-It is also **not a concurrency problem**, which is why calling it a mutex sent the analysis the
-wrong way. There is no second party. A single-threaded program would need the same bracket, because
-the thing racing the code is the clock.
+That last claim used to be the one unmeasured link in this argument — the site graded "real
+protection" rested on reasoning while the two graded "protects nothing" had 60 trials each.
+`INVENTORY.md` records only that the four sites take a relative `delayMillis` (TMR-01…TMR-04);
+`SEM-06` covers negative and zero delays, not the read point. So it was measured:
+[`probes/ExpJ.java`](probes/ExpJ.java), three arms, `n = 10` each, `D = 1000 ms`, gap `= 200 ms`.
+
+```
+baseline  arm: 1002 1001 1001 1001 1001 1001 1001 1001 1001 1001
+drift     arm: 1202 1202 1202 1201 1202 1201 1201 1202 1200 1201
+bracketed arm: 1001 1001 1001 1001 1001 1000 1001 1000 1001 1000
+
+ARM         fire - t0 (simulated ms), t0 taken BEFORE the gap
+  baseline    min=1001 max=1002 median=1001   [control: no gap]
+  drift       min=1200 max=1202 median=1202   [gap, clock RUNNING]
+  bracketed   min=1000 max=1001 median=1001   [gap, clock PAUSED across it -- the 2008 idiom]
+
+VERDICT 1: setTimer's delay is measured from the KERNEL's OWN, LATER read  [drift - baseline = 201 ms against a 200 ms gap]
+VERDICT 2: the pauseClock bracket REMOVES that drift  [bracketed - baseline = 0 ms]
+```
+
+**3/3 consecutive runs, 30 trials per arm in total**, `drift − baseline` = 201, 200, 200 ms
+against a 200 ms gap, and `bracketed − baseline` = 0 ms in all three. So:
+
+* `setTimer` **does** re-read the clock at the call. The drift is real and is exactly the elapsed
+  simulated time, to within a millisecond.
+* The 2008 bracket **does** remove it, completely. `Planning`'s bracket is load-bearing, and
+  deleting it *without* replacing the relative delay with an absolute instant would be a
+  behaviour change.
+
+Note the disposition does not depend on the result — `AgentClock.scheduleAt` reads no clock at
+all, so it is at least as good either way, and had `setTimer` turned out not to re-read, the
+bracket would simply have joined `RoadAgent`'s two in the "protects nothing" column. It is the
+*reasoning* that depended on it, and reasoning is what #30–#34 will cite.
+
+The site is also **not a concurrency problem**, which is why calling it a mutex sent the analysis
+the wrong way. There is no second party. A single-threaded program would need the same bracket,
+because the thing racing the code is the clock.
 
 **`RoadAgent.java:132-134` and `:167-169` — protecting nothing.** The bracket holds the clock
 still across one heap operation so every comparison inside it sees the same `t`. Two independent
@@ -182,13 +260,22 @@ is protecting nothing, and both are **deletions with no replacement**.
 
 | Site | Verdict | Replacement |
 |---|---|---|
-| `Planning.java:108-112` | The bracket is real, and the sequence is real | **Delete the bracket** and call `AgentClock.scheduleAt(requestTime + timeDiff, …)`. Passing the absolute instant removes the second clock read, so there is no drift left to freeze against. §3.2 |
+| `Planning.java:108-112` | The bracket is real, and the sequence is real — `ExpJ`, 3/3 runs | **Delete the bracket** and call `AgentClock.scheduleAt(requestTime + timeDiff, …)`. Passing the absolute instant removes the second clock read, so there is no drift left to freeze against. Do **not** delete it while keeping a relative delay: that reintroduces the 200 ms-class drift `ExpJ` measured. §3.2 |
 | `RoadAgent.java:132-134` | Protects nothing (#28 + algebra) | **Delete.** `roadQueue.offer(train, position, agentClock.now())` |
 | `RoadAgent.java:167-169` | Protects nothing (#28 + algebra) | **Delete.** `roadQueue.poll(agentClock.now())` |
 
 `SimClock.pause()`/`resume()` still exist — the GUI may want them, a scenario may want to freeze a
 run, and `defect-triage.md` requires a port to be *able* to reproduce a 2008 behaviour even where
 it chooses not to. They are simply not what these three sites should use.
+
+> **"Delete the bracket" is not "delete the monitor".** Each of the three sites sits inside an
+> ordinary Java monitor that is *separate* from the pause pair and was never part of this
+> analysis: `synchronized (this)` at `Planning.java:97` enclosing the whole envelope method, and
+> `synchronized` on `RoadAgent.enter`/`leave` (`:118`, `:150`) enclosing `push`/`pop`. Those are
+> real locks over real shared state and they do exclude. They become *redundant* under JADE's
+> one-thread-per-agent dispatch — which is a separate argument, made per agent, in #30–#34 — but
+> they are not redundant because of anything measured here. Remove the two `pauseClock` lines;
+> leave the `synchronized` alone until the agent that owns it is ported.
 
 **One thing the deletion does change, and it is worth stating rather than discovering in #39.**
 Under Cybele the three brackets froze the clock for the duration of the bracketed work — always,
@@ -273,6 +360,12 @@ Two details that matter more than they look:
 * **`pollDue` hands back one task at a time and the drain runs it outside every lock.** So a
   wake-up that throws does not consume the wake-ups behind it, and a wake-up may arm, cancel, read
   the clock or pause it.
+* **That bound is per drain, so do not call `runDue()` from inside a wake-up.** A callback that
+  re-enters `runDue()` gets a fresh, higher sequence limit and picks up the deadline it just
+  armed — measured, a self-rearming callback that drained itself fired five times inside one
+  outer drain. The class contract still holds (the framework's drain terminates), but it is the
+  spin the bound exists to prevent, re-created by hand. Arm from a wake-up freely; drain only
+  from the agent's ticker.
 
 ### 3.4 What is *not* reproduced, and why
 
@@ -310,6 +403,15 @@ agent threads read `nowMs()`. Three points:
   thing would give one state two representations and make `isPaused()` a lie. Negative, `NaN` and
   infinite are rejected for the same reason a `ScenarioConfig` key is validated at startup: a bad
   value should fail where it is set, not where it is read.
+* **And it is bounded**, `[PacedClock.MIN_PACE, MAX_PACE]` = `[1e-6, 1e6]`. Not defensive
+  clutter: `epochSimMs + (long)(elapsedNanos * pace / 1e6)` wraps **negative** once the
+  `double`→`long` cast saturates, and a subsequent `setPace` rebases onto the wrapped value.
+  A review demonstrated it at `pace = 1e300`. It needs ~36 million simulated years at pace 8 and
+  is unreachable from the toolbar's 8/1/0.3, but `setPace` is public API the agent ports call and
+  monotonicity is the class's central promise — so it is enforced twice: the bound rejects the
+  input, and `nowMs()` saturates at `Long.MAX_VALUE` rather than wrapping in any case.
+  `PacedClockTest.an_extreme_pace_saturates_instead_of_wrapping` drives it to the top of the
+  `long` range and asserts the clock never reads negative.
 
 `sim.clock.pace` and `sim.clock.startMs` keep their meaning unchanged and become the two
 constructor arguments of `PacedClock`.
@@ -400,15 +502,15 @@ both outputs plus JADE. A new package needs no wiring.
 
 ### Tests
 
-47 new tests, all L1, all in `src/test/java`; the suite goes 102 → **149**.
+50 new tests, all L1, all in `src/test/java`; the suite goes 102 → **152**.
 
 | Class | Pins |
 |---|---|
-| `PacedClockTest` | pace scaling, pause freezing, resume-continues-not-catches-up, counted vs boolean, monotonicity across every control op, pace validation, created-running |
+| `PacedClockTest` | pace scaling, pause freezing, resume-continues-not-catches-up, counted vs boolean, monotonicity across every control op, pace validation **and bounds**, **saturation instead of wrap at the top of the `long` range**, **`setPace` while paused**, created-running |
 | `VirtualClockTest` | exact advancement, pace through `advanceRealMs`, the paused-advance guard, monotonicity, byte-equal repeated timelines |
 | `DeadlineQueueTest` | time order, FIFO ties, past deadlines firing (DEF-16), cancel, no self-re-entry within a drain, the older-entry-not-skipped case, `long` compare not DEF-03's `int` narrowing |
 | `AgentClockTest` | **absolute scheduling does not drift** (§3.2), relative resolved at arming, unclamped negative delay, wake-ups on the caller's thread, paused clock fires nothing, pace change leaves deadlines put, throwing wake-up leaves the rest armed |
-| `PauseIdiomTest` | `ExpI`'s two arms at `ExpI`'s numbers, in both semantics, plus **verdict 2**: a bracket does not block another thread |
+| `PauseIdiomTest` | `ExpI`'s two arms, **derived from `ExpI`'s four constants** rather than the literal 190, in both semantics; **that a bracket defers every pending wake-up by its duration and preserves their order** (§2.4.1); and the design requirement that `pause()` must never block a thread |
 | `ClockTickerBehaviourTest` | one tick is one drain on the ticking thread; one behaviour serves every deadline the agent arms |
 
 ---
@@ -457,7 +559,8 @@ Three things to carry across intact:
 ## 9. Re-running the experiment
 
 ```bash
-docs/probes/run.sh ExpI        # exits 1 if the clock's command channel is dead; re-run
+docs/probes/run.sh ExpI        # the idiom under two agents; exits 1 if clock control is dead
+docs/probes/run.sh ExpJ        # from which read does setTimer's delay run? same exit contract
 ```
 
 Read the result **only** alongside the `startUp -> createClock` gap it prints. A probe inside the

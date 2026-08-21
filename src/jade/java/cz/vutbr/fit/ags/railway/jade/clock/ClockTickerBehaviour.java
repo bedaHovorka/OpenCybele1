@@ -1,3 +1,12 @@
+/*
+ * Projekt AGS 2007/08
+ * FIT VUT Brno
+ *
+ * Open Cybele 1
+ *
+ * Bedrich Hovorka
+ * xhovor07@stud.fit.vutbr.cz
+ */
 package cz.vutbr.fit.ags.railway.jade.clock;
 
 import cz.vutbr.fit.ags.railway.domain.clock.AgentClock;

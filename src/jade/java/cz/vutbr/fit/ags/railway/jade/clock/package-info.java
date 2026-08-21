@@ -1,3 +1,12 @@
+/*
+ * Projekt AGS 2007/08
+ * FIT VUT Brno
+ *
+ * Open Cybele 1
+ *
+ * Bedrich Hovorka
+ * xhovor07@stud.fit.vutbr.cz
+ */
 /**
  * The JADE binding of the simulated clock (#29).
  * <p>

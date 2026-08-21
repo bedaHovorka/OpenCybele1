@@ -95,8 +95,14 @@ public interface SimClock {
      * <p>Simulated time already elapsed is not re-interpreted: the clock rebases on the change,
      * so {@link #nowMs()} is continuous across it.</p>
      *
-     * @param pace simulated ms per real ms; must be {@code > 0} and finite
-     * @throws IllegalArgumentException if {@code pace} is not strictly positive and finite.
+     * @param pace simulated ms per real ms; must lie in
+     *     {@code [PacedClock.MIN_PACE, PacedClock.MAX_PACE]}
+     * @throws IllegalArgumentException if {@code pace} is outside that range, or is
+     *     {@code NaN}. The upper bound exists because {@link #nowMs()}'s promise of
+     *     monotonicity is otherwise falsifiable: a pace large enough to saturate the
+     *     {@code double}-to-{@code long} cast, followed by a rebase, wraps the clock negative.
+     *     The implementation saturates rather than wrapping in any case, so the bound is a
+     *     second line, not the only one.
      *     Pace {@code 0} is rejected on purpose: a stopped clock is {@link #pause()}, and
      *     letting a pace of zero mean the same thing gives two representations of one state
      *     and makes {@link #isPaused()} a lie.

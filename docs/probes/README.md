@@ -26,6 +26,7 @@ docs/probes/run.sh ExpA            # compile, then run one probe
 docs/probes/run.sh ExpA2 --control # ExpA2 with the SEM-01 positive-control config
 docs/probes/run.sh Order           # iteration-order probe (no Cybele, util classes only)
 docs/probes/run.sh ExpI            # the pause/resume idiom under two agents (#29)
+docs/probes/run.sh ExpJ            # from which read does setTimer's delay run? (#29)
 docs/probes/run.sh --all           # every probe in turn
 ```
 
@@ -58,6 +59,7 @@ Environment used for the recorded results: OpenJDK 21.0.11 (Red Hat), Fedora 43,
 | `ExpG.java` | **Self-verdicting**: `Cybele.terminate()` calls `System.exit(0)` and never returns; a shutdown hook's `Runtime.halt(code)` still overrides that status; and the *second*, recoverable way a clock command is lost — see below. The three facts `RunControl` (#17) is built on. | `SEM-02`, `SEM-06`, issue #17 |
 | `ExpH.java` | The two kernel facts #20's trace probe rests on beyond `SEM-03`: **H1** an earlier subscriber survives a later `openChannel` of the same name by another agent (so the probe can pre-open `TRAIN.STATE.<train>` before the train exists), **H2** `CybeleEvent.getClockTime()` is `-1` on a MESSAGE event and only populated for timer events (so a trace tick must come from `Cybele.getTime`), **H3** opening a channel nothing ever sends on is inert. | `SEM-03`, `SEM-05`, issue #20 |
 | `ExpI.java` | **Self-verdicting**: the `pauseClock`/`resumeClock` idiom under **two agents**, brackets overlapping on purpose. Establishes (1) that a second agent's resume restarts the clock inside the first agent's bracket — 20/20 per run, 60/60 over three runs, control 0/60 — and (2) that the second agent's body *runs* inside that bracket, i.e. the idiom excludes nothing and is not a mutex. The two facts #29 rests on. | `SEM-02`, issue #29 |
+| `ExpJ.java` | **Self-verdicting**: from which clock read does `Activity.setTimer`'s *relative* delay run? Three arms (no gap / gap with the clock running / gap with the clock bracketed). Establishes that the kernel re-reads at the call — drift 200–201 ms against a 200 ms gap, 3/3 runs — and that the 2008 `pauseClock` bracket removes it exactly. The measurement that stops `Planning.java:108-112` being the one link in #29's argument taken on reasoning. | `SEM-02`, `TMR-01`…`TMR-04`, issue #29 |
 | `Order.java` | Iteration order at the four hash-order sites that decide behaviour | `NDT-01`…`NDT-04` |
 | `OrderLock.java` | **Self-verdicting** pin of those same orders: node/road creation order, every road's `(first, second)` endpoints, every station's candidate-edge order and all 56 origin/destination routes. Exits non-zero on any drift. Built against `ScenarioConfig.buildNet()`, so it locks the real production topology path. | `NDT-01`…`NDT-04`, issue #19 |
 
@@ -88,7 +90,7 @@ while `getTime`/`isPaused` keep working — so the failure is invisible. Measure
 ≤ 3.4 ms lost in 19/23 runs; gap ≥ 3.5 ms landed in 66/66. Per-clock and permanent, identical on
 JDK 21 and 25.
 
-**Every `ExpB*` probe sits inside that window** — `ExpI` (#29) deliberately does not: it sleeps 20 ms, then *proves* clock control works with a re-sending `isPaused` poll before it measures anything, and prints the measured gap beside its results. Copy that shape rather than `ExpB*`'s if you add a clock probe. Treat any `ExpB*` result as valid only alongside a
+**Every `ExpB*` probe sits inside that window** — `ExpI` and `ExpJ` (#29) deliberately do not: they sleep 20 ms, then *prove* clock control works with a re-sending `isPaused` poll before measuring anything, and print the measured gap beside their results. Copy that shape rather than `ExpB*`'s if you add a clock probe. Treat any `ExpB*` result as valid only alongside a
 measured `startUp` → `createClock` gap. To measure the *intended* semantics, sleep ≥ 5 ms after
 `Cybele.startUp()` and before the first `createClock`. Do **not** "fix" `ExpB3`'s NEVER result by
 changing its polling technique — the polling is not the cause.

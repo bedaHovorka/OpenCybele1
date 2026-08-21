@@ -20,15 +20,25 @@ package cz.vutbr.fit.ags.railway.domain.clock;
  *
  * <pre>
  * control arm (agent A alone)        0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
- * overlap arm (A, with B inside it)  190 190 190 189 190 190 190 190 190 189 ...
- * VERDICT 1 (early resume): 20/20 overlap trials saw the clock advance inside A's bracket
- * VERDICT 2 (exclusion):    B's body ran while A held the bracket: true
+ * overlap arm (A, with B inside it)  190 191 189 189 190 189 190 190 190 190 ...
+ * VERDICT 1 (early resume): 20/20 overlap trials, control 0/20
+ * VERDICT 2 (exclusion):    B ENTERED its body inside A's bracket 20/20,
+ *                           and RETURNED from it still inside A's bracket 20/20
  * </pre>
+ * 60/60 on each counter across three consecutive runs.
  *
  * <p>Verdict 1 is #29's hypothesis, confirmed: agent B's {@code resumeClock} restarts the clock
  * while agent A still believes it is frozen. Verdict 2 is the larger finding — pausing a clock
- * stops simulated <em>time</em>, not <em>threads</em>, so the idiom never excluded anything and
- * was never a mutex in the first place. See {@code docs/clock-abstraction.md} §2.</p>
+ * stops simulated <em>time</em>, not <em>threads</em>, so the idiom excludes no handler from
+ * running and was never a mutex.</p>
+ *
+ * <p><b>"Excludes nothing" would be too strong, and #30–#34 must not read it that way.</b> A
+ * freeze is not inert: all four {@code Activity.setTimer} sites are on the one global clock, so
+ * for the bracket's duration no timer anywhere in the simulation can fire and every agent's
+ * {@code getTime} stamp is frozen with it. The exclusion domain is <em>clock-derived events,
+ * system-wide</em> — deferred, not dropped, and since all pending timers shift together their
+ * relative order is preserved (and the tick is family 1 of #21's projection). What the idiom
+ * never excluded is a <em>thread</em>. See {@code docs/clock-abstraction.md} §2.</p>
  */
 public enum PauseSemantics {
 

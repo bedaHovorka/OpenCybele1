@@ -161,7 +161,7 @@ class PacedClockTest {
     }
 
     @Test
-    @DisplayName("pace must be positive and finite -- 0 is rejected, because pause already means that")
+    @DisplayName("pace must be positive, finite and bounded -- 0 is rejected, because pause means that")
     void an_unusable_pace_is_rejected() {
         PacedClock c = clock(0, 1.0);
         // A pace of 0 would be a second representation of "stopped", and would make isPaused()
@@ -171,7 +171,52 @@ class PacedClockTest {
         assertThrows(IllegalArgumentException.class, () -> c.setPace(Double.NaN));
         assertThrows(IllegalArgumentException.class, () -> c.setPace(Double.POSITIVE_INFINITY));
         assertThrows(IllegalArgumentException.class, () -> new PacedClock(0, 0.0));
+        // The upper bound. 1e300 is where nowMs()'s cast saturates, and a rebase onto the
+        // saturated value then wraps the clock NEGATIVE -- see the next test.
+        assertThrows(IllegalArgumentException.class, () -> c.setPace(1e300));
+        assertThrows(IllegalArgumentException.class, () -> c.setPace(PacedClock.MAX_PACE * 2));
+        assertThrows(IllegalArgumentException.class, () -> c.setPace(PacedClock.MIN_PACE / 2));
         assertEquals(1.0, c.pace(), "a rejected change must leave the pace alone");
+        // The bounds themselves are legal.
+        c.setPace(PacedClock.MAX_PACE);
+        c.setPace(PacedClock.MIN_PACE);
+        assertEquals(PacedClock.MIN_PACE, c.pace());
+    }
+
+    @Test
+    @DisplayName("nowMs saturates rather than wrapping, so a huge pace cannot run the clock backwards")
+    void an_extreme_pace_saturates_instead_of_wrapping() {
+        // The single place the class's central promise is falsifiable. With the bound alone,
+        // `epochSimMs + (long)(elapsedNanos * pace / 1e6)` would still wrap if the cast pinned
+        // at Long.MAX_VALUE and epochSimMs were positive. Start near the top and drive it there.
+        PacedClock c = clock(Long.MAX_VALUE - 1000, PacedClock.MAX_PACE);
+        source.advanceMillis(1000);
+        assertEquals(Long.MAX_VALUE, c.nowMs(), "saturates at the top");
+        // And a rebase onto the saturated value must not then wrap.
+        c.setPace(1.0);
+        assertEquals(Long.MAX_VALUE, c.nowMs());
+        source.advanceMillis(1000);
+        assertTrue(c.nowMs() >= 0, "must never be negative: " + c.nowMs());
+        assertEquals(Long.MAX_VALUE, c.nowMs());
+    }
+
+    @Test
+    @DisplayName("a pace change while PAUSED preserves the frozen value and applies only after resume")
+    void a_pace_change_while_paused_applies_on_resume() {
+        // now_is_monotone_across_every_control_operation happens to order its loop so that every
+        // setPace lands on a RUNNING clock, so this path was untested.
+        PacedClock c = clock(0, 1.0);
+        source.advanceMillis(100);
+        c.pause();
+        assertEquals(100, c.nowMs());
+        c.setPace(8.0);
+        assertEquals(100, c.nowMs(), "the frozen reading must not move");
+        source.advanceMillis(500);
+        assertEquals(100, c.nowMs(), "and real time inside the pause is still not simulated time");
+        c.resume();
+        source.advanceMillis(100);
+        assertEquals(900, c.nowMs(), "100 at pace 1, then 100 real ms at the new pace 8");
+        assertEquals(8.0, c.pace());
     }
 
     @Test

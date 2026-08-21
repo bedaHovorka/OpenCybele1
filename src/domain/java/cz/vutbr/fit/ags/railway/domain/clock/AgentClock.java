@@ -134,6 +134,14 @@ public final class AgentClock {
      * hypothetical: it is 2.26 % of {@code RoadAgent}'s travel-time draws on a 1 s road
      * (DEF-16).</p>
      *
+     * <p><b>The bound is per drain, not global — do not call {@link #runDue()} from inside a
+     * wake-up.</b> A callback that re-enters {@code runDue()} gets a fresh, higher sequence
+     * limit and will therefore pick up the deadline it just armed: measured, a self-rearming
+     * callback that called {@code runDue()} itself fired five times inside one outer drain.
+     * That does not violate this class's contract — the drain the framework started still
+     * terminates — but it is exactly the spin the bound is there to prevent, re-created by
+     * hand. Arm from a wake-up freely; drain only from the agent's ticker.</p>
+     *
      * <p>Tasks run outside every lock this package holds, so a task may arm, cancel, read the
      * clock, or pause it. If a task throws, the throwable propagates and the wake-ups that had
      * not yet been polled stay in the queue — they are not consumed by the failed drain.</p>

@@ -11,6 +11,7 @@
 #   docs/probes/run.sh ExpG            # self-verdicting: terminate()/exit-code/clock-command facts
 #   docs/probes/run.sh ExpH            # subscription order, message clock stamps (#20's probe)
 #   docs/probes/run.sh ExpI            # self-verdicting: the pause/resume idiom under two agents (#29)
+#   docs/probes/run.sh ExpJ            # self-verdicting: from which read does setTimer's delay run? (#29)
 #   docs/probes/run.sh Order           # the util-only, no-Cybele iteration-order probe
 #   docs/probes/run.sh OrderLock       # self-verdicting: asserts those orders (#19)
 #   docs/probes/run.sh --all           # run every probe in turn
@@ -93,7 +94,7 @@ run_probe() {
 
 case "${1:-}" in
     "")        exit 0 ;;
-    --all)     for p in ExpA ExpA2 ExpB ExpB2 ExpB3 ExpB4 ExpC ExpE ExpF ExpG ExpH ExpI Order OrderLock; do
+    --all)     for p in ExpA ExpA2 ExpB ExpB2 ExpB3 ExpB4 ExpC ExpE ExpF ExpG ExpH ExpI ExpJ Order OrderLock; do
                    run_probe "$p" cybelle || echo "  (probe $p exited non-zero)"
                done ;;
     *)         if [ "${2:-}" = "--control" ]; then run_probe "$1" ctrl; else run_probe "$1" cybelle; fi ;;
