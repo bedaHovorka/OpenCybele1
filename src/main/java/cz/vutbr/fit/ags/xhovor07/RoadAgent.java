@@ -247,7 +247,10 @@ import jade.lang.acl.MessageTemplate;
  *       one-thread-per-agent for every agent that armed a timer".</li>
  * </ol>
  * With both halves on one thread the monitor excludes nothing that could otherwise interleave,
- * so it is redundant <em>here</em>. Not a licence for {@code Planning.java:97}, which #34 owns.
+ * so it is redundant <em>here</em>. Not a licence for {@code Planning.java:97} — #34 owned that
+ * one and made the same argument separately, from a different second party: there the monitor
+ * excluded the {@code VoteCollecting} activity's thread and the kernel timer service, both of
+ * which that ticket deletes.
  *
  * <h2>What happened to {@code StaticRailwayObject} and {@code RailwayObject}</h2>
  * This agent no longer extends them; {@code Station} already stopped. The two base classes are

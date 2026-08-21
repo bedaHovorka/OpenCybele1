@@ -202,10 +202,11 @@ import jade.lang.acl.MessageTemplate;
  * per-agent argument #4 asks each ticket to make for itself, not a licence for the other four.
  *
  * <h2>What still runs on Cybele</h2>
- * Nothing in this file does, and the application does not run until #31–#34 land — see #4. The two
+ * Nothing in this file does, and the application does not run until #32/#33 land — see #4. The two
  * vestigial members kept below, {@link #PATH_FIND_REPLY} and {@link Info}, exist only so the
  * not-yet-ported {@code RailwayMainAgent}, {@code RailwayCanvas} and {@code TraceProbe} still
- * compile. They are #34's to delete.
+ * compile. This comment said "#34's to delete"; #34 landed first and could not, because all three
+ * of those namers are #33's. <b>They are #33's to delete</b>, together with {@code RoadAgent.State}.
  *
  * @author Bedrich Hovorka
  *
@@ -221,8 +222,12 @@ public class Station extends Agent {
      * not-yet-ported {@code RailwayMainAgent} and {@code TraceProbe} still name the channel, and
      * #27's {@code ChannelTableTest.cybele_channel_names_are_reproduced_verbatim} compares
      * {@code Channel.PATH_FIND_REPLY} against exactly this literal. The first reason expires with
-     * #34; the second does not — unless #34 re-points that assertion at the literal string, which
-     * is what it should do, since the test's subject is {@code Channel} and not this class.
+     * <b>#33</b>, not #34 — {@code RailwayMainAgent} is #33's agent — and the second does not expire
+     * at all unless that assertion is re-pointed at the literal string, which is what it should do,
+     * since the test's subject is {@code Channel} and not this class. #34 left it alone: it kept
+     * {@code Planning.PLAN_TRAIN} and {@code Planning.VOTE} for exactly the same reason, so
+     * re-pointing one of the fifteen rows and not the other two would make the test less uniform,
+     * not more.
      */
     public static final String PATH_FIND_REPLY = "PATH_FIND_REPLY.";
     /**
@@ -267,7 +272,7 @@ public class Station extends Agent {
      * instead, which is the snapshot semantics {@code docs/defect-triage.md} §3.2 places inside
      * the contract. The type survives only because {@code RailwayMainAgent.stationInfos},
      * {@code RailwayCanvas.paintStation} and {@code TraceProbe.onStationInfo} still name it.
-     * Delete with #34.
+     * Delete with #33, which ports all three of those.
      */
     public class Info implements Serializable {
 	private static final long serialVersionUID = 1L;
