@@ -75,4 +75,23 @@ class DispatchTimelineTest {
         assertEquals(Arrays.asList(Long.valueOf(1234567), Long.valueOf(1241567)),
                 DispatchTimeline.accumulate(Arrays.asList("tr1", "stB"), big, 1234567));
     }
+
+    @Test
+    @DisplayName("past 2^53 the double accumulator loses the low bit, which an integer one would keep")
+    void the_double_accumulator_loses_the_low_bit_past_two_to_the_53() {
+        // #37 NOTE. The test above SHOWS the double form and the integer form agreeing; it does
+        // not DISTINGUISH them, and its own comment says so -- `disp += 1000 * delay.longValue()`
+        // passes it. This one cannot be passed by an integer accumulator.
+        //
+        // 2^53 + 1 is the first long a double cannot hold. `disp += 1000 * delay.doubleValue()`
+        // is `disp = (long)(disp + 1000.0*delay)`: the widening rounds 2^53+1 down to 2^53
+        // before the addition, so the low bit is gone before anything is added to it.
+        final long start = 9007199254740993L;   // 2^53 + 1
+        final Map<String, Long> delays = new LinkedHashMap<String, Long>();
+        delays.put("tr1", Long.valueOf(1));
+
+        assertEquals(Arrays.asList(Long.valueOf(start), Long.valueOf(9007199254741992L)),
+                DispatchTimeline.accumulate(Arrays.asList("tr1", "stB"), delays, start),
+                "the integer computation would give 9007199254741993");
+    }
 }

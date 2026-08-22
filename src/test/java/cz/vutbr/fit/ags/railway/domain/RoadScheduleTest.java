@@ -40,13 +40,46 @@ class RoadScheduleTest {
     @Test
     @DisplayName("the window is half-open: [time-delay, time+delay)")
     void the_window_is_half_open() {
+        // #37 NOTE. The lower half of this test used to read
+        //     lower.addToPlan("vl1", 50000 - D);
+        //     assertEquals(50000 - D + D - 50000, lower.computeDifference("vl0", 50000));
+        // whose expected value simplifies to 0 -- which is also what computeDifference returns
+        // when the window is EMPTY. An exclusive lower bound would have passed it. The second
+        // booking below is what makes the two branches produce different numbers: it is far
+        // outside the window, so it cannot trigger the branch, but it is lastKey, so it sets
+        // the answer the branch gives.
         final RoadSchedule lower = new RoadSchedule(D);
-        lower.addToPlan("vl1", 50000 - D);
-        assertEquals(50000 - D + D - 50000, lower.computeDifference("vl0", 50000));
+        lower.addToPlan("vl1", 50000 - D);      // exactly on the inclusive lower edge
+        lower.addToPlan("vl2", 900000);         // far outside the window; supplies lastKey
+        assertEquals(900000 + D - 50000, lower.computeDifference("vl0", 50000),
+                "time-delay is INSIDE the window, so the branch fires and lastKey answers");
 
         final RoadSchedule upper = new RoadSchedule(D);
-        upper.addToPlan("vl1", 50000 + D);
-        assertEquals(0, upper.computeDifference("vl0", 50000));
+        upper.addToPlan("vl1", 50000 + D);      // exactly on the exclusive upper edge
+        upper.addToPlan("vl2", 900000);         // same lastKey trick, so 0 can only mean "empty"
+        assertEquals(0, upper.computeDifference("vl0", 50000),
+                "time+delay is OUTSIDE it, so no train is planned and there is no objection");
+    }
+
+    @Test
+    @DisplayName("one millisecond either side of the two edges, so the boundary is a step and not a slope")
+    void one_step_inside_and_outside_each_edge() {
+        assertEquals(900000 + D - 50000, withFarBooking(50000 - D + 1).computeDifference("vl0", 50000),
+                "one ms inside the lower edge");
+        assertEquals(0, withFarBooking(50000 - D - 1).computeDifference("vl0", 50000),
+                "one ms outside the lower edge");
+        assertEquals(900000 + D - 50000, withFarBooking(50000 + D - 1).computeDifference("vl0", 50000),
+                "one ms inside the upper edge");
+        assertEquals(0, withFarBooking(50000 + D + 1).computeDifference("vl0", 50000),
+                "one ms outside the upper edge");
+    }
+
+    /** A road booked at {@code at}, plus a far-future booking that supplies {@code lastKey}. */
+    private static RoadSchedule withFarBooking(long at) {
+        final RoadSchedule s = new RoadSchedule(D);
+        s.addToPlan("vl1", at);
+        s.addToPlan("vl2", 900000);
+        return s;
     }
 
     @Test

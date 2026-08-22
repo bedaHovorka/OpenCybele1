@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.NoSuchElementException;
 
 import org.junit.jupiter.api.DisplayName;
@@ -42,4 +43,22 @@ class VoteEnvelopeTest {
         assertThrows(NoSuchElementException.class,
                 () -> VoteEnvelope.max(Collections.<Long>emptyList()));
     }
+
+    @Test
+    @DisplayName("a single voter is its own envelope -- the boundary the election reaches on a one-hop path")
+    void a_single_vote_is_the_whole_envelope() {
+        assertEquals(4200L, VoteEnvelope.max(List.of(Long.valueOf(4200))));
+    }
+
+    @Test
+    @DisplayName("the maximum is found at either end of the ballot, not only in the middle")
+    void the_maximum_is_found_at_either_end() {
+        // Every pre-#37 case put the winner at index 1 of 3 or 4, so a `max` that skipped the
+        // first or the last element passed them all.
+        assertEquals(900L, VoteEnvelope.max(List.of(
+                Long.valueOf(900), Long.valueOf(0), Long.valueOf(100))), "first position");
+        assertEquals(900L, VoteEnvelope.max(List.of(
+                Long.valueOf(0), Long.valueOf(100), Long.valueOf(900))), "last position");
+    }
+
 }
