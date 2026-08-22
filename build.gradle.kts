@@ -309,6 +309,17 @@ tasks.named<Test>("test") {
     // in. Both values happen to be today's defaults; the point is that a future edit has to
     // change them deliberately rather than inherit a change. (Same reasoning, and the same two
     // lines, as characterizationIT below.)
+    //
+    // #38 CONSIDERED MOVING JadeDeliverySpikeTest INTO THE integrationTest LANE AND DID NOT.
+    // It is the slowest test here (~1.3 s) and it does boot a container, so the lane below is where
+    // a class of its shape would be written today. Two reasons it stays: it is #27's spike, cited by
+    // name in docs/message-ontology.md sections 6 and 7 as the evidence for the topic-granularity
+    // decision, and moving the file would strand those references; and its
+    // booting_a_container_overwrites_the_global_platform_id test is the regression cover for a
+    // hazard that belongs to THIS lane -- with it gone, no container would ever boot in the `test`
+    // JVM and AclBindingTest's "derive the platform id, never hardcode it" discipline would stop
+    // being exercised against a real overwrite. The two lines above would then be a pin with nothing
+    // left to pin.
     maxParallelForks = 1
     forkEvery = 0
     // -ea matches how the application runs (README "Assertions (-ea)", #22): a domain class
@@ -322,6 +333,90 @@ tasks.named<Test>("test") {
 
 tasks.named("check") {
     dependsOn(domainPurity)
+}
+
+// ---------------------------------------------------------------------------------------------
+// L2 — the integration layer (TESTING.md §4.2, Phase1.md 1-POST.2, issue #38).
+//
+// A source set of its own, and unlike `characterizationIT` it is wired TO `main`: these tests boot
+// a real JADE main container in-process and start the REAL Station / RoadAgent / Train / TraceProbe
+// inside it. That is the point -- the messaging wiring (AID unicast, the fifteen topics, the one
+// shared message queue) is invisible to an L1 POJO test and un-isolatable at L3, where a divergence
+// is one line in a several-thousand-line trace.
+//
+// WHY A SOURCE SET AND NOT A PACKAGE IN `test`. The `test` lane runs its 321 tests in ONE JVM
+// (forkEvery = 0), which it can do because a POJO test mutates little global state. A container
+// test mutates a lot: `jade.core.Runtime` is a JVM-wide singleton, `jade.core.AID.platformID` is
+// overwritten by every container boot, and `RunControl`'s clock, `TraceProbe.READY` and
+// `TraceProbe.FAILURES` are statics with no reset hook -- the last two are named in #37 as
+// untestable at L1 for exactly that reason. A separate lane can pick a DIFFERENT fork policy for
+// them, and does:
+//
+//   maxParallelForks = 1   no two containers alive in one JVM at once; the singleton forbids it.
+//   forkEvery = 1          ONE JVM PER TEST CLASS. This is the lane's fixture, not a tuning knob.
+//                          It is what makes `TraceProbe.READY` (a 60 s latch counted down once and
+//                          never reset) and `TraceProbe.FAILURES` (a monotone counter with no
+//                          reset) testable at all: every class gets them at their initial value.
+//                          ProbeReadyTimeoutIT and ProbeFailureCapIT depend on this and say so in
+//                          their class comments. It also makes "one container per class" the same
+//                          statement as "one container per JVM", so no class can inherit another's
+//                          platform id -- the order-coupling JadeDeliverySpikeTest documents.
+//
+// Both values are pinned rather than inherited, for the reason the `test` lane gives above: a
+// future edit has to change them deliberately.
+//
+// NOT WIRED INTO `check`, on the precedent `characterizationIT` sets below: this lane binds a JICP
+// listener and forks a JVM per class, and `./gradlew build` must stay a build. `check` compiles it,
+// so a test that stops compiling still fails the build.
+// ---------------------------------------------------------------------------------------------
+
+val integrationTestSourceSet: SourceSet = sourceSets.create("integrationTest")
+
+configurations["integrationTestImplementation"].extendsFrom(configurations["implementation"])
+configurations["integrationTestRuntimeOnly"].extendsFrom(configurations["runtimeOnly"])
+
+dependencies {
+    // The application itself, as a compiled output: these tests start the real agent classes.
+    "integrationTestImplementation"(sourceSets["main"].output)
+    "integrationTestImplementation"("org.junit.jupiter:junit-jupiter:5.10.2")
+    "integrationTestRuntimeOnly"("org.junit.platform:junit-platform-launcher")
+}
+
+val integrationTest by tasks.registering(Test::class) {
+    group = "verification"
+    description = "L2 in-process JADE container tests, one container per class (TESTING.md §4.2)."
+    testClassesDirs = integrationTestSourceSet.output.classesDirs
+    classpath = integrationTestSourceSet.runtimeClasspath
+    useJUnitPlatform()
+
+    // See the block comment above. These two lines ARE the fixture.
+    maxParallelForks = 1
+    forkEvery = 1
+
+    // -ea for the reason the `test` lane gives: the agents' asserts are a contract surface and the
+    // goldens were recorded with them on. Headless because a container test must never open a
+    // Swing window.
+    jvmArgs("-ea", "-Djava.awt.headless=true")
+
+    // ABSOLUTE, and that is not a style preference: JADE's AMS concatenates this value with
+    // "APDescription.txt" rather than resolving it, and #36 lost a gate run to a relative one that
+    // put a 25-line FileNotFoundException ahead of line 1 of the trace. Each class makes its own
+    // subdirectory under this root and deletes it again.
+    val jadeFileDir = layout.buildDirectory.dir("integration-test/jade")
+    systemProperty("jade.file.dir", jadeFileDir.get().asFile.absolutePath)
+    doFirst { jadeFileDir.get().asFile.mkdirs() }
+
+    // A container boot is not something Gradle can hash.
+    outputs.upToDateWhen { false }
+
+    testLogging {
+        events("passed", "failed", "skipped")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
+}
+
+tasks.named("check") {
+    dependsOn(integrationTestSourceSet.classesTaskName)
 }
 
 // ---------------------------------------------------------------------------------------------

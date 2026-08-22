@@ -119,8 +119,16 @@ public class TraceProbe extends Agent {
     /** Non-zero once an observation has failed; see {@link #probeFailures()}. */
     private static final AtomicInteger FAILURES = new AtomicInteger();
 
-    /** Cap on failure reports, so a systematic fault cannot bury the trace it broke. */
-    private static final int MAX_FAILURE_REPORTS = 20;
+    /**
+     * Cap on failure reports, so a systematic fault cannot bury the trace it broke.
+     * <p>
+     * Package-private rather than {@code private} for the same reason {@link #GENERATED_GRACE} is:
+     * it is a number a test has to assert <em>against</em>, and the only way to reach the cap is
+     * to burn the process-wide {@link #FAILURES} counter up to it, which needs a JVM whose counter
+     * starts at zero. That is {@code ProbeFailureCapIT} in the {@code integrationTest} lane (#38).
+     * A test that hard-coded {@code 20} instead would keep passing after somebody changed this.
+     */
+    static final int MAX_FAILURE_REPORTS = 20;
 
     /** How long {@link #awaitReady()} waits before declaring the probe dead, ms. */
     private static final long READY_TIMEOUT_MS = 60000;
@@ -200,10 +208,33 @@ public class TraceProbe extends Agent {
      *         has no trace and must not be allowed to look like one
      */
     public static void awaitReady() {
+	awaitReady(READY_TIMEOUT_MS);
+    }
+
+    /**
+     * {@link #awaitReady()} with the bound supplied.
+     * <p>
+     * <b>This is a test seam and it is the narrowest one that works</b> (#38). The barrier's
+     * failure branch — "the probe never registered, so refuse to start the simulation" — is the
+     * half that matters and the half no L1 test could reach: {@link #READY} is a static
+     * {@code CountDownLatch} with no reset, so the only JVM in which the branch is reachable is
+     * one where no probe has ever registered, and reaching it there costs
+     * {@link #READY_TIMEOUT_MS}, a full minute, per run. The {@code integrationTest} lane forks a
+     * JVM per class, which supplies the first condition; this overload supplies the second.
+     * <p>
+     * Deliberately <b>not</b> a reset hook. A {@code resetForTests()} would let a production caller
+     * re-arm a barrier that is meant to be crossed once, which is a wider hole than a caller
+     * choosing its own timeout — and a reset is not what the test needs. Package-private for the
+     * same reason: {@code Main} has no business calling it, and nothing outside this package can.
+     *
+     * @param timeoutMs how long to wait, in milliseconds
+     * @throws IllegalStateException if the probe has not registered by then
+     */
+    static void awaitReady(long timeoutMs) {
 	try {
-	    if (!READY.await(READY_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+	    if (!READY.await(timeoutMs, TimeUnit.MILLISECONDS)) {
 		throw new IllegalStateException("the trace probe did not register within "
-			+ READY_TIMEOUT_MS + " ms. Either the container has no"
+			+ timeoutMs + " ms. Either the container has no"
 			+ " TopicManagementService (see setup()) or the agent was never started."
 			+ " Refusing to start the simulation: with "
 			+ ScenarioConfig.KEY_TRACE_ENABLED + "=true a run without a trace is a"
