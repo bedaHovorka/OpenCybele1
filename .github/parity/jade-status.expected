@@ -1,0 +1,129 @@
+# jade-status.expected — the recorded L3 status of the JADE port, per scenario.
+#
+# READ THE JUDGE'S DESIGN NOTE FIRST: .github/scripts/parity-junit.sh, the block
+# above `jade-status)`. This file is only the data half of it.
+#
+# ---------------------------------------------------------------------------
+# WHAT THIS FILE IS
+#
+# `characterizationIT@jade` cannot honestly demand five green scenarios. #39
+# measured the port against the frozen goldens over 20 runs per scenario per
+# implementation, classified the residue **(b) normalizer gap, not closable**,
+# and left three scenarios red (docs/parity-triage-jade.md). Those three do not
+# fail because the port does the wrong thing -- the JADE run emits the SAME
+# EVENT MULTISET as the 2008 application in all five scenarios, every run. They
+# fail because the comparison is keyed on burst partition, burst partition is
+# keyed on inter-message latency, and the goldens froze the baseline's latency.
+#
+# So this job asserts the MEASURED STATE rather than an aspiration, and it does
+# it on the axis the measurement showed to be stable. Not the pass RATE -- three
+# corpora read `capacity` 6/20, 15/20 and 12/12, and quoting any one of them as
+# "the" rate would itself be misleading. The per-scenario VERDICT CLASS.
+#
+# ---------------------------------------------------------------------------
+# THE VERDICT CLASSES (computed by parity-junit.sh from the failure anatomy)
+#
+#   MATCH      byte-identical to the golden.
+#   ORDER      failed, SAME MULTISET -- the golden's events, a different burst
+#              order. This is T-05 / T-06.
+#   QUANTUM    failed, and the ONLY multiset difference is T-07: VOTE.diff
+#              straddling the 1 000 ms `TIME_QUANTUM` bucket. Granted only when
+#              every surplus line carries a `diff=<T~` and the two sides cancel.
+#   BEHAVIOUR  failed with any other multiset difference -- a dropped or an
+#              invented event. **Permitted nowhere in this file, and it is not
+#              possible to permit it: the judge grants no scenario BEHAVIOUR.**
+#   OTHER      not a golden comparison at all: an agent died, the run missed its
+#              simulated-time bound, the harness threw. Permitted nowhere.
+#   SKIP       assumed away. Permitted nowhere -- the whole point of this job is
+#              that these five actually run. Before #40 they never had.
+#
+# ---------------------------------------------------------------------------
+# HOW TO READ A RED BUILD FROM THIS FILE
+#
+# A scenario that comes out anything other than its recorded status is red, IN
+# EITHER DIRECTION. `opencybele-strict` does not list MATCH: it is 0/N in every
+# corpus ever taken, so a `strict` that suddenly passes means the measurement
+# below has gone stale, and that is as much a signal as a `lifecycle` that
+# starts failing. Both mean somebody should look; neither should be edited away.
+#
+# ---------------------------------------------------------------------------
+# THE MEASUREMENT THIS PINS, AND WHAT RE-MEASURING TAKES
+#
+# Source: docs/parity-triage-jade.md §1 (three corpora) and §4.4 (the margins),
+# plus PR #80's two measurement comments.
+#
+#   scenario     20-run corpus   2nd corpus   12-run idle   margin vs 220 ms
+#   lifecycle    20/20           --           12/12         118 ms
+#   timers       20/20           --           12/12         no gap in [120,400]
+#   capacity      6/20           15/20        12/12           3 ms  (118 ms nearest)
+#   congestion    3/20           --            7/12           9 ms
+#   strict        0/20           0/20          0/12           0 ms
+#
+# The margins rank the pass rates exactly, on both implementations, and the
+# small-margin rows swing by 2-4x between corpora while the large-margin ones do
+# not move. `lifecycle` and `timers` are solid because they have margin, not
+# because they are immune.
+#
+# ---------------------------------------------------------------------------
+# THE CPU-THROUGHPUT FLOOR, measured for #40 because "the CI runner is loaded"
+# is a claim that deserves a number.
+#
+#   CPU budget (developer machine, 24 cores)   verdicts vs this file
+#   24 cores, quiet                            green 3/3
+#   4 dedicated cores (taskset -c 0-3), quiet  green 5/5
+#   4 cores at ~50% steal                      red 3/3
+#   24 cores at 100% steal                     red 4/4
+#
+# Below the floor the failure mode is TRUNCATION, not misordering: every
+# scenario is bounded by an ABSOLUTE sim.stop.maxClockMs at pace 8, so a machine
+# that cannot keep up with simulated time reaches the bound having emitted fewer
+# events (strict 575 lines against 598, congestion 157 against 167). That
+# surfaces as BEHAVIOUR -- which is what a port that dropped an event would look
+# like too, and there is no fingerprint separating them.
+#
+# It is not a property of the port. Under the same starvation the DRIFT GUARD
+# fails too: the frozen baseline stops matching its own goldens, 3/3 runs. The
+# whole L3 lane has this floor, both arms, and it predates #40.
+#
+# So: if a CI run goes red with `HINT: the run is SHORT`, THE FIX IS NOT THIS
+# FILE. It is that the runner is below the lane's throughput floor.
+#
+# ---------------------------------------------------------------------------
+# Re-measuring is NOT a CI action. It is ~20 runs per scenario on a quiet
+# machine:
+#
+#   ./gradlew installDist
+#   ./gradlew parityGate -Pjade.dist=$PWD/build/install/opencybele \
+#             -Dparity.gate.runs=20 -Dparity.gate.scenario=opencybele-strict
+#
+# and the numbers above are what a proposed edit to this file has to argue
+# against. Editing a row to make a build green, without a corpus behind it, is
+# the failure this whole mechanism exists to prevent.
+#
+# Format: <scenario> <permitted verdict>...   (whitespace separated, # comments)
+# ---------------------------------------------------------------------------
+
+# Solid across every corpus: 32/32 combined, and 118 ms of margin. These two
+# must pass. A failure here is a regression, full stop.
+opencybele-lifecycle    MATCH
+opencybele-timers       MATCH
+
+# Load-sensitive. The rate swings 6/20 -> 15/20 -> 12/12 and 3/20 -> 7/12 with
+# machine load, so a single CI run on a loaded shared runner cannot distinguish
+# "passed" from "failed" as a signal, and pinning either one would be pinning
+# the runner rather than the program. What IS pinned is that when they fail,
+# they fail as an ORDERING difference and never as a behaviour difference --
+# which is the claim every corpus supports.
+opencybele-capacity     MATCH ORDER
+opencybele-congestion   MATCH ORDER
+
+# 0/N in every corpus taken, on either machine state -- deterministic, not
+# flaky, and the same boundary fails the BASELINE 3/20 under concurrent load, at
+# the same line and in the same direction (§4.2). MATCH is deliberately absent:
+# `strict` passing is a status change and goes red.
+#
+# QUANTUM is here because #39 measured T-07 on this scenario specifically:
+# VOTE.diff for (vl8, stH) is 3214..3254 on the baseline and 2809..3116 on the
+# port, so it quantises to <T~3000> every time on one and straddles the bucket
+# on the other -- 10 runs each way in a corpus of 20.
+opencybele-strict       ORDER QUANTUM

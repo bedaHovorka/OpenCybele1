@@ -301,7 +301,16 @@ xhost -local:docker   # revoke access again once done
 
 ## Continuous integration
 
-`.github/workflows/characterization-opencybele.yml` runs the job **`characterizationIT@opencybele`** on every push to, and pull request against, `develop`/`jade-develop`, plus nightly. It checks out this branch (the parity harness) *and* `opencybele-baseline` (the frozen OpenCybele application), recovers and installs the vendored Cybele jars with `scripts/bootstrap-vendor-jars.sh`, builds the application with `installDist`, and runs the L3 golden-master suite against it via `-Popencybele.dist`. The run is headless and needs no display server.
+`.github/workflows/ci.yml` (named `characterization-opencybele.yml` until #40) runs **four jobs** on every push to, and pull request against, `develop`/`jade-develop`:
+
+| Job | What it does |
+|---|---|
+| `build@this-ref` | `./gradlew build` on the triggering ref: compilation, the 321-test L1 lane, `domainPurity` |
+| `integrationTest@this-ref` | the 17-test L2 lane — real in-process JADE containers, one JVM per class |
+| `characterizationIT@opencybele` | the **drift guard**: checks out this branch (the parity harness) *and* `opencybele-baseline` (the frozen OpenCybele application), recovers and installs the vendored Cybele jars with `scripts/bootstrap-vendor-jars.sh`, builds the application with `installDist`, and runs the L3 golden-master suite against it via `-Popencybele.dist` |
+| `characterizationIT@jade` | the **port guard**: the same suite and the same untouched goldens, against the JADE application built from this ref (`installDist`, `-Pjade.dist`) |
+
+Every run is headless and needs no display server. The JADE lane is judged against a *recorded measurement* rather than against "all five scenarios green" — `opencybele-strict` fails its golden deterministically, for a reason #39 measured and classified as a normalizer gap that cannot be closed. See [`docs/ci.md`](docs/ci.md) §10 for why, what that costs, and what re-measuring takes.
 
 Two things about it are worth knowing before reading the YAML. Without `-Popencybele.dist` the end-to-end test is *skipped* and Gradle still exits 0, so the job asserts out of the JUnit XML that the scenario really ran rather than trusting the exit status. And the baseline carries a measured ~1-in-45 nondeterministic wedge (`DEF-22`) whose failure is indistinguishable from real behavioural drift except by re-running, so the end-to-end class — and only that class — gets one loudly announced retry.
 
