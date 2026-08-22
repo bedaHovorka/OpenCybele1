@@ -576,12 +576,24 @@ same observation from the other end.
   starvation is deterministic, so it fails both attempts and goes red — which is correct: a CI
   machine that cannot run this lane should be visible, not hidden.
 
-**What is not settled locally.** A GitHub-hosted `ubuntu-24.04` runner is a dedicated VM with a
-small, fixed vCPU count and no competing tenant, which is the *4-dedicated-cores* row — the row that
-is green 5/5. But that is a model, not a measurement of the actual runner, and only a real run
-settles where a hosted runner sits on this table. If the first runs come back red with `HINT:` lines
-about short runs, the answer is not to edit `jade-status.expected` — it is that the runner is below
-this lane's throughput floor, and that is a fact about the runner worth having explicitly.
+**Settled by the first real run.** A GitHub-hosted `ubuntu-24.04` runner is a dedicated VM with a
+small, fixed vCPU count and no competing tenant, so the *4-dedicated-cores* row was the prediction.
+Run [`32550380188`](https://github.com/bedaHovorka/OpenCybele1/actions/runs/32550380188) confirms it:
+all four jobs green, `characterizationIT@jade` on **attempt 1 of 2** with no retry, and
+
+```
+scenario                 verdict    recorded           status
+opencybele-strict        ORDER      ORDER QUANTUM      ok
+opencybele-capacity      MATCH      MATCH ORDER        ok
+opencybele-congestion    MATCH      MATCH ORDER        ok
+opencybele-lifecycle     MATCH      MATCH              ok
+opencybele-timers        MATCH      MATCH              ok
+```
+
+That is **one sample**, not a rate, and this job is not measuring one (see the top of this section).
+If a later run comes back red with `HINT:` lines about short runs, the answer is not to edit
+`jade-status.expected` — it is that the runner was below this lane's throughput floor on that
+occasion, and that is a fact about the runner worth having explicitly.
 
 ---
 

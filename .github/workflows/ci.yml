@@ -253,7 +253,7 @@ jobs:
 
       - name: Publish the unit test reports
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v6.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: port-build-test-results
           path: build/test-results/test/**/*.xml
@@ -608,7 +608,7 @@ jobs:
 
       - name: Publish the integration test reports
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v6.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: integration-test-results
           path: build/test-results/integrationTest/**/*.xml
@@ -868,7 +868,7 @@ jobs:
 
       - name: Upload the run evidence
         if: ${{ failure() || env.PARITY_RETRIED == 'true' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v6.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: characterizationIT-jade-evidence
           path: ${{ env.EVIDENCE_DIR }}
@@ -881,7 +881,7 @@ jobs:
       # burst-boundary margins) actually lives.
       - name: Publish the parity test reports
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v6.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: characterizationIT-jade-test-results
           path: build/test-results/characterizationIT/**/*.xml
