@@ -2,6 +2,10 @@
 
 Issue [#16](https://github.com/bedaHovorka/OpenCybele1/issues/16). Phase 1, `1-PRE`.
 
+> **#82.** The pinned `cybelle/*.prop` files and the Cybele application live on
+> `opencybele-baseline`. This branch is JADE-only; keep this document as the measurement record
+> for the baseline kernel, not as a setup guide for `jade-develop`.
+
 `cybelle/cybele.prop` and `cybelle/ICS.prop` are the last determinism levers that live outside
 application code. This document records what the kernel actually does with them, what changing
 them does to a run, and the four decisions that came out of that.

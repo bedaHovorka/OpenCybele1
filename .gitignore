@@ -6,9 +6,6 @@ bin/
 .gradle/
 build/
 
-# Vendored Cybele jars (installed to ~/.m2, not tracked in git — see README)
-cybelle/*.jar
-
 # IDE
 .idea/
 *.iml

@@ -10,15 +10,16 @@ java {
 
 application {
     mainClass.set("cz.vutbr.fit.ags.xhovor07.Main")
+    // Kept as "opencybele" so installDist still lands at build/install/opencybele,
+    // which is the path JadeLauncher / -Pjade.dist and the parity docs name.
+    // The framework on this branch is JADE (#82); the OpenCybele/Cybele solution
+    // lives on branch opencybele-baseline.
     applicationName = "opencybele"
-    // -ea turns the codebase's 32 `assert` statements into real invariant
-    // checks. See README.md ("Assertions (-ea)") — enabling this is itself a
-    // behaviour change, and the on/off decision for golden recording is
-    // deliberately NOT made here (see issues #22/#24).
-    //
-    // --patch-module java.base=cybelle is required for Cybele to find
-    // cybele.prop under JPMS; see README.md ("Why --patch-module").
-    applicationDefaultJvmArgs = listOf("-ea", "--patch-module", "java.base=cybelle")
+    // -ea turns the codebase's `assert` statements into real invariant checks.
+    // See README.md ("Assertions (-ea)") — enabling this is itself a behaviour
+    // change, and the on/off decision for golden recording is deliberately NOT
+    // made here (see issues #22/#24).
+    applicationDefaultJvmArgs = listOf("-ea")
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -52,24 +53,17 @@ val domainJar by tasks.registering(Jar::class) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The jade source set (#27, Phase1.md 1-PORT "messages -> ACLMessage").
+// The jadeOntology source set (#27, Phase1.md 1-PORT "messages -> ACLMessage").
 //
 // `src/jade/java` holds the ONE layer of the message ontology that cannot be framework-free:
 // the binding from the domain's message records to `jade.lang.acl.ACLMessage`, the fifteen
-// `MessageTemplate`s, and the topic names the probe (#36) registers to.
+// `MessageTemplate`s, the topic names the probe (#36) registers to, and ClockTickerBehaviour.
 //
-// WHY A SOURCE SET OF ITS OWN, AND NOT `main`. `main` is the Cybele application. This branch's
-// parity gate runs it, its goldens are frozen, and `./gradlew run` / `installDist` must keep
-// launching it with `--patch-module java.base=cybelle` and nothing else on the classpath.
-// Putting the JADE jar on `implementation` would drop jade-4.3.jar into `build/install/
-// opencybele/lib` and onto the start script's classpath, which is a change to the thing under
-// measurement for no benefit -- the Cybele agents deliberately do NOT use this ontology (that
-// is #30-#34's job, ticket by ticket, each with its own gate run). A source set gives the
-// classes a home, a compile check on every build, and zero reach into the running application.
-//
-// It depends on `domain` and on JADE, and on nothing else. In particular it must never import
-// `cz.vutbr.fit.ags.xhovor07` -- the split between this and `domain` is the split between
-// "needs jade.lang.acl" and "reusable verbatim by branch jason (#46)".
+// WHY A SOURCE SET OF ITS OWN, AND NOT JUST A PACKAGE IN `main`. It depends on `domain` and on
+// JADE, and on nothing else. In particular it must never import `cz.vutbr.fit.ags.xhovor07` --
+// the split between this and `domain` is the split between "needs jade.lang.acl" and
+// "reusable verbatim by branch jason (#46)". Packaged as a jar so `main` consumes it as a
+// library and the one-way dependency stays visible in the build file.
 val jadeOntology by sourceSets.creating {
     java.setSrcDirs(listOf("src/jade/java"))
     compileClasspath += domain.output
@@ -80,20 +74,6 @@ dependencies {
     "jadeOntologyImplementation"("net.sf.ingenias:jade:4.3")
 }
 
-// #30 SPENDS THE BUDGET THE COMMENT ABOVE SET ASIDE, and this is the note that says so.
-//
-// That comment keeps JADE off `main` because "the Cybele agents deliberately do NOT use this
-// ontology (that is #30-#34's job, ticket by ticket, each with its own gate run)". #30 is the
-// first of those tickets: `Station` is now a `jade.core.Agent` that builds its messages with
-// `Messages`/`Templates`, so `main` needs JADE and this source set's output on its compile
-// classpath. Packaged as a jar, exactly like `domainJar`, so `main` consumes it as a library and
-// the one-way dependency stays visible in the build file.
-//
-// The cost is the one that comment predicted: jade-4.3.jar and this jar land in
-// `build/install/opencybele/lib` and on the start script's classpath. It is no longer a change to
-// the thing under measurement -- per #4's sequencing decision the application stops running at
-// #30, and the parity gate measures the frozen baseline dist in `../wt/opencybele-ref`, not this
-// tree's. Nothing else in the build moves.
 val jadeOntologyJar by tasks.registering(Jar::class) {
     archiveBaseName.set("opencybele-jade-ontology")
     from(jadeOntology.output)
@@ -155,8 +135,7 @@ tasks.withType<JavaCompile>().configureEach {
 // A second source set for verification drivers that are not part of the simulation and
 // must never be on its classpath. `tools/java` holds SeedInterleavingCheck, the evidence
 // for issue #15's "identical draw sequences regardless of thread interleaving" criterion.
-// No external test framework is pulled in: this project builds from mavenLocal vendor jars
-// and stays buildable offline.
+// No external test framework is pulled in.
 val tools by sourceSets.creating {
     java.setSrcDirs(listOf("tools/java"))
     compileClasspath += sourceSets["main"].output + configurations.runtimeClasspath.get()
@@ -206,19 +185,8 @@ tasks.named("check") {
 // COMPLETE" -- checked mechanically instead of by hand. Two steps: run the simulation
 // headless and bounded with the probe on, then verdict what it produced.
 //
-// #30 NOTE, DISCHARGED BY #36. `traceRun`/`traceCheck` stopped working at #30, because the
-// application stopped booting: `Station` had become a `jade.core.Agent` and a Cybele
-// `RailwayMainAgent` could not spawn it. That was expected and planned for (#4's sequencing
-// decision: the tree compiles at every step of #30-#34 and runs at none of them). #36 completed
-// the set -- `Main` boots a JADE main container and the probe registers to the fifteen topics --
-// and these two tasks run again unchanged. `TraceCheck`'s one baseline-specific assertion, "field
-// 6 is always '-'", was replaced rather than deleted: it now checks field 6 against the FIPA act
-// #27 assigned to that channel.
-//
-// Deliberately NOT wired into `check`, unlike rngProof. This one boots the Cybele kernel,
-// takes ~20 s of wall clock, and inherits the kernel's own residual hang (INVENTORY
-// DEF-22, roughly 1 run in 45) -- putting that in every `./gradlew build` would trade a
-// reliable build for a flaky one. It is one command when you want it.
+// Deliberately NOT wired into `check`, unlike rngProof. This boots a full JADE platform and
+// takes ~20 s of wall clock; it is one command when you want it.
 val traceFile = layout.buildDirectory.file("trace/trace.txt")
 
 val traceRun by tasks.registering(JavaExec::class) {
@@ -226,7 +194,7 @@ val traceRun by tasks.registering(JavaExec::class) {
     description = "Runs a short bounded headless simulation with the parity trace probe on (#20)."
     classpath = sourceSets["main"].runtimeClasspath
     mainClass.set("cz.vutbr.fit.ags.xhovor07.Main")
-    jvmArgs("-ea", "--patch-module", "java.base=cybelle", "-Djava.awt.headless=true")
+    jvmArgs("-ea", "-Djava.awt.headless=true")
     systemProperty("sim.config", "scenarios/short-bounded.properties")
     systemProperty("sim.trace.enabled", "true")
     doFirst {
@@ -260,20 +228,19 @@ tasks.named<JavaExec>("run") {
 }
 
 repositories {
-    mavenLocal()
     mavenCentral()
 }
 
 dependencies {
-    implementation("com.iai:cybele-api:1.0")
-    implementation("com.iai:cybele-impl:1.0")
     // The domain jar is a library like any other: on the compile and runtime classpath, and
     // therefore inside `installDist`'s lib/ and on the start script's classpath. The
     // dependency is deliberately one-way -- `domain` has no dependency on `main`.
     implementation(files(domainJar))
 
-    // #30: `Station` is a `jade.core.Agent`. See the note next to `jadeOntologyJar` for why this
-    // is now on `main` when the jadeOntology source set's comment says it should not be.
+    // JADE 4.3.3 (net.sf.ingenias:jade:4.3) — decision #26. The agents in src/main are
+    // jade.core.Agent subclasses; the ontology binding is the jadeOntology jar (#27/#30).
+    // Cybele vendor jars are NOT on this branch (#82): the OpenCybele solution lives on
+    // opencybele-baseline and is driven by the harness as a child JVM via OpenCybeleLauncher.
     implementation("net.sf.ingenias:jade:4.3")
     implementation(files(jadeOntologyJar))
 
@@ -285,8 +252,7 @@ dependencies {
     // #27's binding tests -- template disjointness and the ACLMessage round trip -- need the real
     // JADE classes to be worth anything: a hand-rolled stub would prove that the stub is disjoint.
     //
-    // #30 CORRECTS THIS COMMENT. It used to end "JADE is on the TEST classpath only. It is
-    // deliberately NOT on `implementation`", which the `implementation` line above now contradicts.
+    // JADE reaches the test classpath via `implementation` above (testImplementation extends it).
     // The explicit `testImplementation("net.sf.ingenias:jade:4.3")` that used to sit here is gone
     // with it: `testImplementation` extends `implementation`, so it was resolving the same
     // coordinate twice and stating a constraint that no longer holds. The tests still get JADE --

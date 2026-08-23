@@ -1,6 +1,11 @@
 # INVENTORY.md — Stage-0 inventory of OpenCybele1
 
-Status: **authoritative**. This is the `agent → activities → events handled → state → messages`
+> **#82.** This document inventories the **original Cybele application** as it stood when Stage 0
+> was written. The live Cybele tree is on branch `opencybele-baseline`; `jade-develop` carries the
+> JADE port only. Paths such as `cybelle/` and `import cybele.kernel` below refer to that baseline,
+> not to the current tree on this branch.
+
+Status: **authoritative** (as a historical baseline). This is the `agent → activities → events handled → state → messages`
 table demanded by [`MIGRATION.md` §5 Step 0](MIGRATION.md#5-step-by-step-migration-process) and by
 [`Phase1.md` L19](Phase1.md). It supersedes `MIGRATION.md` §4 (which was written without repo access
 and was explicitly labelled ASSUMED) and the illustrative "before" snippets in `MIGRATION.md` §7.

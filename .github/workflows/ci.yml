@@ -36,18 +36,11 @@
 #      For the JADE arm this is not so, and it is the one real simplification #40 gets: the harness
 #      and the JADE implementation are the same tree. ONE checkout, `installDist`, `-Pjade.dist`.
 #
-#   2. The vendor jars are not in git. `Cybele.jar`/`CybeleImpl.jar` are 2008-era IAI binaries with
-#      no public Maven repo, excluded by .gitignore and reachable only through the `withoutGradle`
-#      tag. `scripts/bootstrap-vendor-jars.sh` (#14) recovers and installs them, and works with no
-#      `mvn` on PATH. It is the single call this workflow makes; the install commands are NOT
-#      duplicated here.
-#
-#      The JADE jobs need it too, even though `src/main` has ZERO `cybele.*` references since #35:
-#      `build.gradle.kts` still declares `com.iai:cybele-api`/`cybele-impl` on `implementation`, so
-#      the two jars are still resolved and still land in `installDist`'s lib/. Dropping them is a
-#      1-POST cleanup and NOT #40's: the child JVM's `-cp` is part of the command line every
-#      measurement in docs/parity-triage-jade.md was taken under, and this lane's margins are 3--9
-#      ms wide. That is not a classpath to change as a side effect of a CI ticket.
+#   2. The Cybele vendor jars are not in git, and they are not on THIS branch either (#82).
+#      `Cybele.jar`/`CybeleImpl.jar` live only on `opencybele-baseline`. The OPENCYBELE arm
+#      recovers them there with that branch's `scripts/bootstrap-vendor-jars.sh` (#14). The JADE
+#      jobs on this ref need no bootstrap: `src/main` is a JADE application and its only framework
+#      coordinate is `net.sf.ingenias:jade:4.3` from Maven Central.
 #
 #   3. A green Gradle exit does not mean a good run. Three separate ways, all measured on this
 #      repository: without `-Popencybele.dist` the end-to-end test is SKIPPED by `assumeTrue` and
@@ -194,9 +187,7 @@ jobs:
   # executable by the harness: `./gradlew build` on THIS ref -- compilation plus every unit suite
   # (domain, ontology, clock, and the ported agents' behaviour-as-POJO tests).
   #
-  # It needs the vendor jars for the same reason the tree still compiles mid-port: the un-ported
-  # Cybele classes are still there. It does NOT need `installDist` and does not start the
-  # application, because during 1-PORT there is no runnable application to start.
+  # No vendor-jar bootstrap: this branch is JADE-only (#82). JADE resolves from Maven Central.
   # ---------------------------------------------------------------------------------------------
   port-build:
     name: build@this-ref
@@ -207,10 +198,6 @@ jobs:
     steps:
       - name: Check out this ref
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # `bootstrap-vendor-jars.sh` restores the untracked jars from the `withoutGradle` tag,
-          # so the tag has to be in the clone. The default fetch-depth of 1 does not carry tags.
-          fetch-depth: 0
 
       - name: Set up JDK 21
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
@@ -224,9 +211,6 @@ jobs:
           validate-wrappers: true
           cache-provider: basic
           cache-read-only: ${{ github.event_name == 'pull_request' }}
-
-      - name: Bootstrap the vendored Cybele jars
-        run: scripts/bootstrap-vendor-jars.sh
 
       - name: Build and run every unit suite
         run: ./gradlew --no-daemon --console=plain --stacktrace build
@@ -573,10 +557,6 @@ jobs:
     steps:
       - name: Check out this ref
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # `bootstrap-vendor-jars.sh` restores the untracked jars from the `withoutGradle` tag, so
-          # the tag has to be in the clone. The default fetch-depth of 1 does not carry tags.
-          fetch-depth: 0
 
       - name: Set up JDK 21
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
@@ -590,9 +570,6 @@ jobs:
           validate-wrappers: true
           cache-provider: basic
           cache-read-only: ${{ github.event_name == 'pull_request' }}
-
-      - name: Bootstrap the vendored Cybele jars
-        run: scripts/bootstrap-vendor-jars.sh
 
       - name: Run the L2 integration lane
         run: ./gradlew --no-daemon --console=plain --stacktrace integrationTest
@@ -687,8 +664,6 @@ jobs:
     steps:
       - name: Check out this ref
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
 
       - name: Set up JDK 21
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
@@ -703,16 +678,11 @@ jobs:
           cache-provider: basic
           cache-read-only: ${{ github.event_name == 'pull_request' }}
 
-      - name: Bootstrap the vendored Cybele jars
-        # Still needed on the port branch. See point 2 in this file's header: `src/main` has no
-        # `cybele.*` reference left, but `build.gradle.kts` still declares the two coordinates on
-        # `implementation`, so they resolve and land in the dist.
-        run: scripts/bootstrap-vendor-jars.sh
-
       - name: Build the JADE application (installDist)
         # `installDist`, not `build`, for the reason the opencybele arm gives: that is the layout
         # the launcher drives -- build/install/opencybele/lib/*.jar -- and `JadeLauncher` invokes
-        # `java -cp` on it directly, never `bin/opencybele`.
+        # `java -cp` on it directly, never `bin/opencybele`. No Cybele bootstrap: JADE is from
+        # Maven Central (#82).
         run: ./gradlew --no-daemon --console=plain --stacktrace installDist
 
       - name: Show what will be driven
