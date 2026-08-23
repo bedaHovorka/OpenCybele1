@@ -109,6 +109,27 @@ rewiring them is #30–#34, ticket by ticket, each with its own parity gate run.
 ./gradlew compileJadeOntologyJava   # just this source set
 ```
 
+## Integration layer (`integrationTest`)
+
+`src/integrationTest/java` holds the L2 suite (issue #38, `docs/TESTING.md` §4.2): it boots a real
+JADE main container **in-process** and starts the real `Station` / `RoadAgent` / `Train` /
+`TraceProbe` inside it, then drives one interaction pair per test through a probe agent and asserts
+with bounded `poll(timeout)`. It proves the messaging wiring — AID unicast, the fifteen
+`railway.<EVENT>` topics, and the single message queue draining — which POJO tests cannot reach and
+L3 cannot isolate.
+
+```bash
+./gradlew integrationTest
+```
+
+**The lane's fork policy is its fixture, not a tuning knob.** `maxParallelForks = 1` because
+`jade.core.Runtime` and `jade.core.AID.platformID` are JVM-wide singletons; **`forkEvery = 1`**
+because `TraceProbe.READY` (a latch counted down once, never reset), `TraceProbe.FAILURES` (a
+monotone counter) and `RunControl`'s first-writer-wins clock have no reset hook, so a fresh JVM per
+class is the only reset there is — that is what makes those statics testable at all. Inside a class
+the container is shared and the agents are killed between methods (`ContainerFixture`). Not wired
+into `check`, on the same precedent as `characterizationIT`; `check` compiles it.
+
 ## Parity harness (`characterizationIT`)
 
 `src/characterizationIT/java` holds the L3 golden-master harness (issue #12): a `ScenarioRunner`
@@ -124,3 +145,9 @@ Jason unchanged — and it is a source set of its own, wired to nothing in `main
 
 Scenario specs are YAML data under `parity-tests/scenarios/`. Format, contract levels and the order
 in which a run is judged: [`docs/parity-harness.md`](docs/parity-harness.md).
+
+The L3 run of this branch against the frozen goldens, and the classification of every diff
+it produced, is [`docs/parity-triage-jade.md`](docs/parity-triage-jade.md): two of the five
+scenarios reproduce byte-for-byte across 20 runs, and the three that do not are red on a
+normalizer limit that the file measures rather than works around — every one of them emits the
+same events, in the same multiset, at the same length.

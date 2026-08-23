@@ -2,6 +2,7 @@ package cz.vutbr.fit.ags.parity.run;
 
 import cz.vutbr.fit.ags.parity.ParityLayout;
 import cz.vutbr.fit.ags.parity.golden.ComparisonResult;
+import cz.vutbr.fit.ags.parity.golden.DiffAnatomy;
 import cz.vutbr.fit.ags.parity.golden.GoldenStore;
 import cz.vutbr.fit.ags.parity.golden.TraceComparator;
 import cz.vutbr.fit.ags.parity.spec.ContractLevel;
@@ -203,12 +204,18 @@ public final class ScenarioRunner {
         }
         ComparisonResult comparison = TraceComparator.compare(spec, golden, normalized);
         if (!comparison.matched()) {
+            // The anatomy is APPENDED to the comparator's own failures, never substituted for
+            // them: it explains a difference, it does not decide one, and nothing it computes
+            // can make a failing run pass. See DiffAnatomy.
+            List<String> failures = new ArrayList<>(comparison.failures());
+            failures.addAll(DiffAnatomy.of(golden, normalized, captured.lines(), normalizer)
+                    .describe());
             throw new ScenarioFailedException(report(spec, adapter, captured,
                     "the run does not match its golden at contract level "
                             + spec.contract().yamlName() + " (" + goldenStore.fileFor(spec.goldenFile())
                             + "). A golden diff is a port bug until proven a harness defect;"
                             + " re-recording is not a triage option.",
-                    comparison.failures()));
+                    failures));
         }
         return new RunReport(captured, normalized, false, goldenStore.fileFor(spec.goldenFile()));
     }

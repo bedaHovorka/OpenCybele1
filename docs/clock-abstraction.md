@@ -11,6 +11,13 @@
 did, and the parity gate still measures the same binary. Rewiring the agents onto `SimClock` is
 #30–#34, ticket by ticket, each with its own gate run.
 
+> **Tense warning, added by [#41](https://github.com/bedaHovorka/OpenCybele1/issues/41) once 1-PORT finished.** On `phase1/1-port` that paragraph is
+> history. `src/main/java` has **no** `cybele.*` reference left; the four timer sites are
+> `clock.scheduleIn`/`clock.scheduleAt` (`Generator.java:168` and `:199`, `Planning.java:564`,
+> `RoadAgent.java:630`); and §2.6's dispositions and §8's wiring recipe are records of what was
+> *prescribed* and then done, not of open work. The measurements — `ExpI`, `ExpJ`, `SEM-02` — are
+> unaffected and are what the port was built on.
+
 ---
 
 ## 0. What this decides
@@ -45,6 +52,12 @@ Cybele.createClock(CLOCK_ID, Cybele.HOST, config.getClockStartMs(), config.getCl
   `RoadAgent.java` (through `RoadQueue`) and `RailwayCanvas.java:92`.
 * **Pace is adjustable at runtime**, `Cybele.setPace`, from the toolbar at `Gui.java:98`, presets
   `sim.gui.paces = Fast=8,Normal=1,Slow=0.3`. Changing it rescales every pending timer.
+  *([#41](https://github.com/bedaHovorka/OpenCybele1/issues/41): this premise is asserted here and at §3.2 and is the one load-bearing claim in this
+  document that was **never measured** — no `SEM-` id, no probe, no bytecode reading; `INVENTORY.md`
+  records `setPace` only as a call-site count. It does not change the design, because absolute
+  simulated deadlines make the rescale a no-op either way, but it should not be quoted as a
+  measured fact alongside `ExpI` and `ExpJ`, which were measured precisely because they were
+  load-bearing.)*
 * **The clock can be paused**, and three sites do so around short critical sections.
 
 JADE offers `WakerBehaviour` and `TickerBehaviour`. Both are wall-clock. Neither has a shared
@@ -350,6 +363,16 @@ projects the five clock-derived families away (#21). Choose the granularity well
 shortest simulated interval the simulation can distinguish; the railway's shortest is a 1 s road,
 i.e. 1000 simulated ms.
 
+> **Superseded as sizing guidance ([#41](https://github.com/bedaHovorka/OpenCybele1/issues/41), via #31's review in `725bc18`).** "Well below 1000
+> simulated ms" is a floor-of-distinguishability argument, not a budget, and read as a budget it is
+> ~200× too coarse. What actually decides a golden diff is `DEFAULT_SEGMENT_GAP_TICKS = 220`
+> simulated ms and the scenarios' measured margins against it — "44 ms or better" at the time.
+> The shipped port budgets **5 simulated ms** and derives the ticker's real-ms period as
+> `granularityMsFor(pace) = max(1, ceil(5 / pace))` — pace 8 → 1 real ms → ≤ 8 simulated ms.
+> The pace division is the part this section does not mention and the part that matters: a fixed
+> **real**-ms period is 8× coarser at pace 8 than at pace 1, which is how a benchmarked-looking
+> 10 ms constant came to add U[0, 80] simulated ms to every reaction event against a 44 ms margin.
+
 Two details that matter more than they look:
 
 * **The drain reads the clock once, at entry, and bounds the queue's arming sequence at entry.**
@@ -491,7 +514,7 @@ on the clock, so ordering is not assumed; there is no channel and no pool.
 | `SimClock`, `PacedClock`, `VirtualClock`, `PauseSemantics`, `NanoSource`, `ManualNanoSource`, `DeadlineQueue`, `AgentClock` | **`domain`** | Framework-free, and branch `jason` (#46, #47) consumes them unchanged. The `domain` source set's dependency configuration is empty, so a `cybele.kernel` or `jade.core` import there does not compile. |
 | `ClockTickerBehaviour` | **`jadeOntology`** (`src/jade/java`) | The only part that needs `jade.core.behaviours`. Not on the Cybele application's classpath. |
 
-`./gradlew domainPurity` — green, 48 files, no forbidden imports. No `java.awt`, no `jade.*`, no
+`./gradlew domainPurity` — green, 48 files (49 at `16193ad`, after #34 added `VoteRound`), no forbidden imports. No `java.awt`, no `jade.*`, no
 `cybele.*`, no `java.lang.reflect`. Real time enters the domain through exactly one interface,
 `NanoSource`, whose production implementation is a one-line `System::nanoTime` and whose test
 implementation is a counter.
@@ -502,7 +525,8 @@ both outputs plus JADE. A new package needs no wiring.
 
 ### Tests
 
-50 new tests, all L1, all in `src/test/java`; the suite goes 102 → **152**.
+50 new tests, all L1, all in `src/test/java`; the suite goes 102 → **152**. *(That is the count at
+#29. The suite is **321** at `16193ad`, after the five agent ports and #37's audit.)*
 
 | Class | Pins |
 |---|---|

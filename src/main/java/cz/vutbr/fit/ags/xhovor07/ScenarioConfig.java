@@ -100,6 +100,26 @@ public final class ScenarioConfig implements Serializable {
     public static final String KEY_CLOCK_START = "sim.clock.startMs";
     /** Initial pace of the global Cybele clock. */
     public static final String KEY_CLOCK_PACE = "sim.clock.pace";
+    /**
+     * The lateness budget of a port's simulated-time wake-ups, in <b>simulated</b> milliseconds.
+     * <p>
+     * <b>Read the unit twice: this is not a timer period.</b> The JADE port drains its
+     * simulated-time deadlines from a {@code ClockTickerBehaviour} whose period is real time, so a
+     * wake-up is late by up to {@code periodRealMs x pace} <em>simulated</em> ms. What decides
+     * whether a golden diffs is the normalizer's segmentation boundary — 220 simulated ms — so the
+     * quantity worth bounding is the simulated one, and the real-ms period is <em>derived</em>
+     * from it: {@code RoadAgent.granularityMsFor(pace) = max(1, ceil(granularityMs / pace))}.
+     * Setting this key to a raw real-ms period would make the error grow with the pace, which is
+     * the trap #31 measured and removed (a fixed 10 real ms added up to 80 simulated ms at pace 8,
+     * against a tightest recorded margin of 44).
+     * <p>
+     * One value, used by every ticker in the process: {@code RoadAgent}'s and the one
+     * {@code Planning} registers on the {@code Main} agent, which {@code Generator} shares. The
+     * default is {@code RoadAgent.GRANULARITY_TARGET_SIM_MS}. The error is one-sided — a wake-up is
+     * never early — so lowering this costs CPU and buys nothing below one real millisecond, which
+     * is JADE's floor for a ticker period.
+     */
+    public static final String KEY_CLOCK_GRANULARITY = "sim.clock.granularityMs";
 
     /** Toolbar pace buttons, {@code Label=pace} entries separated by commas. Order is significant. */
     public static final String KEY_GUI_PACES = "sim.gui.paces";
@@ -195,6 +215,7 @@ public final class ScenarioConfig implements Serializable {
         "tr1=1,tr2=1,tr3=5,tr4=2,tr5=3,tr6=4,tr7=3";
     static final String DEF_CLOCK_START = "0";
     static final String DEF_CLOCK_PACE = "1";
+    static final String DEF_CLOCK_GRANULARITY = "5";          // RoadAgent.GRANULARITY_TARGET_SIM_MS
     static final String DEF_GUI_PACES = "Fast=8,Normal=1,Slow=0.3";
     static final String DEF_GUI_MAIN_LINE = "stA,stH,stG,stE,stD,stB";
     static final String DEF_GUI_BRANCHES = "stC:tr7,stF:tr6";
@@ -219,6 +240,7 @@ public final class ScenarioConfig implements Serializable {
         {KEY_ROAD_DELAYS, DEF_ROAD_DELAYS},
         {KEY_CLOCK_START, DEF_CLOCK_START},
         {KEY_CLOCK_PACE, DEF_CLOCK_PACE},
+        {KEY_CLOCK_GRANULARITY, DEF_CLOCK_GRANULARITY},
         {KEY_GUI_PACES, DEF_GUI_PACES},
         {KEY_GUI_MAIN_LINE, DEF_GUI_MAIN_LINE},
         {KEY_GUI_BRANCHES, DEF_GUI_BRANCHES},
@@ -283,6 +305,7 @@ public final class ScenarioConfig implements Serializable {
     private final Map<String, Long> roadDelaysSec;
     private final long clockStartMs;
     private final double clockPace;
+    private final long clockGranularityMs;
     private final Map<String, Double> guiPaces;
     private final List<String> guiMainLine;
     private final List<Branch> guiBranches;
@@ -303,6 +326,7 @@ public final class ScenarioConfig implements Serializable {
         stationVoteWindowMs = positiveLong(p, KEY_STATION_VOTE_WINDOW);
         clockStartMs = nonNegativeLong(p, KEY_CLOCK_START);
         clockPace = positiveDouble(p, KEY_CLOCK_PACE);
+        clockGranularityMs = positiveLong(p, KEY_CLOCK_GRANULARITY);
 
         topology = parseTopology(p);
         final Set<String> stations = new LinkedHashSet<String>();
@@ -898,6 +922,8 @@ public final class ScenarioConfig implements Serializable {
     public long getClockStartMs() { return clockStartMs; }
     /** @return initial clock pace */
     public double getClockPace() { return clockPace; }
+    /** @return the simulated-ms lateness budget of the ports' wake-up tickers; see {@link #KEY_CLOCK_GRANULARITY} */
+    public long getClockGranularityMs() { return clockGranularityMs; }
     /** @return toolbar pace buttons, in declaration order */
     public Map<String, Double> getGuiPaces() { return guiPaces; }
     /** @return stations on the canvas' main line, left to right */

@@ -26,25 +26,36 @@ import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.JToolBar;
 
-import cybele.kernel.Cybele;
-
 /**
  * specifiction of GUI
+ * <p>
+ * <b>Reused verbatim across the port</b>, which is the point of {@link RailwayView}: #35 decided
+ * to port the Swing view rather than go headless-only precisely so that "if the ported view runs
+ * unchanged against the JADE hub, that is direct evidence the GUI coupling really was as narrow as
+ * the inventory claims". #33 changed exactly two things here, and both are the binding rather than
+ * the view: the constructor takes a {@link RailwayView} instead of a {@code RailwayMainAgent}, and
+ * the toolbar's one write into the simulation goes through {@link RailwayView#setPace(double)}
+ * instead of {@code Cybele.setPace(RailwayMainAgent.CLOCK_ID, pace)} — which since #29 is
+ * {@code SimClock.setPace}, whose pending deadlines are absolute simulated instants and therefore
+ * need no rescale pass. Every pixel below is 2008's.
+ *
  * @author Bedrich Hovorka
  *
  */
 public class Gui extends JFrame {
     private static final long serialVersionUID = 1L;
     private final RailwayCanvas railwayCanvas;
+    private final RailwayView mainAgent;
 
     /**
-     * @param mainAgent
+     * @param mainAgent the simulation, seen through the one interface the view needs
      * @throws HeadlessException bezhlava vyjimka :o)
      */
-    public Gui(RailwayMainAgent mainAgent) throws HeadlessException {
+    public Gui(RailwayView mainAgent) throws HeadlessException {
 	super("AGS OpenCybele Demo by xhovor07 @ FIT VUT Brno");
 	setDefaultCloseOperation(EXIT_ON_CLOSE);
 	setLayout(new BorderLayout());
+	this.mainAgent = mainAgent;
 	railwayCanvas = new RailwayCanvas(mainAgent);
 	
 	final JComponent panel = createBar();
@@ -109,7 +120,7 @@ public class Gui extends JFrame {
 
 	@Override
 	public void actionPerformed(ActionEvent e) {
-	    Cybele.setPace(RailwayMainAgent.CLOCK_ID, pace);
+	    mainAgent.setPace(pace);
 	}
     }
 }

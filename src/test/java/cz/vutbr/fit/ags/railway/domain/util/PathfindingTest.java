@@ -3,6 +3,7 @@ package cz.vutbr.fit.ags.railway.domain.util;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Arrays;
@@ -103,4 +104,27 @@ class PathfindingTest {
         assertEquals("tr1", Util.pathDirection(net, "stA", "stC"));
         assertNotNull(Util.path(net, "stB", "stF"));
     }
+    @Test
+    @DisplayName("PINNED: start == target -- path walks the whole cycle, pathDirection asserts")
+    void the_two_entry_points_disagree_about_a_path_to_oneself() {
+        // The two public entry points to the same search behave differently at the one input
+        // the caller is most likely to try, and nothing pinned it before #37.
+        //
+        // Util.pathDirection opens with `assert ... && !start.equals(target)`, so with -ea --
+        // which is how this project runs, see README "Assertions (-ea)" -- it is an
+        // AssertionError. Util.path has no such guard: privatePath removes the target from
+        // each candidate's node list, so A is never matched at depth 0, but it IS matched on
+        // the way back round, and the answer is the entire cycle rather than [A] or null.
+        assertThrows(AssertionError.class, () -> Util.pathDirection(diamond(), "A", "A"));
+
+        assertEquals(Arrays.asList("A", "e1", "B", "e4", "E", "e5", "D", "e3", "C", "e2", "A"),
+                Util.path(diamond(), "A", "A"));
+    }
+
+    @Test
+    @DisplayName("a node that is not in the graph yields null rather than an empty path")
+    void an_absent_start_node_yields_null() {
+        assertNull(Util.path(diamond(), "Z", "D"));
+    }
+
 }

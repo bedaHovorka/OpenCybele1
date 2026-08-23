@@ -1,3 +1,5 @@
+import cz.vutbr.fit.ags.railway.domain.msg.Channel;
+
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
@@ -115,7 +117,16 @@ public final class TraceCheck {
             final Integer c = counts.get(f[2]);
             if (c == null) { unknown.add(f[2]); continue; }
             counts.put(f[2], Integer.valueOf(c.intValue() + 1));
-            if (!"-".equals(f[5])) badPerformative++;
+            // #36 CHANGED THIS INVARIANT, and strengthened it rather than deleting it.
+            // On opencybele-baseline field 6 was the literal '-': the baseline has no
+            // performatives, and docs/trace-format.md reserved the field so that JADE and Jason
+            // could populate it without a format change. #27 assigned one FIPA act per channel and
+            // #36's probe writes it, so "always '-'" is now false by construction -- but "whatever
+            // the probe felt like" would be worse than either. The check is therefore: field 6 is
+            // exactly the act #27 assigned to THAT channel, read out of the ontology rather than
+            // transcribed here, so the two cannot drift. #21's normalizer erases the field before
+            // comparing, which is what makes the two branches converge; nothing else checks it.
+            if (!Channel.byEvent(f[2]).performative().fipaName().equals(f[5])) badPerformative++;
         }
 
         System.out.println("canonical lines = " + lines.size()
@@ -150,7 +161,7 @@ public final class TraceCheck {
         checkOrdering(lines);
 
         section("[5] format invariants");
-        System.out.println("    performative always '-'   " + (badPerformative == 0
+        System.out.println("    performative is #27's act " + (badPerformative == 0
                 ? "ok" : "FAIL (" + badPerformative + " lines)"));
         if (badPerformative > 0) pass = false;
         System.out.println("    no unknown event tokens   " + (unknown.isEmpty()

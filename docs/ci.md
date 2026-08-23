@@ -1,18 +1,37 @@
 # Continuous integration
 
-> Workflow: [`.github/workflows/characterization-opencybele.yml`](../.github/workflows/characterization-opencybele.yml)
-> · Job: **`characterizationIT@opencybele`**
-> · Issue: [#25](https://github.com/bedaHovorka/OpenCybele1/issues/25)
-> · Requirement: [`Phase1.md`](Phase1.md) 1-PRE.4
+> Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
+> · Issues: [#25](https://github.com/bedaHovorka/OpenCybele1/issues/25) (the drift guard),
+> [#75](https://github.com/bedaHovorka/OpenCybele1/issues/75)/[#79](https://github.com/bedaHovorka/OpenCybele1/issues/79)
+> (the port guard), [#78](https://github.com/bedaHovorka/OpenCybele1/issues/78) (the zero-skip
+> rule), [#40](https://github.com/bedaHovorka/OpenCybele1/issues/40) (the JADE lanes)
+> · Requirement: [`Phase1.md`](Phase1.md) 1-PRE.4 and 1-POST
 
-This is the repository's first workflow. It runs the L3 parity suite
+**The file was `characterization-opencybele.yml` until #40 and is now `ci.yml`.** It stopped being
+a file about one implementation the moment the JADE lane arrived. Job names did not change.
+
+This started as the repository's first workflow and one narrow job: run the L3 parity suite
 ([`TESTING.md`](TESTING.md) §6, [`parity-harness.md`](parity-harness.md)) against the frozen
 OpenCybele baseline, so that behavioural drift in the baseline is a red build rather than a
-mysterious golden diff discovered halfway through the port.
+mysterious golden diff discovered halfway through the port. It is now four jobs, and each answers a
+different question:
 
-There is exactly one job, and it is deliberately narrow: it does **not** run `./gradlew build` or
-`check` on either branch. Those are other issues' business. This job answers one question — *does
-the frozen application still behave the way the goldens say it does?*
+| Job | Trigger | The question it answers | Section |
+|---|---|---|---|
+| **`build@this-ref`** | push / PR | Does the branch under test compile, and do its 321 L1 unit tests and `domainPurity` pass? | §11 |
+| **`integrationTest@this-ref`** | push / PR | Do the 17 L2 tests pass, booting real in-process JADE containers? | §12 |
+| **`characterizationIT@opencybele`** | push / PR (+ an inert nightly, §7) | Has the **frozen baseline** drifted from the goldens recorded from it? | §§1–9 |
+| **`characterizationIT@jade`** | push / PR | Does the **port** still reproduce the measured L3 state against those same goldens? | §10 |
+
+All four run on every push to and pull request against `develop`/`jade-develop`. Sections 1–9 below
+describe the `@opencybele` job, which is the oldest and the one whose reasoning the others inherit;
+§§10–12 describe what the three later jobs do differently and why.
+
+**Why the port guard exists at all.** #75: from #28 onward, `characterizationIT@opencybele` builds
+its application from `opencybele-baseline`, so it never compiles the code being ported and would
+have stayed green through the entire migration without once exercising it. From #30 onward `src/main`
+is a JADE application that does not run under Cybele at all. `build@this-ref` (#79) closed the
+compilation half of that gap; `characterizationIT@jade` (#40) closes the behavioural half.
 
 ---
 
@@ -282,6 +301,22 @@ a *change* rather than a state.
 `opencybele-baseline`, which *prevents* the unreviewed push rather than detecting it up to 24 h
 later. That is the real fix for this gap; the nightly is the detector of last resort.
 
+**#40 looked at fixing the inert nightly and deliberately left it to #75.** Three reasons:
+
+* **None of #40's three jobs depends on it.** All four jobs are `push`/`pull_request`-triggered on
+  the ref under test, which works today. Adding a second `cron:` "for the JADE lane" would be
+  *worse* than adding nothing — equally inert, and it would read to the next person as cover that
+  exists.
+* **The inertness is a property of where this file lives**, not of any job in it. #75's two
+  candidate fixes — merge the workflow to `develop`, or drive the baseline from a push-triggered
+  job with an explicit `opencybele-ref` — both change the **opencybele** arm, and the first is a
+  decision about the frozen 2008 default branch that is nowhere near a CI-jobs ticket.
+* **#40 does shrink the gap without touching the trigger, and the residue is worth naming
+  exactly.** `characterizationIT@opencybele` already runs on every push and PR to `jade-develop`,
+  so the baseline is exercised on every change to the port branch. What remains uncovered is
+  precisely one event: *a push made straight to `opencybele-baseline` with no pull request
+  anywhere.* That, and only that, is what the inert nightly was the cover for.
+
 `concurrency` is keyed on the workflow, **the event** and the ref, with `cancel-in-progress: true`.
 The event is in the group deliberately: without it a scheduled run and a push run on `develop` share
 `refs/heads/develop`, so a 03:17 push would cancel the nightly — the one run that is the sole cover
@@ -334,6 +369,26 @@ The workflow is a wrapper around five commands. From two checkouts side by side:
 ( cd harness && .github/scripts/parity-junit.sh assert-ran build/test-results/characterizationIT )
 ```
 
+`characterizationIT@jade` reproduces from **one** checkout, since the harness and the JADE
+implementation are the same tree:
+
+```bash
+scripts/bootstrap-vendor-jars.sh
+./gradlew --no-daemon --console=plain installDist
+./gradlew --no-daemon --console=plain characterizationIT -Pjade.dist="$PWD/build/install/opencybele"
+# ^ exits non-zero on essentially every run, BY DESIGN. The verdict is the next command's:
+PARITY_REQUIRED_CLASS=cz.vutbr.fit.ags.parity.it.JadeParityIT \
+PARITY_OPT_IN_CLASSES="$(sed -n 's/^ *//p' <<'X'
+cz.vutbr.fit.ags.parity.it.ParityGateIT cz.vutbr.fit.ags.parity.it.OpenCybeleSmokeIT
+cz.vutbr.fit.ags.parity.it.OpenCybeleStrictIT cz.vutbr.fit.ags.parity.it.OpenCybeleCapacityIT
+cz.vutbr.fit.ags.parity.it.OpenCybeleCongestionIT cz.vutbr.fit.ags.parity.it.OpenCybeleLifecycleIT
+cz.vutbr.fit.ags.parity.it.OpenCybeleTimersIT
+X
+)" \
+  .github/scripts/parity-junit.sh jade-status \
+      build/test-results/characterizationIT .github/parity/jade-status.expected
+```
+
 Measured on a cold clone with an empty local Maven repository and `DISPLAY` unset: bootstrap
 instant, `installDist` ~5–6 s, the suite ~19 s, 31 tests, 0 skipped, `OpenCybeleSmokeIT` passed.
 Both installer paths inside the bootstrap were exercised — with Maven on `PATH` (3.9.16, the
@@ -342,15 +397,302 @@ and the full suite is green after either.
 
 ---
 
-## 10. Cloning this for `@jade` and `@jason`
+## 10. `characterizationIT@jade` — the port guard, and what "green" can honestly mean
 
-[#40](https://github.com/bedaHovorka/OpenCybele1/issues/40) and
-[#52](https://github.com/bedaHovorka/OpenCybele1/issues/52) want the same job against the other two
-implementations. The structure is meant to be copied verbatim; what changes is small:
+> Job: **`characterizationIT@jade`** · Issue [#40](https://github.com/bedaHovorka/OpenCybele1/issues/40)
+> · Judge: `.github/scripts/parity-junit.sh jade-status`
+> · Recorded measurement: [`.github/parity/jade-status.expected`](../.github/parity/jade-status.expected)
+> · The measurement behind it: [`parity-triage-jade.md`](parity-triage-jade.md)
 
-* the second checkout's `ref` (`jade` / `jason` instead of `opencybele-baseline`);
-* the vendor-jar steps, which only OpenCybele needs;
-* `-Popencybele.dist=` → the new adapter's dist property;
-* `SMOKE_CLASS` in `parity-junit.sh` → the new adapter's end-to-end class (or pass it in, if by
-  then more than one job shares the script);
-* the retry rationale in §4, which is DEF-22-specific and should be re-derived, not inherited.
+### 10.1 One checkout, not two
+
+The `@opencybele` job needs two checkouts because decision #11 put the harness and the baseline on
+different branches. The JADE arm does not: the harness and the JADE implementation are the **same
+tree**. So this job is one checkout, `installDist`, `-Pjade.dist`. There is no `jade.home` either —
+`OpenCybeleLauncher` needs a second directory only because Cybele reads `cybelle/*.prop` through
+`--patch-module`, and the JADE implementation reads no such file.
+
+It still runs `scripts/bootstrap-vendor-jars.sh`. `src/main` has had zero `cybele.*` references
+since #35, but `build.gradle.kts` still declares `com.iai:cybele-api`/`cybele-impl` on
+`implementation`, so both jars resolve and land in `installDist`'s `lib/`. Dropping them is 1-POST
+cleanup and was deliberately **not** done in #40: the child JVM's `-cp` is part of the command line
+every measurement in `parity-triage-jade.md` was taken under, and this lane's margins are 3–9 ms
+wide. That is not a classpath to change as a side effect of a CI ticket.
+
+### 10.2 Why "all five green" is not available
+
+[#39](https://github.com/bedaHovorka/OpenCybele1/issues/39) measured the port against the frozen
+goldens, 20 runs per scenario per implementation, and classified the residue **(b) normalizer gap,
+not closable**. Four facts decide the shape of this job:
+
+* The JADE run emits the **same event multiset** as the 2008 application in **all five scenarios**,
+  with one declared carve-out: `strict`'s `VOTE.diff` for `(vl8, stH)` straddles the normalizer's
+  own 1 000 ms `TIME_QUANTUM` bucket in 10 runs of 20 (T-07), which is why `QUANTUM` is a verdict
+  class below. Outside that one line on that one field, every remaining difference is burst
+  placement.
+* Pass rates are **load-dependent**, and that is the diagnosis showing through rather than noise.
+  Three corpora read `capacity` 6/20, 15/20 and 12/12; `congestion` 3/20 and 7/12; `strict` **0/N
+  in every corpus**; `lifecycle` and `timers` 20/20 and 12/12.
+* The margins against the 220 ms burst width rank the rates exactly: `lifecycle` 118 ms,
+  `capacity` 3 ms, `congestion` 9 ms, `strict` 0 ms.
+  *(#41: this line used to give `capacity` 118 ms. That is `lifecycle`'s margin — `capacity`'s is
+  3 ms, per `parity-triage-jade.md` §4.4 and COVERAGE §12.2.1 — and with 118 against a 6/20 rate
+  the sentence refuted its own "rank the rates exactly".)*
+* **Under concurrent load the baseline fails its own `strict` golden in 3 runs of 20** — i.e. 17/20
+  pass, idle 20/20 — at the same line and in the same direction. The instrument does this to the
+  reference implementation too. *(#41: written as a failure count on purpose. "3/20" reads as a
+  pass rate, and the port's `congestion` pass rate two lines up is also 3/20.)*
+
+So a job demanding five green scenarios would be red forever, and a job that is always red teaches
+people to ignore CI — which is the exact failure this project already paid for once (#78/#79: CI was
+red on a stale rule for the project's entire history and four PRs merged without anyone reading it).
+
+The check is **not weakened** to escape that. `strict` is not skipped, the contract level is not
+lowered, no golden is touched and there is no retry-until-green.
+
+### 10.3 What is asserted instead: the recorded verdict class
+
+Not the pass **rate**, which the measurement shows is a property of the machine. The per-scenario
+**verdict class**, which the measurement shows is stable. `parity-junit.sh` derives it from the
+failure anatomy `DiffAnatomy` already appends to every golden diff:
+
+| Verdict | Meaning |
+|---|---|
+| `MATCH` | byte-identical to the golden |
+| `ORDER` | failed, **same multiset** — the golden's events in a different burst order (T-05/T-06) |
+| `QUANTUM` | failed, and the *only* multiset difference is T-07: `VOTE.diff` straddling the 1 000 ms `TIME_QUANTUM` bucket. Granted only when every surplus line carries a `diff=<T~` and the two sides cancel exactly |
+| `BEHAVIOUR` | failed with any **other** multiset difference — a dropped or invented event |
+| `OTHER` | not a golden comparison at all: an agent died, the run missed its simulated-time bound, the harness threw |
+| `SKIP` | assumed away |
+
+and compares it against `.github/parity/jade-status.expected`:
+
+```
+opencybele-lifecycle    MATCH
+opencybele-timers       MATCH
+opencybele-capacity     MATCH ORDER
+opencybele-congestion   MATCH ORDER
+opencybele-strict       ORDER QUANTUM
+```
+
+Three properties follow, and they are why this is not a way of hiding a regression:
+
+1. **`BEHAVIOUR` is permitted nowhere, and cannot be permitted** — the judge grants no scenario
+   `BEHAVIOUR` whatever the file says. A dropped or invented event fails all five, *including the
+   three that are allowed to fail*. The claim every corpus supports — "no run has ever produced an
+   event the golden did not record, or missed one it did" — is the thing actually being guarded.
+2. **A change in either direction is red.** `opencybele-strict` does not list `MATCH`: it is 0/N in
+   every corpus ever taken, so a `strict` that suddenly passes fails this job. That is deliberate —
+   it means the pinned measurement has gone stale, and it is as much a signal as a `lifecycle` that
+   starts failing.
+3. **`OTHER` and `SKIP` are permitted nowhere.** Before #40 `JadeParityIT` had been in the tree
+   since #36 and had **never run on a runner** — it skipped in the only job that existed, because
+   that job supplies no `-Pjade.dist`. A lane that reports on nothing is the same class of defect as
+   a test that cannot fail, and `SKIP` being unpermitted is what keeps it from returning.
+
+### 10.4 The cost, stated rather than hidden
+
+**This pins today's measurement.** It lives in [`parity-triage-jade.md`](parity-triage-jade.md) §1
+(the three corpora) and §4.4 (the margin table), plus PR #80's two measurement comments, and the
+corpus tables are reproduced in the header of `jade-status.expected` itself.
+
+Re-measuring is **not** a CI action. It is ~20 runs per scenario on a quiet machine:
+
+```bash
+./gradlew installDist
+./gradlew parityGate -Pjade.dist=$PWD/build/install/opencybele \
+          -Dparity.gate.runs=20 -Dparity.gate.scenario=opencybele-strict
+```
+
+and those numbers are what a proposed edit to the expectations file has to argue against. Editing a
+row to make a build green, without a corpus behind it, is the failure the whole mechanism exists to
+prevent.
+
+### 10.5 Gradle's exit status is deliberately not the verdict
+
+`opencybele-strict` fails its golden on essentially every run **by design**, so
+`./gradlew characterizationIT -Pjade.dist=…` exits non-zero on essentially every run. The run step
+records that status into the job summary and does **not** propagate it; the asserting step is the
+only thing that can turn this job red. That inverts this file's usual "trust Gradle, then assert
+more" shape, and it is the one place in the repository where it is inverted.
+
+### 10.6 The retry, and why it is narrower than §4's
+
+A retry is legitimate only against a failure mode that has been **measured** to be a transient, and
+only if it is incapable of laundering the signal the job exists to carry. Both conditions are
+enforced by `parity-junit.sh jade-retryable`:
+
+* **The measured transient is T-12** ([`parity-triage-jade.md`](parity-triage-jade.md) §4.8): a
+  cluster of slow JVM starts shifting the whole schedule against an *absolute* stop bound, changing
+  which events fall inside it. #39 chased it, found the schedule shifted rather than recomputed, and
+  could not reproduce it in a second corpus. It is the only difference in that entire campaign that
+  was not a reordering, and a loaded shared runner is its worst case. It surfaces as `BEHAVIOUR`.
+* **A retry cannot hide a status change.** `jade-retryable` is false for an unexpected `MATCH`
+  (`strict` going green is the thing this job is here to report), false for `OTHER` (deterministic),
+  and false for any failure outside the scenario class (in-process harness tests). A retry here can
+  only ever *discover* a red, never convert one into a green it was not owed.
+* **Two consecutive `BEHAVIOUR` diffs is not a transient.** That is red, and it means the port
+  dropped or invented an event.
+
+Every retry is loud: a `::warning`, a line in the job summary, and both attempts' reports kept as an
+artifact.
+
+### 10.7 The runner, the CPU-throughput floor, and what it does to *both* arms
+
+A CI runner is the worst case for a latency-keyed comparison — #39's own corpora move by 2–4× with
+machine load. That is exactly why `capacity` and `congestion` are recorded as permitting `MATCH`
+*or* `ORDER`: a single run on a contended runner cannot distinguish those two as a signal, and
+pinning either would be pinning the runner rather than the program. **Do not read this job's greens
+as evidence of an idle-machine pass rate.** It is not measuring one, and the rate it would measure
+is not the number in the triage log.
+
+**The floor was measured rather than assumed**, because "the runner is loaded" is a claim with a
+number attached. On the developer machine (24 cores), varying only the CPU budget:
+
+| CPU budget | `characterizationIT@jade` verdict | What the traces look like |
+|---|---|---|
+| 24 cores, quiet | **green 3/3** | `strict` alternates `ORDER`/`QUANTUM`, `capacity` `MATCH`/`ORDER` — every verdict inside its recorded status |
+| **4 dedicated cores** (`taskset -c 0-3`), quiet | **green 5/5** | `strict` `QUANTUM`×3 then `ORDER`×2; everything else `MATCH` |
+| 4 cores at ~50 % steal (4 spinners pinned alongside) | **red 3/3** | `strict`/`capacity` `BEHAVIOUR`, `timers` `ORDER` |
+| 24 cores at 100 % steal (24 spinners) | **red 4/4** | same, worse |
+
+**The failure mode below the floor is truncation, not misordering.** `opencybele-strict` produced
+575 lines against the golden's 598, `opencybele-congestion` 157 against 167. Every scenario is
+bounded by an *absolute* `sim.stop.maxClockMs` at pace 8, so a machine that cannot keep up with
+simulated time reaches the bound having emitted fewer events. That surfaces as `BEHAVIOUR` — a
+multiset difference — which is exactly what a port that dropped an event would look like.
+
+**And it is not a property of the port or of this job.** Under the same 24-spinner starvation, the
+existing drift guard `characterizationIT@opencybele` **also fails, 3/3 runs**: the *baseline* stops
+matching its own goldens (`OpenCybeleStrictIT`, `OpenCybeleCongestionIT`, `OpenCybeleLifecycleIT`,
+`OpenCybeleSmokeIT`, in various combinations). The whole L3 lane has a CPU-throughput floor, both
+arms of it, and it predates #40. §4.7 of [`parity-triage-jade.md`](parity-triage-jade.md) is the
+same observation from the other end.
+
+**What #40 does about it, and what it deliberately does not.**
+
+* It does **not** try to auto-distinguish "the machine could not keep up" from "the port dropped an
+  event". There is no fingerprint that separates them — #39 established that by hand across two
+  corpora before it could clear T-12 — and inventing one on a CI ticket, with no corpus behind it,
+  is the kind of unmeasured mechanism this project rejects. A short run is still `BEHAVIOUR` and
+  still **red**.
+* It **does** make that red diagnosable in one step. When a `BEHAVIOUR` verdict comes with a run
+  shorter than its golden, `jade-status` prints a `HINT:` line naming the truncation, the absolute
+  bound that causes it, and the boundary table above — so a triager checks the runner before
+  checking the port. Measurement only; it changes no verdict.
+* The narrow retry (§10.6) covers a *transient* starvation spike and nothing more. Sustained
+  starvation is deterministic, so it fails both attempts and goes red — which is correct: a CI
+  machine that cannot run this lane should be visible, not hidden.
+
+**Settled by the first real run.** A GitHub-hosted `ubuntu-24.04` runner is a dedicated VM with a
+small, fixed vCPU count and no competing tenant, so the *4-dedicated-cores* row was the prediction.
+Run [`32550380188`](https://github.com/bedaHovorka/OpenCybele1/actions/runs/32550380188) confirms it:
+all four jobs green, `characterizationIT@jade` on **attempt 1 of 2** with no retry, and
+
+```
+scenario                 verdict    recorded           status
+opencybele-strict        ORDER      ORDER QUANTUM      ok
+opencybele-capacity      MATCH      MATCH ORDER        ok
+opencybele-congestion    MATCH      MATCH ORDER        ok
+opencybele-lifecycle     MATCH      MATCH              ok
+opencybele-timers        MATCH      MATCH              ok
+```
+
+That is **one sample**, not a rate, and this job is not measuring one (see the top of this section).
+If a later run comes back red with `HINT:` lines about short runs, the answer is not to edit
+`jade-status.expected` — it is that the runner was below this lane's throughput floor on that
+occasion, and that is a fact about the runner worth having explicitly.
+
+---
+
+## 11. `build@this-ref` — the L1 lane
+
+Added by [#79](https://github.com/bedaHovorka/OpenCybele1/issues/79). `./gradlew build` on the
+triggering ref: compilation, the 321-test `test` lane, `domainPurity`, and compilation of the
+`integrationTest` and `characterizationIT` source sets (both are wired into `check` for compilation
+only, so a test that stops compiling still fails the build).
+
+It carries one addition from #40: **`parity-junit.sh assert-suite`, with a floor of 321.** A Gradle
+`Test` task that discovers *zero* tests exits 0 and writes no reports, and one whose
+`testClassesDirs` stopped matching writes a handful and exits 0 too — the same "a green exit is not
+a good run" hazard §3 documents for the parity suite, in a different lane. The floor is a floor, not
+a pin: adding tests never breaks it, losing them does.
+
+## 12. `integrationTest@this-ref` — the L2 lane
+
+Added by #40. `./gradlew integrationTest`: 17 tests across 8 classes, each booting a **real
+in-process JADE main container** and starting the real `Station`/`RoadAgent`/`Train`/`TraceProbe`
+inside it ([`TESTING.md`](TESTING.md) §4.2, #38).
+
+Its own job rather than a step in `build@this-ref`, because it is its own lane with its own fixture
+and a red here means something different — and because `check` deliberately compiles this source set
+without running it, so that `./gradlew build` stays a build.
+
+**Is it safe on a hosted runner?** Checked rather than assumed:
+
+* **The port is ephemeral, not fixed.** `ContainerFixture` sets `Profile.MAIN_PORT = "0"`, so the
+  kernel assigns a free port per container and nothing binds JADE's default 1099. It also sets
+  `Profile.MTPS = ""` — no external message transport, so no HTTP MTP on 7778 either — and
+  `Profile.GUI = "false"`. A hosted runner is a single-tenant VM, so even a fixed port would have
+  been fine; an ephemeral one means it is fine on a self-hosted runner too.
+* **`forkEvery = 1` means 8 JVMs for 8 classes, sequentially** (`maxParallelForks = 1`). That is the
+  lane's fixture, not a tuning knob: `TraceProbe.READY` is a latch counted down once with no reset
+  hook, and `jade.core.AID.platformID` is overwritten by every container boot, so one JVM per class
+  is what makes `ProbeReadyTimeoutIT` and `ProbeFailureCapIT` testable at all. Measured locally at
+  **26 s** for the whole lane.
+* **`jade.file.dir` is absolute**, under `build/integration-test/jade`. JADE's AMS concatenates that
+  value with `APDescription.txt` rather than resolving it, and #36 lost a gate run to a relative
+  one. Nothing is written outside the workspace.
+* **The per-class JUnit timeouts are 180 s** (`ContainerFixture`) **and 60 s** (the two probe
+  classes), against a 3 s worst class locally. Those are the numbers to look at first if this lane
+  ever goes red on a slow runner rather than on a real failure.
+
+**What was not verified locally**: whether a runner's slower, contended CPU pushes any class near
+those timeouts. Everything above is a property of the configuration, read off the code and a local
+run; the timing headroom is not, and only a real run settles it.
+
+## 13. The skip accounting is per job
+
+[#78](https://github.com/bedaHovorka/OpenCybele1/issues/78) fixed a stale zero-skip rule by
+exempting one class **by name and by count**: `ParityGateIT` is allowed to skip only because *all*
+of it is opt-in, and a `ParityGateIT` that skipped 3 of its 5 still fails, because then two of them
+found what they needed and ran.
+
+That bar is kept; the constant became a per-job input, because two facts forced it:
+
+* Run `32548100423` on `jade-develop` went red with *"5 test(s) were skipped outside
+  ParityGateIT"* — and the rule was **working**. The five were `JadeParityIT`, which assumes itself
+  away in the opencybele job because that job supplies no `-Pjade.dist`.
+* The mirror image is structural: the JADE job supplies no `-Popencybele.dist`, so the six
+  `OpenCybele*` scenario classes skip *there*. **Each arm's scenarios are the other arm's expected
+  skips** — which is also the empirical answer to "why can the JADE lane not just be a sixth
+  scenario in the existing job".
+
+So the list lives in the workflow's `env:` block, one per job
+(`OPENCYBELE_EXPECTED_SKIPS`, `JADE_EXPECTED_SKIPS`), and is passed to the script as
+`PARITY_OPT_IN_CLASSES`. The all-or-nothing rule is applied to **every** class in the list.
+
+Three environment variables configure the script per job, and nothing else does:
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `PARITY_OPT_IN_CLASSES` | classes that must skip **entirely** in this job | `ParityGateIT` (i.e. #78's behaviour) |
+| `PARITY_REQUIRED_CLASS` | the class that must have **run** (`assert-ran`), and the only class a failure is tolerated in (`jade-status`) | `OpenCybeleSmokeIT` |
+| `PARITY_MIN_TESTS` | floor on a lane's total test count (`assert-suite`) | `1` |
+
+## 14. Cloning this for `@jason`
+
+[#52](https://github.com/bedaHovorka/OpenCybele1/issues/52) wants the same against a third
+implementation. After #40 the structure is meant to be copied from **`characterizationIT@jade`**,
+not from `@opencybele`, since Jason will also live in one tree. What changes:
+
+* `-Pjade.dist=` → the new adapter's dist property, and `installDist` if the layout differs;
+* `PARITY_REQUIRED_CLASS` → the new adapter's scenario class;
+* a third `*_EXPECTED_SKIPS` list in `env:` — and the two existing lists each gain the new
+  adapter's scenario class, since it will skip in both existing jobs;
+* a `jason-status.expected` of its own. **It must be measured, not inherited.** Jason's message
+  latency will be a third answer again ([`parity-triage-jade.md`](parity-triage-jade.md) §10.3), so
+  its verdict classes are an open empirical question — copying JADE's rows would be pinning a
+  measurement nobody took;
+* the retry rationale, which is T-12-specific and should be re-derived, not inherited — exactly as
+  §4's DEF-22 rationale was not inherited by §10.6.

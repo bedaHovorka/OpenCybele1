@@ -46,4 +46,47 @@ class StationQueueTest {
         assertEquals(0, q.size());
         assertNull(q.poll());
     }
+
+    @Test
+    @DisplayName("the queue reports its depth at every step -- Station.leave branches on size()")
+    void the_depth_is_reported_at_every_step() {
+        // Before #37 size() was asserted at 0 and nowhere else, so `return 0;` passed the suite
+        // -- and Station.leave decides whether to admit a waiting train by testing exactly this.
+        final StationQueue q = new StationQueue();
+        assertEquals(0, q.size());
+        q.offer("vl0", "stA");
+        assertEquals(1, q.size());
+        q.offer("vl1", "stC");
+        assertEquals(2, q.size());
+        q.poll();
+        assertEquals(1, q.size());
+        q.poll();
+        assertEquals(0, q.size());
+    }
+
+    @Test
+    @DisplayName("polling past exhaustion keeps yielding null instead of throwing")
+    void polling_past_exhaustion_stays_null() {
+        final StationQueue q = new StationQueue();
+        q.offer("vl0", "stA");
+        assertEquals("vl0", q.poll().getTrain());
+        assertNull(q.poll());
+        assertNull(q.poll(), "a second poll on an empty queue must behave like the first");
+        assertEquals(0, q.size());
+    }
+
+    @Test
+    @DisplayName("the same train may sit in the queue twice: this is a list, not a set")
+    void the_same_train_may_queue_twice() {
+        // Unlike the station TIMETABLE, which is a TreeMultiMap and holds one train per slot
+        // however often it is planned, the door queue de-duplicates nothing.
+        final StationQueue q = new StationQueue();
+        q.offer("vl0", "stA");
+        q.offer("vl0", "stA");
+        assertEquals(2, q.size());
+        assertEquals("vl0", q.poll().getTrain());
+        assertEquals("vl0", q.poll().getTrain());
+        assertEquals(0, q.size());
+    }
+
 }

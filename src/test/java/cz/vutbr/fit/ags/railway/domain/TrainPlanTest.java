@@ -1,6 +1,7 @@
 package cz.vutbr.fit.ags.railway.domain;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.PriorityQueue;
@@ -59,6 +60,19 @@ class TrainPlanTest {
 
     private static TrainPlan at(long departure) {
         return new TrainPlan(departure == 0 ? "b" : "a", "stA", departure);
+    }
+
+    @Test
+    @DisplayName("the two comparators disagree about null, and the asymmetry is the pinned part")
+    void compareTo_null_throws_here_where_the_road_item_returns_minus_one() {
+        // RoadQueueItem.compareTo opens `if (o == null) return -1;` -- a Comparable contract
+        // deviation pinned by RoadQueueOrderingTest.compareTo_null_returns_minus_one_instead_of
+        // _throwing. TrainPlan, whose Javadoc cross-references that very method for DEF-03, has
+        // NO such line: it dereferences o.departure and throws, which is what Comparable
+        // specifies. Both readings are defensible and a port author holding the two files side
+        // by side could harmonise them in either direction; until #37 nothing failed if they
+        // did. This is the test that fails.
+        assertThrows(NullPointerException.class, () -> new TrainPlan("vl0", "stA", 1000L).compareTo(null));
     }
 
     @Test

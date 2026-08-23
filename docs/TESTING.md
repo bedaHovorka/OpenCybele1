@@ -202,6 +202,28 @@ Practical notes:
 - Other test↔agent channels besides a probe: the **O2A channel** (`setEnabledO2ACommunication(true)`, `AgentController.putO2AObject(...)`) to inject objects into an agent, and **`jade.wrapper.gateway.JadeGateway`** for synchronous request/reply from non-agent test code.
 - Separate Gradle source set: `test` (unit, parallel, fast) vs `integrationTest` (container-based, sequential).
 
+> **Done for this project — see [#38](https://github.com/bedaHovorka/OpenCybele1/issues/38).**
+> `src/integrationTest/java` is that source set, and `./gradlew integrationTest` is that lane. The
+> sketch above is superseded on three points, each of which the implementation records at the site:
+>
+> - **The port is `0`, not `1200 + random`.** An ephemeral port cannot collide with a concurrent
+>   lane and leaves a build machine nothing to free. Note it does not make the platform hermetic —
+>   the JICP intra-platform listener still binds a socket, so a box that forbids listening sockets
+>   fails this lane at *boot*.
+> - **The profile needs two more parameters.** `services = TopicManagementService` (without it every
+>   `railway.<EVENT>` topic is a silent dead letter and `TraceProbe.setup()` bails out), and an
+>   **absolute** `file-dir` — [#36](https://github.com/bedaHovorka/OpenCybele1/issues/36) lost a gate
+>   run to a relative one that put a 25-line `FileNotFoundException` ahead of line 1 of a trace.
+> - **`maxParallelForks = 1` is not sufficient; the lane also sets `forkEvery = 1`.** Three statics
+>   have no reset hook — `TraceProbe.READY` (a latch counted down once per JVM), `TraceProbe.FAILURES`
+>   (a monotone counter) and `RunControl`'s first-writer-wins clock — and a fresh JVM per class is
+>   the only reset there is. That is what makes them testable rather than merely sequential.
+>
+> The probe agent in the sketch also polls with `block()`; the real one takes its outbound work
+> through the **O2A channel** listed two bullets above, so there is no polling loop in the fixture at
+> all. `TraceProbe.awaitReady(long)` is the one production seam #38 added — the narrowest thing that
+> makes a one-minute barrier's failure branch reachable in a test, and deliberately not a reset hook.
+
 ### 4.3 When to use the JADE Test Suite add-on
 Only if you build a large long-lived JADE layer and want protocol-level functional groups with its GUI/batch runner. For a migration way-station, layers 4.1 + 4.2 in JUnit are usually sufficient and CI-friendlier.
 
