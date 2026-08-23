@@ -316,10 +316,17 @@ symptom, which is the one failure a golden-master harness cannot survive.
 
 ## What headless mode does and does not change
 
-`RailwayMainAgent` still `extends Observable`, still registers its inner `TableModel` in the
-constructor, and still calls `notifyObservers()` on every state change. In headless mode
-`RailwayCanvas` is simply never constructed, so nothing else subscribes. No observer wiring was
-removed; there is one less observer.
+`RailwayMainAgent` still registers its inner `TableModel` at construction and still notifies on
+every state change. In headless mode `RailwayCanvas` is simply never constructed, so nothing else
+subscribes. No listener wiring was removed; there is one less listener.
+
+> **Since [#33](https://github.com/bedaHovorka/OpenCybele1/issues/33)** the mechanism is
+> `RailwayView.Listener`, not `java.util.Observable` — that API has been deprecated since Java 9,
+> and it was used in three places (the hub, `RailwayCanvas`, the inner `TableModel`). The paragraph
+> above is unchanged in substance: the registration is still unconditional and still above the
+> headless guard, which is why `defect-triage.md` §4.5 can say that `sim.headless=true` changes
+> nothing whatsoever about DEF-24. #33 moved the guard itself into `RailwayMainAgent.openView()`,
+> the one method in that agent that touches AWT.
 
 The eager check in `Main` is the other half: a JVM that is headless (`-Djava.awt.headless=true`,
 or no display) while `sim.headless=false` is **rejected before the kernel starts**, with a message

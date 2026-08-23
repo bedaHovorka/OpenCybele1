@@ -38,4 +38,15 @@ class TravelDelayTest {
         assertEquals(1000, TravelDelay.travelMs(1000, 0.001));
         assertEquals(999, TravelDelay.travelMs(1000, -0.002), "-1.0 truncates to -1");
     }
+    @Test
+    @DisplayName("a zero-length track is the jitter alone, sign included -- the base is what bounds DEF-16")
+    void a_zero_base_leaves_only_the_jitter() {
+        // DEF-16 is "1 s roads go negative". The reason is entirely the base: it is what the
+        // draw has to overcome. At base 0 every negative draw survives and every positive one
+        // does too, which is the boundary the shipped 1 s track sits just above.
+        assertEquals(0, TravelDelay.travelMs(0, 0.0));
+        assertEquals(-500, TravelDelay.travelMs(0, -1.0));
+        assertEquals(500, TravelDelay.travelMs(0, 1.0));
+    }
+
 }

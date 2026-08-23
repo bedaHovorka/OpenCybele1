@@ -109,4 +109,39 @@ class StationScheduleTest {
         assertThrows(NoSuchElementException.class,
                 () -> new StationSchedule(0, W).computeDifference("vl0", 0));
     }
+    @Test
+    @DisplayName("the reserve pull needs BOTH conditions: a crowded tail sends the train past lastKey")
+    void a_crowded_tail_defeats_the_reserve_pull() {
+        // The -window/3 branch is `timePlusLambda < lastKey && size <= capacity - 1`. Every
+        // pre-#37 test took it with both conjuncts TRUE or with the first one FALSE; the
+        // TRUE && FALSE combination -- a far-future lastKey, but no room left out there --
+        // was unreached, so `size <= capacity - 1` could have been dropped entirely.
+        final StationSchedule s = new StationSchedule(2, W);
+        final long time = 100000;
+        s.addToPlan("vl1", 100000);
+        s.addToPlan("vl2", 100100);     // 2 > 2-1, so the branch fires
+        // Three trains at or beyond time+W: lastKey is far in the future (first conjunct TRUE)
+        // but the tail holds 3 > capacity-1 == 1 (second conjunct FALSE).
+        s.addToPlan("vl3", 200000);
+        s.addToPlan("vl4", 200100);
+        s.addToPlan("vl5", 200200);
+        assertEquals(200200 + W / 3 - time, s.computeDifference("vl0", time),
+                "the tail is full, so the train goes AFTER lastKey, not in front of it");
+    }
+
+    @Test
+    @DisplayName("the reserve pull needs lastKey STRICTLY beyond time+window, not merely at it")
+    void a_lastKey_exactly_at_the_window_edge_does_not_pull() {
+        // `timePlusLambda < timetable.lastKey()` is strict. A slot sitting exactly on the
+        // window edge is the boundary between the two branches, and turning the `<` into
+        // `<=` flips the sign of the answer.
+        final StationSchedule s = new StationSchedule(2, W);
+        final long time = 100000;
+        s.addToPlan("vl1", 100000);
+        s.addToPlan("vl2", 100100);     // 2 > 2-1, the branch fires
+        s.addToPlan("vl3", time + W);   // lastKey == time+W exactly; tailSubMultiMap holds 1
+        assertEquals(time + W + W / 3 - time, s.computeDifference("vl0", time),
+                "not strictly beyond, so the +window/3 side is taken");
+    }
+
 }

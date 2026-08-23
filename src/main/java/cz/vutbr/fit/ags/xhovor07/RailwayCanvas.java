@@ -19,17 +19,14 @@ import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionListener;
 import java.awt.geom.AffineTransform;
 import java.util.List;
-import java.util.Observable;
-import java.util.Observer;
 import java.util.Set;
 
 import javax.swing.JComponent;
 import javax.swing.Scrollable;
 import javax.swing.SwingConstants;
 
-import cybele.kernel.Cybele;
-import cz.vutbr.fit.ags.xhovor07.RoadAgent.State;
-import cz.vutbr.fit.ags.xhovor07.Station.Info;
+import cz.vutbr.fit.ags.railway.domain.msg.RoadDirection;
+import cz.vutbr.fit.ags.railway.domain.msg.StationInfo;
 
 /**
  * This is a main GUI component in a program. It show railway elements in a canvas.
@@ -45,8 +42,19 @@ import cz.vutbr.fit.ags.xhovor07.Station.Info;
  * finds is printed at startup and painted here in red, and a main-line pair with no
  * track between it is drawn as a red {@code ??} gap instead of quietly omitted.
  * See {@code docs/scenario-config.md}.
+ * <p>
+ * <b>Reused verbatim across the port</b> — #35's reason for porting the view at all; see
+ * {@link RailwayView}. #33 changed three bindings and no drawing: the constructor takes a
+ * {@link RailwayView}, {@code java.util.Observer} (deprecated since Java 9) becomes
+ * {@link RailwayView.Listener}, and the two payload types it reads are the ontology's immutable
+ * records — {@link StationInfo} for {@code Station.Info} and {@link RoadDirection} for
+ * {@code RoadAgent.State} — which is the snapshot semantics {@code docs/defect-triage.md} §3.2
+ * puts inside the contract for DEF-13. The visible consequence is the one #35 recorded in advance:
+ * the occupancy this paints is a value that was true when the station sent it, where the 2008
+ * canvas read a live alias the station was still mutating. GUI freshness only; the view is never
+ * an oracle.
  */
-public class RailwayCanvas extends JComponent implements Scrollable, MouseMotionListener, Observer {
+public class RailwayCanvas extends JComponent implements Scrollable, MouseMotionListener, RailwayView.Listener {
     private static final long serialVersionUID = 1L;
     private static final int maxUnitIncrement = 35;
     private final String[] mainRoads;
@@ -58,13 +66,13 @@ public class RailwayCanvas extends JComponent implements Scrollable, MouseMotion
     private final int roadWidth = 75;
     private final int stationWidth = 45;
     private final BasicStroke basicStroke = new BasicStroke(2.5f);
-    private final RailwayMainAgent mainAgent;
+    private final RailwayView mainAgent;
 	
     /**
      * Create object for painting railway Grid on screen
      * @param mainAgent 
      */
-    public RailwayCanvas(RailwayMainAgent mainAgent) {
+    public RailwayCanvas(RailwayView mainAgent) {
 	final ScenarioConfig config = ScenarioConfig.get();
 	final List<String> mainLine = config.getGuiMainLine();
 	this.mainRoads = mainLine.toArray(new String[mainLine.size()]);
@@ -73,7 +81,7 @@ public class RailwayCanvas extends JComponent implements Scrollable, MouseMotion
 	this.knownStations = config.getStationNames();
 	this.knownRoads = config.getRoadNames();
 	this.mainAgent = mainAgent;
-	mainAgent.addObserver(this);
+	mainAgent.addListener(this);
 	setPreferredSize(new Dimension(780, 380));
 	setBackground(Color.BLACK);
 	setAutoscrolls(true);
@@ -88,18 +96,18 @@ public class RailwayCanvas extends JComponent implements Scrollable, MouseMotion
     
     private void paintStation(String name, Graphics2D g) {
 	g.drawArc(0, 0, stationWidth, stationWidth, 0, 360);
-	final Info info = mainAgent.getStationInfos().get(name);
-	final String infoStr = (info != null) ? info.occupied+"/"+info.capacity :"N/A";
+	final StationInfo info = mainAgent.getStationInfos().get(name);
+	final String infoStr = (info != null) ? info.occupied()+"/"+info.capacity() :"N/A";
 	g.drawString(infoStr, stationWidth/2-10, stationWidth/2+5);
 	g.drawString(name, stationWidth/2-7, stationWidth+13);
     }
     
     private void paintRoad(String name, Graphics2D g) {
 	Color color = g.getColor();
-	State state = mainAgent.getRoadAgentStates().get(name);
+	RoadDirection state = mainAgent.getRoadAgentStates().get(name);
 	if (state == null) {
 	    g.setColor(Color.BLUE);
-	} else if (state != State.FREE) {
+	} else if (state != RoadDirection.FREE) {
 	    g.setColor(Color.RED);
 	    g.drawString(state.getSymbol(), roadWidth/2-5, stationWidth/2-3);
 	}
@@ -114,7 +122,7 @@ public class RailwayCanvas extends JComponent implements Scrollable, MouseMotion
      */
     public void paint(Graphics2D g) {
 	final Color baseColor = g.getColor();
-	g.drawString(Cybele.getTime(RailwayMainAgent.CLOCK_ID)/1000 + " sec", 20, 20);
+	g.drawString(mainAgent.getSimTimeMs()/1000 + " sec", 20, 20);
 	paintLayoutWarnings(baseColor, g);
 	g.setStroke(basicStroke);
 	final AffineTransform inicitialPos = g.getTransform();
@@ -245,7 +253,8 @@ public class RailwayCanvas extends JComponent implements Scrollable, MouseMotion
         scrollRectToVisible(r);
     }
 
-    public void update(Observable o, Object arg) {
+    @Override
+    public void railwayChanged() {
 	repaint(100);
     }
 }

@@ -301,7 +301,16 @@ xhost -local:docker   # revoke access again once done
 
 ## Continuous integration
 
-`.github/workflows/characterization-opencybele.yml` runs the job **`characterizationIT@opencybele`** on every push to, and pull request against, `develop`/`jade-develop`, plus nightly. It checks out this branch (the parity harness) *and* `opencybele-baseline` (the frozen OpenCybele application), recovers and installs the vendored Cybele jars with `scripts/bootstrap-vendor-jars.sh`, builds the application with `installDist`, and runs the L3 golden-master suite against it via `-Popencybele.dist`. The run is headless and needs no display server.
+`.github/workflows/ci.yml` (named `characterization-opencybele.yml` until #40) runs **four jobs** on every push to, and pull request against, `develop`/`jade-develop`:
+
+| Job | What it does |
+|---|---|
+| `build@this-ref` | `./gradlew build` on the triggering ref: compilation, the 321-test L1 lane, `domainPurity` |
+| `integrationTest@this-ref` | the 17-test L2 lane — real in-process JADE containers, one JVM per class |
+| `characterizationIT@opencybele` | the **drift guard**: checks out this branch (the parity harness) *and* `opencybele-baseline` (the frozen OpenCybele application), recovers and installs the vendored Cybele jars with `scripts/bootstrap-vendor-jars.sh`, builds the application with `installDist`, and runs the L3 golden-master suite against it via `-Popencybele.dist` |
+| `characterizationIT@jade` | the **port guard**: the same suite and the same untouched goldens, against the JADE application built from this ref (`installDist`, `-Pjade.dist`) |
+
+Every run is headless and needs no display server. The JADE lane is judged against a *recorded measurement* rather than against "all five scenarios green" — `opencybele-strict` fails its golden deterministically, for a reason #39 measured and classified as a normalizer gap that cannot be closed. See [`docs/ci.md`](docs/ci.md) §10 for why, what that costs, and what re-measuring takes.
 
 Two things about it are worth knowing before reading the YAML. Without `-Popencybele.dist` the end-to-end test is *skipped* and Gradle still exits 0, so the job asserts out of the JUnit XML that the scenario really ran rather than trusting the exit status. And the baseline carries a measured ~1-in-45 nondeterministic wedge (`DEF-22`) whose failure is indistinguishable from real behavioural drift except by re-running, so the end-to-end class — and only that class — gets one loudly announced retry.
 
@@ -316,6 +325,12 @@ Full write-up, including how to reproduce the job locally: [`docs/ci.md`](docs/c
 - [`docs/trace-format.md`](docs/trace-format.md) — the canonical parity trace: the line format as a cross-framework contract, the fifteen channels, the aliased-payload hazard, and the probe-on/probe-off perturbation measurement
 - [`docs/message-ontology.md`](docs/message-ontology.md) — the JADE message ontology: all fifteen channels mapped to an addressing mode, a FIPA performative, a payload record and a `MessageTemplate`; the topic-granularity decision; the `ENTER` payload asymmetry
 - [`docs/clock-abstraction.md`](docs/clock-abstraction.md) — simulated time as an object: the `SimClock`/`AgentClock` design, absolute simulated deadlines, the pace decision, the virtual clock, and the measurement that showed the `pauseClock`/`resumeClock` idiom is not a mutex
+- [`docs/parity-triage-jade.md`](docs/parity-triage-jade.md) — the L3 triage log for the JADE port: every diff, its classification, the burst-boundary evidence, and the seven candidate repairs that were measured and rejected
+
+### The Phase-1 wrap-up
+
+- [`jade/README.md`](jade/README.md) — **the JADE port's mapping notes**: which Cybele activity became which JADE behaviour, per agent; where the planning docs' mapping table was wrong; and the explicit list of differences the goldens cannot see (threading model, internal scheduling, conversation ids, container topology, the JICP socket, and the `TRAVEL_LEFT`/`TRAVEL_RIGHT` label that no golden can pin)
+- [`docs/comparison-log-phase1.md`](docs/comparison-log-phase1.md) — **the Phase-1 comparison log**: LOC (implementation vs test, and what it does not include), per-agent port effort, what did not map cleanly, runtime observations, the JADE distribution decision with its two retractions, the Definition-of-Done verdict, and the numbers that disagree with each other
 
 `dokumentace.pdf` and `prezentace.pdf` (in Czech) are the original project documentation and presentation submitted for the course.
 

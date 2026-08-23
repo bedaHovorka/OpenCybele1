@@ -1,6 +1,9 @@
 package cz.vutbr.fit.ags.railway.domain.util;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -95,4 +98,52 @@ class GraphStructureTest {
         net.put("stC", "stF", "tr7");
         return net;
     }
+    @Test
+    @DisplayName("the edge key answers the whole equals contract, including the case that must be FALSE")
+    void the_edge_key_distinguishes_different_pairs() {
+        // Doubleton is the SOLE key type of HashMapGraph. Before #37 the only assertion about
+        // it was that a swapped pair is equal -- which `return true;` would also satisfy.
+        final Doubleton<String> ab = new Doubleton<String>("stA", "stB");
+        final Doubleton<String> ac = new Doubleton<String>("stA", "stC");
+
+        assertNotEquals(ab, ac, "two different tracks must not collide in the graph's map");
+        assertNotEquals(ab, new Doubleton<String>("stC", "stD"));
+        assertEquals(ab, ab, "reflexive");
+        assertEquals(new Doubleton<String>("stB", "stA"), ab, "symmetric, the other direction");
+        assertFalse(ab.equals(null), "null");
+        assertFalse(ab.equals("stAstB"), "a String is not a Doubleton");
+    }
+
+    @Test
+    @DisplayName("PINNED: a self-pair reports size 2 while iterating one node twice")
+    void a_self_pair_breaks_the_Set_contract() {
+        // Doubleton.size() hard-codes `return 2;` and isEmpty() hard-codes `return false;`,
+        // so a self-loop track -- which ScenarioConfig.buildNet can express -- yields a Set
+        // whose size disagrees with its iterator. Inert on the shipped topology, which has no
+        // self-loop, and pinned here so a port does not quietly "fix" the arithmetic.
+        final Doubleton<String> self = new Doubleton<String>("stA", "stA");
+
+        assertEquals(2, self.size());
+        assertFalse(self.isEmpty());
+        assertEquals(Arrays.asList("stA", "stA"), collect(self),
+                "the iterator yields the same node twice, so size 2 is not size 1 in disguise");
+    }
+
+    @Test
+    @DisplayName("PINNED: nodeSet() on an EMPTY graph throws NPE rather than returning an empty set")
+    void nodeSet_on_an_empty_graph_throws() {
+        // NodeCollectionIterator leaves currentPair null when the key set is empty, and
+        // hasNext() dereferences it. Unreachable in the application -- RailwayMainAgent builds
+        // the topology before anything reads it -- and exactly the kind of latent line
+        // DEF-18's row calls "no bug today", so it is pinned rather than repaired.
+        assertThrows(NullPointerException.class,
+                () -> new HashMapGraph<String, String>().nodeSet());
+    }
+
+    private static List<String> collect(Iterable<String> it) {
+        final List<String> out = new ArrayList<String>();
+        for (String s : it) out.add(s);
+        return out;
+    }
+
 }
