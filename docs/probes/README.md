@@ -1,5 +1,11 @@
 # `docs/probes` — the Cybele runtime probes behind `INVENTORY.md` §12
 
+> **#82.** These probes exercise the **Cybele** kernel. On this branch (`jade-develop`) the
+> application is JADE-only: there is no `cybele/` directory and no
+> `scripts/bootstrap-vendor-jars.sh`. To re-run the probes, check out `opencybele-baseline`
+> (or work from a second clone of that branch). The write-ups stay here as the record of
+> what was measured.
+
 Cybele ships as **source-less** 2002-era jars, so every runtime-semantics claim in
 [`INVENTORY.md`](../INVENTORY.md) §12 (`SEM-01`…`SEM-06`) was settled by running these programs
 against the real jars. They are committed so that #16, #20 and #29 can re-run them instead of
@@ -8,14 +14,15 @@ own verdict.
 
 ## Prerequisite: the vendor jars
 
-The two IAI jars are untracked in git (`.gitignore: cybelle/*.jar`). A fresh clone must recover
-them into the local Maven repository first, or nothing here runs:
+The two IAI jars are untracked in git and live with the Cybele application on
+`opencybele-baseline`. Recover them there before anything here runs:
 
 ```bash
-scripts/bootstrap-vendor-jars.sh          # preferred; on opencybele-baseline, landed in #14
+# on opencybele-baseline (not this branch)
+scripts/bootstrap-vendor-jars.sh          # preferred; landed in #14
 ```
 
-or by hand from the `withoutGradle` tag — see the repository `README.md`, "One-time setup".
+or by hand from the `withoutGradle` tag — see that branch's `README.md`.
 `run.sh` checks for both artifacts and prints this same instruction if they are missing.
 
 ## Running
