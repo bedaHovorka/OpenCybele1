@@ -325,6 +325,12 @@ Full write-up, including how to reproduce the job locally: [`docs/ci.md`](docs/c
 - [`docs/trace-format.md`](docs/trace-format.md) — the canonical parity trace: the line format as a cross-framework contract, the fifteen channels, the aliased-payload hazard, and the probe-on/probe-off perturbation measurement
 - [`docs/message-ontology.md`](docs/message-ontology.md) — the JADE message ontology: all fifteen channels mapped to an addressing mode, a FIPA performative, a payload record and a `MessageTemplate`; the topic-granularity decision; the `ENTER` payload asymmetry
 - [`docs/clock-abstraction.md`](docs/clock-abstraction.md) — simulated time as an object: the `SimClock`/`AgentClock` design, absolute simulated deadlines, the pace decision, the virtual clock, and the measurement that showed the `pauseClock`/`resumeClock` idiom is not a mutex
+- [`docs/parity-triage-jade.md`](docs/parity-triage-jade.md) — the L3 triage log for the JADE port: every diff, its classification, the burst-boundary evidence, and the seven candidate repairs that were measured and rejected
+
+### The Phase-1 wrap-up
+
+- [`jade/README.md`](jade/README.md) — **the JADE port's mapping notes**: which Cybele activity became which JADE behaviour, per agent; where the planning docs' mapping table was wrong; and the explicit list of differences the goldens cannot see (threading model, internal scheduling, conversation ids, container topology, the JICP socket, and the `TRAVEL_LEFT`/`TRAVEL_RIGHT` label that no golden can pin)
+- [`docs/comparison-log-phase1.md`](docs/comparison-log-phase1.md) — **the Phase-1 comparison log**: LOC (implementation vs test, and what it does not include), per-agent port effort, what did not map cleanly, runtime observations, the JADE distribution decision with its two retractions, the Definition-of-Done verdict, and the numbers that disagree with each other
 
 `dokumentace.pdf` and `prezentace.pdf` (in Czech) are the original project documentation and presentation submitted for the course.
 

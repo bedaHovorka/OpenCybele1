@@ -297,9 +297,9 @@ State is mapped when a change to it changes the trace, not when the field exists
 | CFG-07 | origin/destination pairs | S (all six defaults) · L · T · C · K | S is the only scenario with the shipped six. |
 | CFG-08 | bootstrap delay | all five; **counted in T** | See TMR-01 — the earlier "only scenario" claim was false. |
 | CFG-09, CFG-10 | GUI presets and layout | **UNMAPPED** | §10.4. |
-| CFG-11 | kernel comm mode `Local;NoSerialization` | partially | Its one observable consequence is DEF-13's aliasing, which is projected. The kernel banner's `comm service` line is in every golden, so a port that failed to load the service fails; the *by-reference* semantics themselves are pinned by `docs/probes/ExpF.java`, not by a scenario. |
+| CFG-11 | kernel comm mode `Local;NoSerialization` | partially | Its one observable consequence is DEF-13's aliasing, which is projected. ~~The kernel banner's `comm service` line is in every golden, so a port that failed to load the service fails~~ — **stale since #36, corrected by [#41](https://github.com/bedaHovorka/OpenCybele1/issues/41): the nine-line Cybele boot banner is still physically at the head of each golden file but is declared a diagnostic by both launchers and stripped from BOTH sides before comparison** (T-04 in `parity-triage-jade.md` §3; the arithmetic checks out — `strict` 607 − 9 = 598, `congestion` 176 − 9 = 167). Nothing in the suite reads it any more. The *by-reference* semantics are pinned by `docs/probes/ExpF.java`, not by a scenario. |
 | CFG-12, CFG-13 | kernel thread pool, kernel event queues | **UNMAPPED** | §10.7. |
-| CFG-14 | kernel services loaded | all five | The nine-line kernel banner is inside every golden and names all seven services in order. |
+| CFG-14 | kernel services loaded | ~~all five~~ **UNMAPPED** | ~~The nine-line kernel banner is inside every golden and names all seven services in order.~~ **Stale since #36, corrected by [#41](https://github.com/bedaHovorka/OpenCybele1/issues/41).** The banner is in the golden *files* but is stripped as a declared diagnostic before comparison (T-04), so no comparison reads it and the mapping is no longer earned by any scenario. It had to go: the banner is Cybele's, and a JADE run cannot produce it — keeping it in the comparison would have made every JADE scenario fail on nine lines of another kernel's boot output. On the OpenCybele arm a failure to load a service still shows up, but through the run's behaviour rather than through the banner. |
 
 ---
 
@@ -472,6 +472,14 @@ Two smaller corrections fall out of the same measurement, and both were in the f
 **Verdict: DEF-16 is unmapped. It needs an L1 unit test on the extracted delay expression (#28), and
 `docs/defect-triage.md` §3.1's guidance to #39 should be corrected when that issue is next touched.**
 
+> **Discharged.** `defect-triage.md` §3.1's DEF-16 row now carries the guidance struck through and
+> the falsification inline (*"#39 must NOT triage a clamp from a diff here — there will not be
+> one"*), and the L1 test exists: `TravelDelay` is the extracted expression and
+> `TravelDelayTest` pins it, including base 0 and the unclamped negative. The port carries the
+> behaviour unchanged — `RoadAgent`'s `AgentClock` fires an already-past instant at the next drain,
+> exactly as Cybele fires a negative delay immediately (SEM-06). Verified by
+> [#41](https://github.com/bedaHovorka/OpenCybele1/issues/41).
+
 ### 10.10 ST-17's under-capacity arm — was unpinned, now pinned
 
 Recorded here rather than only in the ST table because it was found the same way DEF-16 was, and it
@@ -631,7 +639,7 @@ Mapping follows [`docs/defect-triage.md`](../../docs/defect-triage.md) §3. Clas
 | DEF-08 | de-claimed | all five | Not a defect. What is pinned is the *shape*: the destructor's `LEAVE` to the destination station, which balances its `occupied++`. |
 | DEF-11 | (a) | **unmapped — unmappable** | `==` on interned `String`s behaves identically to `.equals`; a port using either produces a byte-identical trace. |
 | DEF-14 | (a) | all five | Pinned as the invariant "no road carries two trains at once" — ST-20. |
-| **DEF-16** | (a) | **UNMAPPED — see §10.9** | A clamping port passes the whole suite. Reclassified here as unmappable by golden; `defect-triage.md` §3.1's guidance to #39 is wrong and should be corrected. |
+| **DEF-16** | (a) | **UNMAPPED — see §10.9** | A clamping port passes the whole suite. Reclassified here as unmappable by golden. `defect-triage.md` §3.1's guidance to #39 was wrong and **has been corrected** (struck through, with the falsification inline); the L1 replacement is `TravelDelayTest`. |
 | DEF-13 | (b) | mechanism mapped, **value projected** | Never a port bug. |
 | clock families | (b) | mechanism mapped, **values projected** | `tick`, `expected`, `planned` and the departure instant are **erased**; `diff` is **quantised**, and §2.2's "zero one `diff`" mutant shows the quantum has teeth. |
 | agent init order | (b) | **deliberately not pinned** | Sorted by the `startup-block` rule. |

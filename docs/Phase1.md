@@ -116,11 +116,60 @@ Goal: white-box confidence inside the new implementation + black-box proof of eq
 - [ ] CI: `characterizationIT@jade` job, same suite, must be green.
 
 ### 1-POST.4 Wrap-up artifacts
-- [ ] `jade/README.md`: mapping notes (which activity became which behaviour), known non-observable differences (threading, internal timing) explicitly listed as out-of-contract.
-- [ ] Short comparison log for the experiment: LOC, port effort notes, anything that didn't map cleanly (feeds Phase 2 planning).
+- [x] [`jade/README.md`](../jade/README.md): mapping notes (which activity became which behaviour),
+  known non-observable differences explicitly listed as out-of-contract — §6 lists threading model,
+  internal scheduling, conversation ids, container topology, the JICP listener that binds a socket
+  where Cybele bound none, and the `TRAVEL_LEFT`/`TRAVEL_RIGHT` label, which is pinned by no golden
+  and cannot be. It also records where this document's own companion mapping table was wrong: **five
+  of `CYBELLE_TO_JADE.md`'s six behaviour-class rows have zero instances in the finished port.**
+- [x] Comparison log: [`comparison-log-phase1.md`](comparison-log-phase1.md) — LOC (implementation
+  vs test, and what the number does not include), per-agent effort, what did not map cleanly,
+  runtime observations, the JADE distribution decision with both of #26's retractions, and §9, the
+  numbers that disagree with each other.
 
 **Exit criteria Phase 1 (Definition of Done):**
 1. `characterizationIT` green on **both** `develop` and `jade` against identical goldens, flake-free (≥10 runs).
 2. L1 + L2 suites green in CI on `jade`.
 3. Coverage checklist shows every inventory row exercised by L3 and every behaviour covered by L1.
 4. Comparison log written. Harness untouched by JADE-specific hacks (anything JADE-specific lives in the `JadeLauncher` adapter only).
+
+### The verdict, %s
+
+Full working: [`comparison-log-phase1.md`](comparison-log-phase1.md) §8.
+
+| | criterion | verdict |
+|---|---|---|
+| 1 | goldens green on both, flake-free | **NOT MET** |
+| 2 | L1 + L2 green in CI on `jade` | **MET** — CI run `32550380188`, four jobs, 321 + 17 tests |
+| 3 | coverage checklist complete | **MET for L1; partially met for L3** — three rows are exercised by no golden, all three measured and assigned before this ticket |
+| 4 | comparison log written; harness un-hacked | **MET** — and the second half is asserted by a test, not a convention |
+
+**Criterion 1 is not met, and no work on the port can meet it.** `strict`, `congestion` and
+`capacity` are red; the residual is classified **(b)** on evidence and is not closable, because a
+golden is a fixed point of the normalizer at every width, so `burst-order`'s width re-segments the
+**run only** and the comparison therefore asks the port to reproduce the baseline's *message
+latency* rather than its behaviour. `strict` needs a width ≥ 227 and `congestion` one < 214 —
+mutually exclusive. Seven candidate repairs were implemented and measured before being rejected. The
+margins against the 220 ms width rank the pass rates exactly on both implementations (118 ms →
+20/20, 3 ms → 6/20, 9 ms → 3/20, 0 ms → 0/20), and **under concurrent load the reference
+implementation fails its own `strict` golden in 3 runs of 20, at the same line and in the same
+direction.** No golden was re-recorded, no contract level demoted, no width changed, no check
+relaxed; `git diff origin/jade-develop -- parity-tests/golden` is 0 lines.
+
+**The strongest honest claim Phase 1 supports** is therefore not "the goldens match" but: *the JADE
+run emits the same event multiset as the 2008 application in all five scenarios, every remaining
+difference is burst placement, and two of the five reproduce byte for byte 20 times out of 20.*
+
+**Two carve-outs travel with that sentence** and it must not be quoted without them
+([`comparison-log-phase1.md`](comparison-log-phase1.md) §8.1):
+
+* **T-07** — `strict`'s `VOTE.diff` for `(vl8, stH)` straddles the normalizer's own 1 000 ms
+  quantiser bucket in 10 runs of 20. One line, one payload field, a declared cost of the quantiser,
+  and the two sides cancel; the CI judge's `QUANTUM` class exists for exactly it.
+* **T-12** — the only genuine multiset difference this port ever produced: five consecutive runs of
+  one `capacity` corpus differed by 14–17 lines because a slow JVM start shifted the whole schedule
+  against an *absolute* `sim.stop.maxClockMs`. Inter-departure offsets were identical to the
+  millisecond, so the schedule was shifted rather than recomputed, and it did not reproduce (a
+  second corpus of twenty was all 20 multiset-identical). It is a gap in `COVERAGE.md` §12.1's
+  bound-margin rule, which measures from *last train creation* and models nothing about how late a
+  run starts — 2-PRE work.

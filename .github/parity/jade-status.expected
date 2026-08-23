@@ -11,9 +11,26 @@
 # implementation, classified the residue **(b) normalizer gap, not closable**,
 # and left three scenarios red (docs/parity-triage-jade.md). Those three do not
 # fail because the port does the wrong thing -- the JADE run emits the SAME
-# EVENT MULTISET as the 2008 application in all five scenarios, every run. They
-# fail because the comparison is keyed on burst partition, burst partition is
-# keyed on inter-message latency, and the goldens froze the baseline's latency.
+# EVENT MULTISET as the 2008 application in all five scenarios. They fail
+# because the comparison is keyed on burst partition, burst partition is keyed
+# on inter-message latency, and the goldens froze the baseline's latency.
+#
+# #41 narrowed "every run" out of that sentence, because it was not measured.
+# `strict` is multiset-identical in 7 runs of 20; the other 13 differ by exactly
+# TWO lines -- one VOTE.diff straddling the 1 000 ms TIME_QUANTUM bucket, T-07,
+# a declared cost of the quantiser and not an event the port invented or
+# dropped. That is precisely what the QUANTUM verdict class below exists to
+# carry, so the file already encoded the carve-out its prose had dropped.
+#
+# One more, for completeness, because "every run" also erased it: T-12. Five
+# consecutive runs of ONE 20-run `capacity` corpus differed by MULTISET, 14-17
+# lines, when a slow JVM start shifted the whole schedule against an ABSOLUTE
+# sim.stop.maxClockMs. It did not reproduce -- a second corpus of twenty was all
+# 20 multiset-identical -- and the schedule was shifted, not recomputed
+# (inter-departure offsets identical to the millisecond). It is the only genuine
+# multiset difference this port has ever produced, and it is exactly why
+# BEHAVIOUR is granted to no scenario in this file: a recurrence must be a red
+# build, not a footnote. See parity-triage-jade.md 4.8.
 #
 # So this job asserts the MEASURED STATE rather than an aspiration, and it does
 # it on the axis the measurement showed to be stable. Not the pass RATE -- three
@@ -55,9 +72,13 @@
 #   scenario     20-run corpus   2nd corpus   12-run idle   margin vs 220 ms
 #   lifecycle    20/20           --           12/12         118 ms
 #   timers       20/20           --           12/12         no gap in [120,400]
-#   capacity      6/20           15/20        12/12           3 ms  (118 ms nearest)
+#   capacity      6/20           15/20        12/12            3 ms
 #   congestion    3/20           --            7/12           9 ms
 #   strict        0/20           0/20          0/12           0 ms
+#
+# (#41 removed an unexplained "(118 ms nearest)" from the capacity row: 118 ms
+# is LIFECYCLE's margin, and capacity's is 3 ms -- parity-triage-jade.md 4.4 and
+# COVERAGE 12.2.1, both. No expectation row was changed by that edit.)
 #
 # The margins rank the pass rates exactly, on both implementations, and the
 # small-margin rows swing by 2-4x between corpora while the large-margin ones do
@@ -118,8 +139,10 @@ opencybele-capacity     MATCH ORDER
 opencybele-congestion   MATCH ORDER
 
 # 0/N in every corpus taken, on either machine state -- deterministic, not
-# flaky, and the same boundary fails the BASELINE 3/20 under concurrent load, at
-# the same line and in the same direction (§4.2). MATCH is deliberately absent:
+# flaky, and the same boundary fails the BASELINE in 3 runs of 20 under
+# concurrent load -- 17/20 pass, idle 20/20 -- at the same line and in the same
+# direction (§4.2). (#41 wrote that as a failure count: "3/20" two blocks up is
+# a PASS rate.) MATCH is deliberately absent:
 # `strict` passing is a status change and goes red.
 #
 # QUANTUM is here because #39 measured T-07 on this scenario specifically:

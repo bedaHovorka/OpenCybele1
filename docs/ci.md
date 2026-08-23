@@ -425,15 +425,23 @@ wide. That is not a classpath to change as a side effect of a CI ticket.
 goldens, 20 runs per scenario per implementation, and classified the residue **(b) normalizer gap,
 not closable**. Four facts decide the shape of this job:
 
-* The JADE run emits the **same event multiset** as the 2008 application in **all five scenarios**.
-  Every remaining difference is burst placement.
+* The JADE run emits the **same event multiset** as the 2008 application in **all five scenarios**,
+  with one declared carve-out: `strict`'s `VOTE.diff` for `(vl8, stH)` straddles the normalizer's
+  own 1 000 ms `TIME_QUANTUM` bucket in 10 runs of 20 (T-07), which is why `QUANTUM` is a verdict
+  class below. Outside that one line on that one field, every remaining difference is burst
+  placement.
 * Pass rates are **load-dependent**, and that is the diagnosis showing through rather than noise.
   Three corpora read `capacity` 6/20, 15/20 and 12/12; `congestion` 3/20 and 7/12; `strict` **0/N
   in every corpus**; `lifecycle` and `timers` 20/20 and 12/12.
-* The margins against the 220 ms burst width rank the rates exactly: `capacity` 118 ms,
-  `congestion` 9 ms, `strict` 0 ms.
-* **Under concurrent load the baseline fails its own `strict` golden 3/20**, at the same line and
-  in the same direction. The instrument does this to the reference implementation too.
+* The margins against the 220 ms burst width rank the rates exactly: `lifecycle` 118 ms,
+  `capacity` 3 ms, `congestion` 9 ms, `strict` 0 ms.
+  *(#41: this line used to give `capacity` 118 ms. That is `lifecycle`'s margin — `capacity`'s is
+  3 ms, per `parity-triage-jade.md` §4.4 and COVERAGE §12.2.1 — and with 118 against a 6/20 rate
+  the sentence refuted its own "rank the rates exactly".)*
+* **Under concurrent load the baseline fails its own `strict` golden in 3 runs of 20** — i.e. 17/20
+  pass, idle 20/20 — at the same line and in the same direction. The instrument does this to the
+  reference implementation too. *(#41: written as a failure count on purpose. "3/20" reads as a
+  pass rate, and the port's `congestion` pass rate two lines up is also 3/20.)*
 
 So a job demanding five green scenarios would be red forever, and a job that is always red teaches
 people to ignore CI — which is the exact failure this project already paid for once (#78/#79: CI was

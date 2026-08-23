@@ -479,6 +479,11 @@ A boundary one millisecond from the threshold, named in the failure itself.
 5. **DEF-02 did not reproduce and structurally cannot on JADE** (T-09). If the migration is meant to
    demonstrate anything about the original's defects, it needs a scenario that observes them
    directly rather than a golden that happens to contain them.
-6. **Three scenarios reproduce byte-for-byte across two independent agent kernels.** That is the
-   result worth carrying forward, and it is worth saying that it was obtained with the goldens
-   untouched.
+6. **Two scenarios reproduce byte-for-byte across two independent agent kernels** — `lifecycle`
+   and `timers`, 20/20 each. That is the result worth carrying forward, and it is worth saying that
+   it was obtained with the goldens untouched.
+
+   *(Corrected by [#41](https://github.com/bedaHovorka/OpenCybele1/issues/41): this line said
+   **three**, which contradicts §1's "two of five" and could only have been counting `capacity` on
+   its good corpus — which §1.1 and §4.4 call "luck, not a property". It is the sentence in this
+   file most likely to be lifted into a DoD verdict, so it says two.)*

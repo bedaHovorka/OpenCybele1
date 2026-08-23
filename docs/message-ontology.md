@@ -12,6 +12,13 @@
 > `src/jade/java/cz/vutbr/fit/ags/railway/jade/` (the `jade.lang.acl` binding). Neither is on
 > the Cybele application's classpath. **This branch's agents deliberately still use Cybele
 > channels**; rewiring them is #30–#34's job, ticket by ticket, each with its own parity gate run.
+>
+> **Tense warning, added by [#41](https://github.com/bedaHovorka/OpenCybele1/issues/41) once 1-PORT finished.** That last sentence, §10 and §11 are all
+> written from before the ports landed, and on `phase1/1-port` they are a record of what was
+> *prescribed*, not of open work. `src/main` has zero `cybele.*` references, all five agents are
+> `jade.core.Agent`s, and the two claims that went stale are corrected in place below (§10, §11).
+> Everything in §0–§9 — the fifteen channels, the performatives, the payload records, the
+> templates — is current and is what the port implements.
 
 ## 0. What this decides
 
@@ -597,6 +604,17 @@ since the Cybele agents deliberately do not use this ontology yet. JADE is on th
 classpath as well, because a disjointness proof against a hand-rolled stub would only prove the
 stub is disjoint.
 
+> ⚠️ **Superseded at #30, and this file did not record it until [#41](https://github.com/bedaHovorka/OpenCybele1/issues/41).** `build.gradle.kts` already
+> carries the correction next to the `implementation("net.sf.ingenias:jade:4.3")` line it added:
+> from #30 onward `Station` *is* a `jade.core.Agent`, so JADE and the `jadeOntology` output are on
+> `main`, and `jade-4.3.jar` does land in `build/install/opencybele/lib` exactly as the paragraph
+> above predicted. **It is no longer "a change to the thing under measurement"**: per #4's
+> sequencing decision the application stops running under Cybele at #30, and the drift guard
+> measures the frozen baseline dist from a separate worktree, not this tree. The rest of the
+> paragraph still holds — the `jade` source set stays separate so the ontology has no dependency
+> on the agents, and JADE stays on the test classpath so the disjointness proof runs against the
+> real `MessageTemplate`.
+
 The `jade` source set has no dependency on `main` and must never import
 `cz.vutbr.fit.ags.xhovor07`.
 
@@ -604,10 +622,18 @@ The `jade` source set has no dependency on `main` and must never import
 
 * **Wiring.** No Cybele agent is rewired here. Each of #30–#34 takes one agent, replaces its
   channels with the templates and builders above, and runs the parity gate.
-* **Behaviour shapes.** `TickerBehaviour` vs a self-rearming `WakerBehaviour` (this codebase has
-  zero repeating timers — see `docs/CYBELLE_TO_JADE.md`), the `CountDownLatch` in `Planning`, the
-  `wait()`/`notify()` in `Station.getPathDirection`. All out of scope here; all constrained by
+* **Behaviour shapes.** ~~`TickerBehaviour` vs a self-rearming `WakerBehaviour`~~ (this codebase
+  has zero repeating timers — see `docs/CYBELLE_TO_JADE.md`), the `CountDownLatch` in `Planning`,
+  the `wait()`/`notify()` in `Station.getPathDirection`. All out of scope here; all constrained by
   §4.1's "no protocol behaviours".
+
+  **Settled, and neither of the two options offered was taken** ([#41](https://github.com/bedaHovorka/OpenCybele1/issues/41)). `clock-abstraction.md` §1
+  rejects `TickerBehaviour` *and* `WakerBehaviour` outright — both are wall-clock, neither has a
+  pace or a pause — so all four timer sites went onto `AgentClock`, drained by one
+  `ClockTickerBehaviour` per arming agent. The `CountDownLatch` became a non-blocking tally
+  (`VoteRound`) plus a template gate that preserves the SEM-04 seriality `await()` was really
+  buying, and the `wait()`/`notify()` became a per-target continuation map. Full write-up:
+  `../jade/README.md` §2–§3 and `comparison-log-phase1.md` §3.
 * **The drain behaviour.** §7 specifies the template; each agent has to register it.
 * **`Main`'s internal split.** `Generator`, `Planning` and `VoteCollecting` are activities of one
   Cybele agent. Whether they become behaviours of one JADE agent or agents of their own is #34's
@@ -628,3 +654,4 @@ The `jade` source set has no dependency on `main` and must never import
 | `docs/trace-format.md` "Why `performative` is empty" | its instruction — *do not put a guessed mapping here, #27 owns it* — is discharged by §4. The trace format itself is unchanged. |
 | `docs/defect-triage.md` DEF-13 / §4.3 | §5.5 records that the JADE wire form makes the aliasing structurally unreproducible, which is why projecting `occupied` is mandatory. No reclassification. |
 | `docs/INVENTORY.md` §4 | the authority for the fifteen channels. Not re-counted here. |
+| `docs/INVENTORY.md` §4, *"any typed-message migration must split CH-03 into two message types"* | **Overruled by §5.2, and this row was missing until [#41](https://github.com/bedaHovorka/OpenCybele1/issues/41).** The port sends one `EnterRequest` to both receivers and lets each name its own field (`endStation()` == slot 2, `arrivingFrom()` == slot 1). A split would put two message types on the wire where the baseline put one, which changes the trace and therefore the golden. The requirement's *purpose* — that the asymmetry stop being an unstated index convention — is met by the record. |
