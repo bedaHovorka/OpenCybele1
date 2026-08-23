@@ -1,53 +1,43 @@
-# OpenCybele1
+# OpenCybele1 (JADE port)
 
-A Swing GUI simulation of trains moving through a small railway network, built as a set of communicating agents on top of **Cybele**, a multi-agent kernel from IAI. Written for the AGS (Multi-Agent Systems) course at FIT VUT Brno, 2007/08.
+A Swing GUI simulation of trains moving through a small railway network, built as a set of
+communicating agents. Written for the AGS (Multi-Agent Systems) course at FIT VUT Brno, 2007/08,
+originally on the **Cybele** kernel; **this branch is the JADE port** of that application
+([Phase 1](docs/Phase1.md), mapping notes in [`jade/README.md`](jade/README.md)).
 
-Stations and single-track road segments are simulated as agents that negotiate train departure times through a distributed voting protocol, then move trains along the network while respecting station capacity and track occupancy. A Swing canvas visualizes station occupancy and track state live, alongside a table of in-flight trains.
+> **Branch split (#82).** Compare implementations *between branches*, not inside one tree:
+>
+> | Branch | What it carries |
+> |---|---|
+> | `opencybele-baseline` | the frozen OpenCybele / Cybele application (and its vendor jars) |
+> | `jade-develop` (this branch) | the JADE application, the shared domain, and the parity harness |
+>
+> The harness still drives the baseline as a **child JVM** via `OpenCybeleLauncher` +
+> `-Popencybele.dist` so the goldens stay guarded. It does **not** compile or ship Cybele here.
 
-## Baseline environment
+Stations and single-track road segments are simulated as agents that negotiate train departure times
+through a distributed voting protocol, then move trains along the network while respecting station
+capacity and track occupancy. A Swing canvas visualizes station occupancy and track state live,
+alongside a table of in-flight trains.
 
-This is the reference environment the baseline is built and run in. Anything else is untested.
+## Environment
 
 | | |
 |---|---|
 | **Build tool** | Gradle **8.10.2**, via the checked-in wrapper (`./gradlew`, `gradlew.bat`) — do not substitute a system Gradle |
 | **Java** | Gradle **toolchain 21** (`build.gradle.kts`); verified on Temurin/OpenJDK 21 |
-| **Required JVM flag** | `--patch-module java.base=cybelle` — mandatory, see [Why `--patch-module`](#why---patch-module) |
-| **Required Cybele config** | `cybele.srv.comm.app.param.iai = Local;NoSerialization` in `cybelle/cybele.prop` — mandatory, see [Why `Local;NoSerialization`](#why-localnoserialization) |
-| **Assertions** | `-ea` is on for `run`, and baked into the `installDist` start script and the Docker image — see [Assertions (`-ea`)](#assertions--ea) and [`docs/assertion-triage.md`](docs/assertion-triage.md) |
-| **Vendor jars** | `com.iai:cybele-api:1.0`, `com.iai:cybele-impl:1.0` in the local Maven repository — see [One-time setup](#one-time-setup-install-the-vendor-jars) |
+| **Agent framework** | JADE **4.3.3** via `net.sf.ingenias:jade:4.3` (decision [#26](https://github.com/bedaHovorka/OpenCybele1/issues/26)) from Maven Central — no vendor-jar bootstrap |
+| **Assertions** | `-ea` is on for `run`, and baked into the `installDist` start script and the Docker image — see [Assertions (`-ea`)](#assertions--ea) |
 | **Scenario config** | `sim.*` system properties, defaults identical to the historical literals — see [Scenario configuration](#scenario-configuration-sim) and [`docs/scenario-config.md`](docs/scenario-config.md) |
 | **Randomness** | per-agent streams from one master seed, `-Dsim.random.masterSeed`, defaulting to a drawn (printed) seed — see [Reproducing a run](#reproducing-a-run-simrandommasterseed) and [`docs/seeded-rng.md`](docs/seeded-rng.md) |
 | **Parity trace** | off by default; `-Dsim.trace.enabled=true` adds one passive probe agent that prints `agent\|tick\|event\|from\|to\|performative\|payload` for all 15 channels — see [Parity trace](#parity-trace-simtraceenabled) and [`docs/trace-format.md`](docs/trace-format.md) |
-| **Tests** | no test suite; verification is manual through the Swing GUI, plus `./gradlew rngProof` for the RNG determinism check |
+| **Tests** | L1 unit tests (`./gradlew test`), L2 in-process JADE containers (`./gradlew integrationTest`), L3 parity harness (`./gradlew characterizationIT -Pjade.dist=…`) |
 
 ## Requirements
 
 - JDK 21 and Gradle (a wrapper is included: `./gradlew`/`gradlew.bat`)
-- The Cybele kernel jars, vendored in `cybelle/` (`Cybele.jar`, `CybeleImpl.jar`, plus its `ICS.prop`/`cybele.prop` runtime config) — not tracked in git (see below), installed to your local Maven repository (`~/.m2`) instead
-- Maven (`mvn`) is **optional** — the bootstrap script below uses it when present and falls back to installing the jars itself when it isn't
-- A running X server for the Swing GUI
-
-## One-time setup: install the vendor jars
-
-`Cybele.jar`/`CybeleImpl.jar` are 2008-era binaries from IAI with no public Maven repo, so they aren't committed to git. They're still recoverable from the `withoutGradle` tag and get installed into your local Maven repository (`~/.m2`), which Gradle then resolves them from like any other dependency.
-
-That whole procedure is scripted:
-
-```bash
-scripts/bootstrap-vendor-jars.sh
-```
-
-The script:
-
-- restores `cybelle/Cybele.jar` and `cybelle/CybeleImpl.jar` from the `withoutGradle` tag if they're not already in the working tree (and leaves them untracked, as `.gitignore` intends);
-- installs them as `com.iai:cybele-api:1.0` and `com.iai:cybele-impl:1.0` into the local Maven repository;
-- **does not require `mvn` on `PATH`.** If Maven is available it shells out to `mvn install:install-file`; if not, it writes the repository layout (jar + a minimal generated POM) directly. Both paths produce the same on-disk result, which `mavenLocal()` resolves identically;
-- is **idempotent** — re-running it is a no-op once both artifacts are installed and match. `--force` reinstalls anyway; `--verify-only` checks that both artifacts are installed and exits, writing nothing and leaving the working tree untouched (it will *not* restore missing jars — the two flags are mutually exclusive);
-- resolves the target repository from `MAVEN_REPO_LOCAL`, else `<localRepository>` in `~/.m2/settings.xml` (XML comments stripped first — Maven's own shipped `settings.xml` carries a commented-out `/path/to/local/repo` example that a naive grep picks up), else `~/.m2/repository`, and logs which one it chose. **`MAVEN_REPO_LOCAL` is a script-side override only**: Gradle's `mavenLocal()` does not read it, so if you point it somewhere non-default you must also pass a matching `-Dmaven.repo.local` to Gradle or the build will not find what was just installed;
-- fails with an actionable message rather than a stack trace when the tag is missing, the clone has no `.git`, or the destination isn't writable.
-
-It is also the entry point used by the [`Dockerfile`](Dockerfile) builder stage — no separate Maven install step is needed anywhere. It is designed to be the single call CI makes to prepare a build, but **no CI workflow exists in this repository yet**; wiring one up is [#25](https://github.com/bedaHovorka/OpenCybele1/issues/25).
+- Network access to Maven Central (for JADE and JUnit)
+- A running X server for the Swing GUI (not needed for headless / CI runs)
 
 ## Build
 
@@ -55,29 +45,46 @@ It is also the entry point used by the [`Dockerfile`](Dockerfile) builder stage 
 ./gradlew build
 ```
 
+No one-time vendor-jar setup. JADE resolves from Maven Central.
+
 ## Run
 
 ```bash
 ./gradlew run
 ```
 
-This launches `cz.vutbr.fit.ags.xhovor07.Main` with the jars above on the classpath (resolved from `~/.m2`) plus the JVM flags `-ea` and `--patch-module java.base=cybelle`, configured as `applicationDefaultJvmArgs` in `build.gradle.kts`; Cybele reads its `ICS.prop`/`cybele.prop` config from `cybelle/` via that flag. A Swing window opens on launch showing the railway network, live station/track state, and a table of trains currently in transit.
+This launches `cz.vutbr.fit.ags.xhovor07.Main`, which boots a JADE main container (with the topic
+management service) and starts `RailwayMainAgent` + the optional `TraceProbe`. `-ea` is set via
+`applicationDefaultJvmArgs` in `build.gradle.kts`. A Swing window opens on launch showing the
+railway network, live station/track state, and a table of trains currently in transit.
 
 ### Source layout
 
 | Source set | Directory | What it is | Depends on |
 |---|---|---|---|
-| `domain` | `src/domain/java` | The railway rules as plain Java — timetables, voting rules, queue ordering, graph and pathfinding. Package root `cz.vutbr.fit.ags.railway.domain`. | **nothing** (JDK only) |
-| `main` | `src/main/java` | The Cybele application: agents, activities, GUI, configuration, trace probe. | `domain`, Cybele |
-| `test` | `src/test/java` | L1 unit tests for the `domain` classes (JUnit 5). Runs in `./gradlew build`. | `domain` |
+| `domain` | `src/domain/java` | The railway rules as plain Java — timetables, voting rules, queue ordering, graph, pathfinding, clock, message records. Package root `cz.vutbr.fit.ags.railway.domain`. | **nothing** (JDK only) |
+| `jadeOntology` | `src/jade/java` | ACL binding: `Messages`, `Templates`, `RailwayOntology`, `ClockTickerBehaviour`. | `domain`, JADE |
+| `main` | `src/main/java` | The JADE application: agents, GUI, configuration, trace probe. | `domain`, `jadeOntology`, JADE |
+| `test` | `src/test/java` | L1 unit tests (domain + behaviour-as-POJO). Runs in `./gradlew build`. | `domain`, `jadeOntology`, JADE |
+| `integrationTest` | `src/integrationTest/java` | L2 in-process JADE container tests. | `main` |
 | `tools` | `tools/java` | Verification drivers (`SeedInterleavingCheck`, `TraceCheck`) — never on the simulation's classpath. | `main` |
 | `characterizationIT` | `src/characterizationIT/java` | The L3 parity harness. Drives an implementation as a **child process**; has no compile-time link to one. | nothing in this repo |
 
-The `domain` source set's dependency configuration is deliberately **empty**, so an accidental `import cybele.kernel.…` there fails the compiler rather than a review. `./gradlew domainPurity` additionally rejects the JDK imports a classpath cannot exclude (`javax.swing`, `java.awt`, `java.lang.reflect`) and any import of the application or the harness. The output is a jar of its own, `opencybele-domain.jar`, which the JADE and Jason branches consume unchanged — see [issue #28](https://github.com/bedaHovorka/OpenCybele1/issues/28).
+The `domain` source set's dependency configuration is deliberately **empty**, so an accidental
+framework import there fails the compiler rather than a review. `./gradlew domainPurity`
+additionally rejects the JDK imports a classpath cannot exclude (`javax.swing`, `java.awt`,
+`java.lang.reflect`) and any import of the application or the harness. The output is a jar of its
+own, `opencybele-domain.jar`, which branch `jason` (#46) consumes unchanged — see
+[issue #28](https://github.com/bedaHovorka/OpenCybele1/issues/28).
 
-**The domain classes reproduce the 2008 behaviour, defects and all.** Each pinned quirk carries a `DEF-nn` comment pointing at [`docs/defect-triage.md`](docs/defect-triage.md) §3.1 and is locked in by a unit test named for what it preserves. Do not "fix" one — under the Phase-1 scope guard a behaviour change is a port bug, and several of these quirks are unreachable at scenario scale, so no golden would catch it.
+**The domain classes reproduce the 2008 behaviour, defects and all.** Each pinned quirk carries a
+`DEF-nn` comment pointing at [`docs/defect-triage.md`](docs/defect-triage.md) §3.1 and is locked in
+by a unit test named for what it preserves. Do not "fix" one — under the Phase-1 scope guard a
+behaviour change is a port bug, and several of these quirks are unreachable at scenario scale, so no
+golden would catch it.
 
-Beyond those unit tests there is no automated test of the simulation itself: end-to-end verification is the L3 parity suite, and interactive verification is manual through the GUI.
+End-to-end verification is the L3 parity suite; interactive verification is manual through the GUI.
+Per-agent mapping notes: [`jade/README.md`](jade/README.md).
 
 ### Headless and bounded runs
 
@@ -243,43 +250,45 @@ does not pin, and how to keep a scenario below that ceiling, is measured in
 
 ### Assertions (`-ea`)
 
-`run` enables assertions (`-ea` in `applicationDefaultJvmArgs`). The 32 `assert` statements in `src/` are the codebase's only invariant checks, and they encode real preconditions — every path member having voted, a train arriving where it was routed, a path direction being resolvable. With assertions off, a violated invariant is silent corruption; with them on, it is a logged failure.
+`run` enables assertions (`-ea` in `applicationDefaultJvmArgs`). The `assert` statements in `src/`
+are the codebase's only invariant checks, and they encode real preconditions — every path member
+having voted, a train arriving where it was routed, a path direction being resolvable. With
+assertions off, a violated invariant is silent corruption; with them on, it is a failure.
 
-Note how Cybele treats one. An exception thrown out of an agent event handler is caught by `com.iai.cybele.thmgmt.IAIAgentThread` — but its catch list is five named types, *not* `Throwable`. An `AssertionError` survives only because `Method.invoke` wraps it in an `InvocationTargetException`, which is on that list. It is then printed by `com.iai.cybele.exception.IAIExceptionHandler` **to `System.err`** (twice per failure), and the simulation continues. So a firing assertion does *not* abort the process or change the exit status.
+On this JADE port a throwable out of a behaviour kills **that agent** (JADE prints a banner and two
+stdout lines and the platform keeps running with a hole in it). That is different from the Cybele
+baseline, where an `AssertionError` was swallowed by the kernel and the process exit status never
+changed — see [`docs/assertion-triage.md`](docs/assertion-triage.md) for the baseline measurement
+and [`jade/README.md`](jade/README.md) for what the port does instead. Goldens were recorded with
+`-ea` on ([`parity-tests/golden/MANIFEST.md`](parity-tests/golden/MANIFEST.md)).
 
-Three practical consequences, all measured: output diffing must **capture stderr** (nothing appears on stdout); the exit status is worthless as a pass/fail signal; and a throwable inside a timer handler such as `Generator.generateTrain` stops train generation **permanently and silently**, because the method re-arms its own timer as its last statement. Full mechanism, evidence and the rules a scenario runner must follow are in [`docs/assertion-triage.md`](docs/assertion-triage.md) § Result 3.
-
-Full triage of all 32 assertion sites — which fire, which are merely never reached, and how many times each is evaluated in a normal run — is in [`docs/assertion-triage.md`](docs/assertion-triage.md). Summary: **none fires**; 24 sites are exercised and hold, 8 are never reached (2 of those deliberately). The triage was recorded against 33 sites before [#18](https://github.com/bedaHovorka/OpenCybele1/issues/18) removed `RailwayCanvas`'s `assert road != null`; see that document's amendment, which also gives the corrected `grep` exclusion list — a naive `grep -c 'assert '` now yields 33, not 32.
-
-`applicationDefaultJvmArgs` is baked into the generated start script too (`build/install/opencybele/bin/opencybele`), so the Docker image runs with assertions on as well. That script appends `JAVA_OPTS` and `OPENCYBELE_OPTS` *after* `DEFAULT_JVM_OPTS`, so assertions can be turned off there without touching the build:
+`applicationDefaultJvmArgs` is baked into the generated start script too
+(`build/install/opencybele/bin/opencybele`), so the Docker image runs with assertions on as well.
+That script appends `JAVA_OPTS` and `OPENCYBELE_OPTS` *after* `DEFAULT_JVM_OPTS`, so assertions can
+be turned off there without touching the build:
 
 ```bash
 OPENCYBELE_OPTS=-da build/install/opencybele/bin/opencybele
 ```
 
-`./gradlew run` has **no** such escape hatch — disabling assertions on that path requires editing `build.gradle.kts`. #22 should be aware of the asymmetry: it is exactly the sort of thing that produces a golden recorded under different assertion settings than the label claims.
+`./gradlew run` has **no** such escape hatch — disabling assertions on that path requires editing
+`build.gradle.kts`.
 
-**Enabling `-ea` is itself a behaviour change.** A path that previously continued silently past a broken invariant now throws instead. That is the desired trade for local development and CI, but it means the assertions-on/assertions-off setting is a property of the *scenario being recorded*, not a free-standing preference.
+**Enabling `-ea` is itself a behaviour change.** A path that previously continued silently past a
+broken invariant now throws instead. That is the desired trade for local development and CI, but it
+means the assertions-on/assertions-off setting is a property of the *scenario being recorded*, not a
+free-standing preference.
 
-> **Scope boundary — deliberately not decided here.** This project enables `-ea` for `run`. It does **not** decide whether golden recordings are captured with assertions on or off. That decision belongs to [#22](https://github.com/bedaHovorka/OpenCybele1/issues/22) and must be written down in the [#24](https://github.com/bedaHovorka/OpenCybele1/issues/24) manifest alongside the other run parameters, so a recording can never be compared against a replay made under a different assertion setting.
-
-### Why `Local;NoSerialization`
-
-`cybelle/cybele.prop` sets `cybele.srv.comm.app.param.iai = Local;NoSerialization` so Cybele's comm service runs in local-only mode. Commented out — which is how the vendored file shipped — `IAICommService` builds an `IAINetClient` that spawns an external `IAIDaemon`, and startup aborts with `Could not connect with IAIDaemon -- Execution aborted!` and exit status 1 (verified under [#16](https://github.com/bedaHovorka/OpenCybele1/issues/16)). The setting is mandatory, not a tuning knob.
-
-> `cybelle/ICS.prop` used to declare **two** `ICSBrowser` keys — an external IAI host (`63.122.105.110`) followed by `127.0.0.1`. Last-one-wins made it harmless, but reordering them would have pointed the spawned daemon at an external host. The external entry was removed under [#16](https://github.com/bedaHovorka/OpenCybele1/issues/16); one live key remains.
-
-The other two kernel knobs — the event-queue sort/compare strategy and the thread pool — were measured and deliberately left at their existing behaviour under #16; `cybelle/cybele.prop` now says so at each line, and [`docs/kernel-config.md`](docs/kernel-config.md) has the numbers.
-
-### Why `--patch-module`
-
-Cybele's kernel jar loads `cybele.prop` via `props.getClass().getResourceAsStream("/cybele.prop")`, where `props` is a `java.util.Properties` — a class loaded by the bootstrap class loader as part of the `java.base` platform module. Before the Java Platform Module System (Java 9+), that call fell back to searching the application classpath, which is how this 2002-era kernel found `cybele.prop` sitting in `cybelle/`. Since JPMS, that classpath fallback no longer happens for module-loaded classes, so the lookup returns `null` and Cybele aborts with `Cannot find cybele.prop at class path` — regardless of JDK version. `--patch-module java.base=cybelle` works around this by injecting `cybelle/`'s contents directly into the `java.base` module, so the same lookup succeeds again. No source or jar changes are needed. This only works against a plain directory on disk, not jar contents, which is why `cybele.prop`/`ICS.prop` stay as loose tracked files in `cybelle/` even though the two binary jars don't.
+> Cybele-only launch concerns (`--patch-module java.base=cybelle`, `Local;NoSerialization`, the
+> vendor-jar bootstrap) live on branch `opencybele-baseline` and in
+> [`docs/kernel-config.md`](docs/kernel-config.md). They are not part of this branch (#82).
 
 ## Run with Docker
 
-A `Dockerfile`/`docker-compose.yml` build and run the app in a container, forwarding the Swing GUI to an X server on the host. The image is a multi-stage build: a JDK 21 builder stage (runs `scripts/bootstrap-vendor-jars.sh`, then `./gradlew installDist`), then a slim JRE 21 runtime stage — Docker here is a convenience/reproducibility option, not a requirement for a working JVM.
-
-Run `scripts/bootstrap-vendor-jars.sh` **on the host before building the image**. The build context excludes `.git` (see `.dockerignore`), so the script's recover-from-tag step cannot run inside the builder — the jars have to already be sitting in `cybelle/`. The builder still calls the same script (to install them into the image's local Maven repository), and it fails with exactly that instruction if they're absent.
+A `Dockerfile`/`docker-compose.yml` build and run the app in a container, forwarding the Swing GUI
+to an X server on the host. The image is a multi-stage build: a JDK 21 builder stage
+(`./gradlew installDist` — JADE comes from Maven Central), then a slim JRE 21 runtime stage.
+Docker here is a convenience/reproducibility option, not a requirement for a working JVM.
 
 **Prerequisites**: Docker + Docker Compose, and an X server (native on Linux; [XQuartz](https://www.xquartz.org/) on macOS; [VcXsrv](https://sourceforge.net/projects/vcxsrv/) or Xming on Windows).
 
@@ -307,8 +316,8 @@ xhost -local:docker   # revoke access again once done
 |---|---|
 | `build@this-ref` | `./gradlew build` on the triggering ref: compilation, the 321-test L1 lane, `domainPurity` |
 | `integrationTest@this-ref` | the 17-test L2 lane — real in-process JADE containers, one JVM per class |
-| `characterizationIT@opencybele` | the **drift guard**: checks out this branch (the parity harness) *and* `opencybele-baseline` (the frozen OpenCybele application), recovers and installs the vendored Cybele jars with `scripts/bootstrap-vendor-jars.sh`, builds the application with `installDist`, and runs the L3 golden-master suite against it via `-Popencybele.dist` |
-| `characterizationIT@jade` | the **port guard**: the same suite and the same untouched goldens, against the JADE application built from this ref (`installDist`, `-Pjade.dist`) |
+| `characterizationIT@opencybele` | the **drift guard**: checks out this branch (the parity harness) *and* `opencybele-baseline` (the frozen OpenCybele application), recovers and installs the vendored Cybele jars **from that checkout's** `scripts/bootstrap-vendor-jars.sh`, builds the application with `installDist`, and runs the L3 golden-master suite against it via `-Popencybele.dist` |
+| `characterizationIT@jade` | the **port guard**: the same suite and the same untouched goldens, against the JADE application built from this ref (`installDist`, `-Pjade.dist`) — no Cybele bootstrap |
 
 Every run is headless and needs no display server. The JADE lane is judged against a *recorded measurement* rather than against "all five scenarios green" — `opencybele-strict` fails its golden deterministically, for a reason #39 measured and classified as a normalizer gap that cannot be closed. See [`docs/ci.md`](docs/ci.md) §10 for why, what that costs, and what re-measuring takes.
 

@@ -370,10 +370,9 @@ The workflow is a wrapper around five commands. From two checkouts side by side:
 ```
 
 `characterizationIT@jade` reproduces from **one** checkout, since the harness and the JADE
-implementation are the same tree:
+implementation are the same tree. No vendor-jar bootstrap (#82): JADE is from Maven Central.
 
 ```bash
-scripts/bootstrap-vendor-jars.sh
 ./gradlew --no-daemon --console=plain installDist
 ./gradlew --no-daemon --console=plain characterizationIT -Pjade.dist="$PWD/build/install/opencybele"
 # ^ exits non-zero on essentially every run, BY DESIGN. The verdict is the next command's:
@@ -389,11 +388,8 @@ X
       build/test-results/characterizationIT .github/parity/jade-status.expected
 ```
 
-Measured on a cold clone with an empty local Maven repository and `DISPLAY` unset: bootstrap
-instant, `installDist` ~5–6 s, the suite ~19 s, 31 tests, 0 skipped, `OpenCybeleSmokeIT` passed.
-Both installer paths inside the bootstrap were exercised — with Maven on `PATH` (3.9.16, the
-`mvn install:install-file` route the hosted runner takes) and without it (the built-in copy route) —
-and the full suite is green after either.
+(The `@opencybele` local recipe above still needs the baseline checkout's bootstrap — that is the
+only arm that still resolves `com.iai:cybele-*`.)
 
 ---
 
@@ -412,12 +408,13 @@ tree**. So this job is one checkout, `installDist`, `-Pjade.dist`. There is no `
 `OpenCybeleLauncher` needs a second directory only because Cybele reads `cybelle/*.prop` through
 `--patch-module`, and the JADE implementation reads no such file.
 
-It still runs `scripts/bootstrap-vendor-jars.sh`. `src/main` has had zero `cybele.*` references
-since #35, but `build.gradle.kts` still declares `com.iai:cybele-api`/`cybele-impl` on
-`implementation`, so both jars resolve and land in `installDist`'s `lib/`. Dropping them is 1-POST
-cleanup and was deliberately **not** done in #40: the child JVM's `-cp` is part of the command line
-every measurement in `parity-triage-jade.md` was taken under, and this lane's margins are 3–9 ms
-wide. That is not a classpath to change as a side effect of a CI ticket.
+It does **not** run `scripts/bootstrap-vendor-jars.sh`. #82 dropped the leftover
+`com.iai:cybele-api`/`cybele-impl` coordinates from this branch's `build.gradle.kts`, deleted
+`cybelle/` and the bootstrap script here, and left the Cybele solution exclusively on
+`opencybele-baseline`. The JADE job's only framework coordinate is `net.sf.ingenias:jade:4.3` from
+Maven Central. (Keeping the dead Cybele jars on the child JVM's `-cp` was deliberate in #40 so the
+classpath matched the measurements in `parity-triage-jade.md`; #82 is the cleanup that ticket
+deferred. Re-measure if a golden margin moves.)
 
 ### 10.2 Why "all five green" is not available
 
